@@ -5,18 +5,21 @@
   "scripts": {
     "start": "npx remotion studio",
     "build": "npx remotion render src/index.ts BeMyStyleReel out/reel.mp4",
-    "render": "npx remotion render src/index.ts BeMyStyleReel out/reel.mp4 --codec h264 --jpeg-quality 95"
+    "render": "npx remotion render src/index.ts BeMyStyleReel out/reel.mp4 --codec h264 --jpeg-quality 95",
+    "convert-slides": "node scripts/convert-and-rename.js",
+    "convert-slides:force": "node scripts/convert-and-rename.js public/assets/slides public/assets/slides --force"
   },
   "dependencies": {
-    "remotion": "^4.0.0",
     "@remotion/cli": "^4.0.0",
     "@remotion/renderer": "^4.0.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "remotion": "^4.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "sharp": "^0.32.6",
     "typescript": "^5.3.3"
   }
 }
