@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+
+# Video files
+*.mp4
+*.mov
+*.avi
+*.webm
+
+# OS
+.DS_Store
