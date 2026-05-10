@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node /Users/tomokiimaizumi/bemystyle-reel/scripts/convert-and-rename.js --force)",
+      "Bash(node scripts/convert-and-rename.js --force)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}
