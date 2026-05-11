@@ -3,7 +3,9 @@
     "allow": [
       "Bash(node /Users/tomokiimaizumi/bemystyle-reel/scripts/convert-and-rename.js --force)",
       "Bash(node scripts/convert-and-rename.js --force)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Read(//tmp/**)",
+      "Read(//private/tmp/**)"
     ]
   }
 }
