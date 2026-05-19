@@ -17,6 +17,12 @@ const DEFAULT_RECAP_PROPS: RecapMovieProps = {
   customerId: 1,
   year: new Date().getFullYear(),
   theme: "default",
+  userName: "Tomoki",
+  diagnosisCount: 48,
+  bestScore: 91,
+  averageScore: 84,
+  topGrowthMetric: "音程",
+  voiceType: "パワフルボイス",
 };
 
 export const RemotionRoot: React.FC = () => {
