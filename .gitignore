@@ -4,11 +4,12 @@ node_modules/
 # Build output
 out/
 
-# Video files
+# Video files (fixtures/ is intentionally tracked)
 *.mp4
 *.mov
 *.avi
 *.webm
+!fixtures/*.mp4
 
 # OS
 .DS_Store
