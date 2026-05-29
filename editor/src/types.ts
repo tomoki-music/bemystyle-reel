@@ -1,23 +1,27 @@
-import slidesJson from "../../public/data/slides.json";
-
 export type SlideLayout = "center" | "bottom" | "cta";
 
-export interface SlideData {
+export interface Slide {
   id: number;
   durationSec: number;
   visible: boolean;
   headline: string;
-  subline?: string;
-  emphasis?: string;
+  subline: string;
+  emphasis: string;
   image: string;
   layout: SlideLayout;
   showParticles: boolean;
   showCTA?: boolean;
-  showRadar?: boolean;
-  showGraph?: boolean;
   ctaLabel?: string;
   ctaNote?: string;
   ctaUrl?: string;
 }
 
-export const SLIDES: SlideData[] = slidesJson.slides as SlideData[];
+export interface CTAConfig {
+  qrImage: string;
+}
+
+export interface SlidesData {
+  title: string;
+  slides: Slide[];
+  cta: CTAConfig;
+}
