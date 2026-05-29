@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef, useState, useCallback } from 'react'
 import { Slide, CTAConfig, SlideLayout } from '../types'
 
 interface Props {
@@ -90,6 +90,158 @@ const LAYOUTS: [SlideLayout, string][] = [
   ['cta', 'CTA'],
 ]
 
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+const MAX_BYTES = 10 * 1024 * 1024
+
+function ImageUploadField({ image, onChange }: { image: string; onChange: (img: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+  const [isDragOver, setIsDragOver] = useState(false)
+
+  const previewUrl = image
+    ? image.startsWith('uploads/')
+      ? `/assets/${image}`
+      : `/assets/slides/${image}`
+    : null
+
+  const uploadFile = useCallback(async (file: File) => {
+    setError('')
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setError('jpg / png / webp のみ対応しています')
+      return
+    }
+    if (file.size > MAX_BYTES) {
+      setError('10MB を超えています')
+      return
+    }
+    setUploading(true)
+    try {
+      const form = new FormData()
+      form.append('image', file)
+      const res = await fetch('/api/upload', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.message ?? 'アップロード失敗')
+      onChange(data.filename)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setUploading(false)
+    }
+  }, [onChange])
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) uploadFile(file)
+    e.target.value = ''
+  }, [uploadFile])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) uploadFile(file)
+  }, [uploadFile])
+
+  return (
+    <div>
+      {/* Drop zone */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={handleDrop}
+        style={{
+          border: `2px dashed ${isDragOver ? '#c084fc' : 'rgba(255,255,255,0.15)'}`,
+          borderRadius: 10,
+          padding: '14px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          background: isDragOver ? 'rgba(192,132,252,0.06)' : 'rgba(255,255,255,0.03)',
+          transition: 'all 0.15s',
+          cursor: 'pointer',
+        }}
+        onClick={() => !uploading && inputRef.current?.click()}
+      >
+        {/* Preview thumbnail */}
+        {previewUrl ? (
+          <img
+            src={previewUrl}
+            alt="preview"
+            style={{
+              width: 54,
+              height: 96,
+              objectFit: 'cover',
+              borderRadius: 6,
+              flexShrink: 0,
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 54,
+              height: 96,
+              background: 'rgba(255,255,255,0.06)',
+              borderRadius: 6,
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 22,
+              color: 'rgba(255,255,255,0.2)',
+            }}
+          >
+            ⬜
+          </div>
+        )}
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: uploading ? '#c084fc' : 'rgba(255,255,255,0.75)',
+              marginBottom: 4,
+            }}
+          >
+            {uploading ? 'アップロード中...' : '画像を選択 / ドロップ'}
+          </div>
+          {image ? (
+            <div
+              style={{
+                fontSize: 10,
+                color: 'rgba(255,255,255,0.35)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {image}
+            </div>
+          ) : (
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>
+              jpg / png / webp · 最大 10MB
+            </div>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <p style={{ fontSize: 11, color: '#f87171', marginTop: 6, lineHeight: 1.4 }}>{error}</p>
+      )}
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.webp"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
+    </div>
+  )
+}
+
 export const SlideForm: React.FC<Props> = ({ slide, onChange, ctaConfig, onCtaChange }) => {
   const isCTA = slide.layout === 'cta'
 
@@ -130,13 +282,10 @@ export const SlideForm: React.FC<Props> = ({ slide, onChange, ctaConfig, onCtaCh
       </Section>
 
       <Section title="背景・演出">
-        <Field label="背景画像ファイル名" hint="例: slide01.jpg（public/assets/slides/ に配置）">
-          <input
-            type="text"
-            value={slide.image}
-            onChange={(e) => onChange({ image: e.target.value })}
-            style={inputStyle}
-            placeholder="slide01.jpg"
+        <Field label="背景画像">
+          <ImageUploadField
+            image={slide.image}
+            onChange={(img) => onChange({ image: img })}
           />
         </Field>
 

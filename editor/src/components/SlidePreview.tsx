@@ -129,7 +129,9 @@ export const SlidePreview: React.FC<Props> = ({ slide, ctaConfig }) => {
           style={{
             position: 'absolute',
             inset: 0,
-            backgroundImage: `url(/assets/slides/${slide.image})`,
+            backgroundImage: slide.image
+              ? `url(${slide.image.startsWith('uploads/') ? `/assets/${slide.image}` : `/assets/slides/${slide.image}`})`
+              : undefined,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             backgroundColor: '#1a1a2e',
