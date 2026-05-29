@@ -10,6 +10,7 @@ import { RadarChart } from "./RadarChart";
 import { GrowthGraph } from "./GrowthGraph";
 import { kenBurns } from "../utils/animations";
 import { TRANSITION_FRAMES } from "../utils/timing";
+import { resolveImageAssetPath } from "../utils/imageUrl";
 
 interface Props {
   slide: SlideData;
@@ -60,7 +61,7 @@ export const SlideContainer: React.FC<Props> = ({
         }}
       >
         <Img
-          src={staticFile(`assets/slides/${slide.image}`)}
+          src={staticFile(resolveImageAssetPath(slide.image))}
           style={{
             width: "100%",
             height: "100%",
