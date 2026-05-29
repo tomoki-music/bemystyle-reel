@@ -5,7 +5,19 @@
       "Bash(node scripts/convert-and-rename.js --force)",
       "Bash(node -e ' *)",
       "Read(//tmp/**)",
-      "Read(//private/tmp/**)"
+      "Read(//private/tmp/**)",
+      "Bash(curl -s http://localhost:3002/api/render/status)",
+      "Bash(curl -sI http://localhost:3002/api/render/download)",
+      "Bash(pkill -f \"node server.mjs\")",
+      "Bash(pkill -f \"vite\")",
+      "Bash(npm run *)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(curl -s http://localhost:3002/api/render/history)",
+      "Bash(curl -s http://localhost:5173/)",
+      "Bash(curl -s http://localhost:3001/)",
+      "Bash(npx playwright *)",
+      "Bash(open -a \"Google Chrome\" \"http://localhost:3001\")",
+      "Bash(screencapture -x /tmp/editor-initial.png)"
     ]
   }
 }
