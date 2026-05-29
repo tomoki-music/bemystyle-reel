@@ -7,7 +7,9 @@
     "build": "npx remotion render src/index.ts BeMyStyleReel out/reel.mp4",
     "render": "npx remotion render src/index.ts BeMyStyleReel out/reel.mp4 --codec h264 --jpeg-quality 95",
     "convert-slides": "node scripts/convert-and-rename.js",
-    "convert-slides:force": "node scripts/convert-and-rename.js public/assets/slides public/assets/slides --force"
+    "convert-slides:force": "node scripts/convert-and-rename.js public/assets/slides public/assets/slides --force",
+    "editor:setup": "npm --prefix editor install",
+    "editor": "npm --prefix editor run dev"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",
