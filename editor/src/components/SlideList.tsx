@@ -7,6 +7,7 @@ interface Props {
   onSelect: (id: number) => void
   onToggleVisible: (id: number) => void
   onMove: (fromIdx: number, toIdx: number) => void
+  disabled?: boolean
 }
 
 export const SlideList: React.FC<Props> = ({
@@ -15,6 +16,7 @@ export const SlideList: React.FC<Props> = ({
   onSelect,
   onToggleVisible,
   onMove,
+  disabled = false,
 }) => {
   const dragIdx = useRef<number | null>(null)
   const overIdx = useRef<number | null>(null)
@@ -47,10 +49,10 @@ export const SlideList: React.FC<Props> = ({
         return (
           <div
             key={slide.id}
-            draggable
-            onDragStart={(e) => handleDragStart(e, idx)}
-            onDragOver={(e) => handleDragOver(e, idx)}
-            onDrop={(e) => handleDrop(e, idx)}
+            draggable={!disabled}
+            onDragStart={(e) => !disabled && handleDragStart(e, idx)}
+            onDragOver={(e) => !disabled && handleDragOver(e, idx)}
+            onDrop={(e) => !disabled && handleDrop(e, idx)}
             onClick={() => onSelect(slide.id)}
             style={{
               display: 'flex',
@@ -123,6 +125,7 @@ export const SlideList: React.FC<Props> = ({
             {/* Visible toggle */}
             <button
               title={slide.visible ? '非表示にする' : '表示する'}
+              disabled={disabled}
               onClick={(e) => {
                 e.stopPropagation()
                 onToggleVisible(slide.id)
@@ -130,12 +133,13 @@ export const SlideList: React.FC<Props> = ({
               style={{
                 background: 'none',
                 border: 'none',
-                cursor: 'pointer',
+                cursor: disabled ? 'not-allowed' : 'pointer',
                 color: slide.visible ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.18)',
                 fontSize: 13,
                 padding: 0,
                 flexShrink: 0,
                 lineHeight: 1,
+                opacity: disabled ? 0.4 : 1,
               }}
             >
               {slide.visible ? '👁' : '–'}

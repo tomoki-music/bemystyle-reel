@@ -6,6 +6,7 @@ interface Props {
   onChange: (changes: Partial<Slide>) => void
   ctaConfig: CTAConfig
   onCtaChange: (config: CTAConfig) => void
+  disabled?: boolean
 }
 
 const inputStyle: React.CSSProperties = {
@@ -242,11 +243,11 @@ function ImageUploadField({ image, onChange }: { image: string; onChange: (img: 
   )
 }
 
-export const SlideForm: React.FC<Props> = ({ slide, onChange, ctaConfig, onCtaChange }) => {
+export const SlideForm: React.FC<Props> = ({ slide, onChange, ctaConfig, onCtaChange, disabled = false }) => {
   const isCTA = slide.layout === 'cta'
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '20px', opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : undefined }}>
       <Section title="コンテンツ">
         <Field label="見出し" hint="改行は Enter で入力できます">
           <textarea
