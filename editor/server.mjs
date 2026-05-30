@@ -1,5 +1,5 @@
 import express from 'express'
-import { writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, statSync } from 'fs'
+import { writeFileSync, readFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from 'fs'
 import { resolve, dirname, extname, basename } from 'path'
 import { fileURLToPath } from 'url'
 import multer from 'multer'
@@ -8,6 +8,7 @@ import { spawn } from 'child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SLIDES_PATH = resolve(__dirname, '../public/data/slides.json')
+const TEMPLATES_DIR = resolve(__dirname, '../public/templates')
 const UPLOADS_DIR = resolve(__dirname, '../public/assets/uploads')
 const OUT_DIR = resolve(__dirname, '../out')
 const REELS_DIR = resolve(OUT_DIR, 'reels')
@@ -30,6 +31,7 @@ let renderState = {
 
 mkdirSync(UPLOADS_DIR, { recursive: true })
 mkdirSync(REELS_DIR, { recursive: true })
+mkdirSync(TEMPLATES_DIR, { recursive: true })
 
 const ALLOWED_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
@@ -60,6 +62,155 @@ app.use(express.json({ limit: '10mb' }))
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, message: 'editor api server is running' })
+})
+
+app.get('/api/templates', (_req, res) => {
+  try {
+    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith('.json'))
+    const templates = files.map((f) => {
+      try {
+        const data = JSON.parse(readFileSync(resolve(TEMPLATES_DIR, f), 'utf-8'))
+        return {
+          id: data.id ?? basename(f, '.json'),
+          name: data.name ?? basename(f, '.json'),
+          hints: data.hints ?? null,
+          favorite: data.favorite ?? false,
+          category: data.category ?? 'other',
+          description: data.description ?? '',
+          variables: Array.isArray(data.variables) ? data.variables : [],
+          thumbnail: typeof data.thumbnail === 'string' ? data.thumbnail : '',
+        }
+      } catch (_) {
+        return null
+      }
+    }).filter(Boolean)
+    res.json({ ok: true, templates })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message })
+  }
+})
+
+app.get('/api/templates/:id', (req, res) => {
+  const safe = basename(req.params.id)
+  if (!safe || safe.includes('/') || safe.includes('..')) {
+    return res.status(400).json({ ok: false, message: '不正なIDです' })
+  }
+  const filePath = resolve(TEMPLATES_DIR, `${safe}.json`)
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ ok: false, message: 'テンプレートが見つかりません' })
+  }
+  try {
+    const data = JSON.parse(readFileSync(filePath, 'utf-8'))
+    res.json({ ok: true, template: data })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message })
+  }
+})
+
+app.post('/api/templates', (req, res) => {
+  const body = req.body
+  if (!body || typeof body !== 'object') {
+    return res.status(400).json({ ok: false, message: 'リクエストボディが不正です' })
+  }
+  if (!body.name || typeof body.name !== 'string') {
+    return res.status(400).json({ ok: false, message: 'テンプレート名が必要です' })
+  }
+  if (!Array.isArray(body.slides) || body.slides.length === 0) {
+    return res.status(400).json({ ok: false, message: 'slides が空です' })
+  }
+  const id = `custom-${randomUUID().slice(0, 8)}`
+  const template = {
+    id,
+    name: body.name,
+    title: body.title ?? body.name,
+    slides: body.slides,
+    cta: body.cta ?? {},
+    hints: body.hints ?? null,
+    favorite: false,
+    category: typeof body.category === 'string' ? body.category : 'other',
+    description: typeof body.description === 'string' ? body.description : '',
+    variables: Array.isArray(body.variables) ? body.variables : [],
+    thumbnail: typeof body.thumbnail === 'string' ? body.thumbnail : (body.slides[0]?.image ?? ''),
+  }
+  const filePath = resolve(TEMPLATES_DIR, `${id}.json`)
+  try {
+    writeFileSync(filePath, JSON.stringify(template, null, 2), 'utf-8')
+    res.json({ ok: true, id, message: 'テンプレートとして保存しました' })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message })
+  }
+})
+
+app.post('/api/templates/duplicate', (req, res) => {
+  const { id } = req.body ?? {}
+  if (!id || typeof id !== 'string') {
+    return res.status(400).json({ ok: false, message: 'IDが必要です' })
+  }
+  const safe = basename(id)
+  if (!safe || safe.includes('/') || safe.includes('..')) {
+    return res.status(400).json({ ok: false, message: '不正なIDです' })
+  }
+  const srcPath = resolve(TEMPLATES_DIR, `${safe}.json`)
+  if (!existsSync(srcPath)) {
+    return res.status(404).json({ ok: false, message: 'テンプレートが見つかりません' })
+  }
+  try {
+    const data = JSON.parse(readFileSync(srcPath, 'utf-8'))
+    const newId = `custom-copy-${randomUUID().slice(0, 8)}`
+    const newTemplate = { ...data, id: newId, name: `${data.name} のコピー`, favorite: false }
+    writeFileSync(resolve(TEMPLATES_DIR, `${newId}.json`), JSON.stringify(newTemplate, null, 2), 'utf-8')
+    res.json({ ok: true, id: newId, name: newTemplate.name })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message })
+  }
+})
+
+app.patch('/api/templates/:id', (req, res) => {
+  const safe = basename(req.params.id)
+  if (!safe || safe.includes('/') || safe.includes('..')) {
+    return res.status(400).json({ ok: false, message: '不正なIDです' })
+  }
+  const filePath = resolve(TEMPLATES_DIR, `${safe}.json`)
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ ok: false, message: 'テンプレートが見つかりません' })
+  }
+  const body = req.body ?? {}
+  try {
+    const data = JSON.parse(readFileSync(filePath, 'utf-8'))
+    if (body.name !== undefined) {
+      if (typeof body.name !== 'string' || !body.name.trim()) {
+        return res.status(400).json({ ok: false, message: 'テンプレート名が不正です' })
+      }
+      data.name = body.name.trim()
+    }
+    if (body.favorite !== undefined) {
+      data.favorite = Boolean(body.favorite)
+    }
+    writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
+    res.json({ ok: true, message: '更新しました' })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message })
+  }
+})
+
+app.delete('/api/templates/:id', (req, res) => {
+  const safe = basename(req.params.id)
+  if (!safe || safe.includes('/') || safe.includes('..')) {
+    return res.status(400).json({ ok: false, message: '不正なIDです' })
+  }
+  if (!safe.startsWith('custom-')) {
+    return res.status(403).json({ ok: false, message: '標準テンプレートは削除できません' })
+  }
+  const filePath = resolve(TEMPLATES_DIR, `${safe}.json`)
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ ok: false, message: 'テンプレートが見つかりません' })
+  }
+  try {
+    unlinkSync(filePath)
+    res.json({ ok: true, message: '削除しました' })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message })
+  }
 })
 
 app.post('/api/slides', (req, res) => {

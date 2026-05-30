@@ -1,0 +1,174 @@
+{
+  "id": "free-diagnosis-campaign",
+  "name": "無料歌唱診断キャンペーン",
+  "category": "campaign",
+  "hints": {
+    "imageCount": 14,
+    "durationSec": 40,
+    "ctaNote": "最後にQRコード（LINE登録）"
+  },
+  "title": "無料歌唱診断キャンペーン",
+  "slides": [
+    {
+      "id": 1,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "100名\n限定！",
+      "subline": "先着で無料で\nご参加いただけます。",
+      "emphasis": "100名限定",
+      "image": "slide01.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 2,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "完全\n無料。",
+      "subline": "費用は一切\nかかりません。",
+      "emphasis": "完全無料",
+      "image": "slide02.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 3,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "AI歌唱診断\nキャンペーン",
+      "subline": "あなたの歌声を\n本格的に分析します。",
+      "emphasis": "AI歌唱診断",
+      "image": "slide03.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 4,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "あなたの声を\n分析します。",
+      "subline": "音程・声量・表現力の\n3指標で採点。",
+      "emphasis": "分析",
+      "image": "slide04.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 5,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "弱点が\nわかります。",
+      "subline": "何を練習すれば\nいいかが明確に。",
+      "emphasis": "弱点",
+      "image": "slide05.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 6,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "参加方法は\nかんたん。",
+      "subline": "3ステップで\n完了します。",
+      "emphasis": "かんたん",
+      "image": "slide06.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 7,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "STEP 1\nLINE登録",
+      "subline": "下のQRコードから\n友だち追加。",
+      "emphasis": "LINE登録",
+      "image": "slide07.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 8,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "STEP 2\n録音して送信",
+      "subline": "好きな曲を\n30秒歌って送るだけ。",
+      "emphasis": "録音して送信",
+      "image": "slide08.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 9,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "STEP 3\nAIが分析",
+      "subline": "24時間以内に\n診断結果が届きます。",
+      "emphasis": "AIが分析",
+      "image": "slide09.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 10,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "診断結果が\n届きます。",
+      "subline": "改善ポイントが\n一目でわかります。",
+      "emphasis": "診断結果",
+      "image": "slide10.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 11,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "今すぐ\n始められる。",
+      "subline": "スマホだけで\nすぐ参加できます。",
+      "emphasis": "今すぐ",
+      "image": "slide11.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 12,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "残り◯名。",
+      "subline": "お席がなくなり次第\n終了となります。",
+      "emphasis": "残り",
+      "image": "slide12.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 13,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "お急ぎ\nください。",
+      "subline": "期間限定で\nいつ終わるかわかりません。",
+      "emphasis": "お急ぎ",
+      "image": "slide13.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 14,
+      "durationSec": 4,
+      "visible": true,
+      "headline": " ",
+      "subline": "",
+      "emphasis": "",
+      "image": "slide14.jpg",
+      "layout": "cta",
+      "showParticles": true,
+      "showCTA": true,
+      "ctaLabel": "QRを読み取る",
+      "ctaNote": "無料歌唱診断に参加する",
+      "ctaUrl": "https://be-my-style.com/singing/sign_up"
+    }
+  ],
+  "cta": {
+    "qrImage": "qr-singing.png"
+  }
+}
