@@ -25,3 +25,32 @@ export interface SlidesData {
   slides: Slide[];
   cta: CTAConfig;
 }
+
+export interface TemplateHints {
+  imageCount: number;
+  durationSec: number;
+  ctaNote: string;
+}
+
+export interface TemplateInfo {
+  id: string;
+  name: string;
+  hints: TemplateHints | null;
+  favorite?: boolean;
+  category?: string;
+  description?: string;
+  variables?: string[];
+  thumbnail?: string;
+  usageCount?: number;
+}
+
+export interface Template extends SlidesData {
+  id: string;
+  name: string;
+  hints: TemplateHints | null;
+  favorite?: boolean;
+  category?: string;
+  description?: string;
+  variables?: string[];
+  thumbnail?: string;
+}

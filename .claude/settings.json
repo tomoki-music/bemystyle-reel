@@ -17,7 +17,23 @@
       "Bash(curl -s http://localhost:3001/)",
       "Bash(npx playwright *)",
       "Bash(open -a \"Google Chrome\" \"http://localhost:3001\")",
-      "Bash(screencapture -x /tmp/editor-initial.png)"
+      "Bash(screencapture -x /tmp/editor-initial.png)",
+      "Bash(curl -s http://localhost:3002/api/templates)",
+      "Bash(curl -s http://localhost:3001/api/templates)",
+      "Bash(awk 'NR>1 {print $2}')",
+      "Bash(xargs -I{} sh -c 'ps -p {} -o pid,command 2>/dev/null | tail -1')",
+      "Bash(lsof -p 18402 -F n | grep server.mjs 2>/dev/null; ls -la /proc/18402/cwd 2>/dev/null || lsof -p 18402 | grep cwd 2>/dev/null)",
+      "Read(//proc/18402/**)",
+      "Bash(kill 18402)",
+      "Bash(node server.mjs)",
+      "Bash(curl -s -X POST http://localhost:3002/api/templates -H 'Content-Type: application/json' -d '{\"name\":\"テスト保存\",\"title\":\"test\",\"slides\":[{\"id\":1,\"durationSec\":3,\"visible\":true,\"headline\":\"test\",\"subline\":\"\",\"emphasis\":\"\",\"image\":\"slide01.jpg\",\"layout\":\"center\",\"showParticles\":false}],\"cta\":{\"qrImage\":\"qr-singing.png\"}}')",
+      "Bash(ls /Users/tomokiimaizumi/bemystyle-reel/public/templates/custom-*.json && rm /Users/tomokiimaizumi/bemystyle-reel/public/templates/custom-*.json && echo \"テスト用ファイルを削除\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(list\\(d.keys\\(\\)\\)\\)\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(node -e \"const d = JSON.parse\\(require\\('fs'\\).readFileSync\\('public/templates/singing-diagnosis.json','utf-8'\\)\\); console.log\\(JSON.stringify\\({thumbnail: d.thumbnail, slide0_image: d.slides?.[0]?.image}, null, 2\\)\\)\")"
+    ],
+    "additionalDirectories": [
+      "/Users/tomokiimaizumi/bemystyle-reel/public/templates"
     ]
   }
 }

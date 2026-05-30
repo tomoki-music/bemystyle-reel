@@ -1,0 +1,174 @@
+{
+  "id": "music-community",
+  "name": "音楽コミュニティ紹介",
+  "category": "community",
+  "hints": {
+    "imageCount": 14,
+    "durationSec": 40,
+    "ctaNote": "最後にQRコード"
+  },
+  "title": "音楽コミュニティ紹介",
+  "slides": [
+    {
+      "id": 1,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "一人で\n演奏していた。",
+      "subline": "それでも音楽が\n好きだった。",
+      "emphasis": "一人で",
+      "image": "slide01.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 2,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "でも。",
+      "subline": "誰かと一緒に\n演奏したかった。",
+      "emphasis": "でも",
+      "image": "slide02.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 3,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "仲間が\n欲しかった。",
+      "subline": "同じ気持ちを\n話せる人が。",
+      "emphasis": "仲間",
+      "image": "slide03.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 4,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "セッションって、\n難しそうだった。",
+      "subline": "上手い人ばかりだと\n思っていたから。",
+      "emphasis": "難しそう",
+      "image": "slide04.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 5,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "でも\n大丈夫。",
+      "subline": "ここは挑戦する人を\n笑わない場所。",
+      "emphasis": "大丈夫",
+      "image": "slide05.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 6,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "セッション会、\n開催中。",
+      "subline": "初心者も\n経験者も歓迎。",
+      "emphasis": "セッション会",
+      "image": "slide06.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 7,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "初心者\n歓迎。",
+      "subline": "久しぶりでも。\n自信がなくても。",
+      "emphasis": "初心者歓迎",
+      "image": "slide07.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 8,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "音楽で\nつながった。",
+      "subline": "言葉より先に\n心が通じた。",
+      "emphasis": "つながった",
+      "image": "slide08.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 9,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "笑顔が\n増えた。",
+      "subline": "一緒に演奏する\n喜びを知った。",
+      "emphasis": "笑顔",
+      "image": "slide09.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 10,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "うまくいかない日も、\nある。",
+      "subline": "だからこそ\n一緒に続けられる。",
+      "emphasis": "一緒に",
+      "image": "slide10.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 11,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "音楽は、\nやっぱり最高だ。",
+      "subline": "そう思える瞬間を\nもう一度。",
+      "emphasis": "最高",
+      "image": "slide11.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 12,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "あなたの\"好き\"が\n広がる。",
+      "subline": "一人では見られない\n景色がある。",
+      "emphasis": "好き",
+      "image": "slide12.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 13,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "参加者\n募集中。",
+      "subline": "あなたの参加を\n待っています。",
+      "emphasis": "参加者募集",
+      "image": "slide13.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 14,
+      "durationSec": 4,
+      "visible": true,
+      "headline": " ",
+      "subline": "",
+      "emphasis": "",
+      "image": "slide14.jpg",
+      "layout": "cta",
+      "showParticles": true,
+      "showCTA": true,
+      "ctaLabel": "QRを読み取る",
+      "ctaNote": "コミュニティ詳細はこちら",
+      "ctaUrl": "https://be-my-style.com"
+    }
+  ],
+  "cta": {
+    "qrImage": "qr-singing.png"
+  }
+}

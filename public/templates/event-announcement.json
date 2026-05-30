@@ -1,0 +1,130 @@
+{
+  "id": "event-announcement",
+  "name": "イベント告知",
+  "category": "event",
+  "hints": {
+    "imageCount": 10,
+    "durationSec": 30,
+    "ctaNote": "最後に申込リンク"
+  },
+  "title": "イベント告知",
+  "slides": [
+    {
+      "id": 1,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "告知です！",
+      "subline": "お知らせがあります。\nぜひ最後まで見てください。",
+      "emphasis": "告知",
+      "image": "slide01.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 2,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "イベント\n開催決定。",
+      "subline": "みなさんをお招きします。",
+      "emphasis": "イベント開催",
+      "image": "slide02.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 3,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "日時\n◯月◯日（◯）",
+      "subline": "◯◯:◯◯ スタート",
+      "emphasis": "◯月◯日",
+      "image": "slide03.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 4,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "場所",
+      "subline": "◯◯◯◯\nアクセス良好です。",
+      "emphasis": "場所",
+      "image": "slide04.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 5,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "内容",
+      "subline": "◯◯◯◯◯◯\n◯◯◯◯◯◯",
+      "emphasis": "内容",
+      "image": "slide05.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 6,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "参加費\n◯◯円",
+      "subline": "◯◯の方は\n無料です。",
+      "emphasis": "参加費",
+      "image": "slide06.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 7,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "どなたでも\n参加できます。",
+      "subline": "初めての方も\n大歓迎。",
+      "emphasis": "どなたでも",
+      "image": "slide07.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 8,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "先着◯名",
+      "subline": "定員になり次第\n締め切ります。",
+      "emphasis": "先着",
+      "image": "slide08.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 9,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "お申込みは\nプロフィールから",
+      "subline": "リンクを\nタップしてください。",
+      "emphasis": "お申込み",
+      "image": "slide09.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 10,
+      "durationSec": 4,
+      "visible": true,
+      "headline": " ",
+      "subline": "",
+      "emphasis": "",
+      "image": "slide10.jpg",
+      "layout": "cta",
+      "showParticles": true,
+      "showCTA": true,
+      "ctaLabel": "申込はこちら",
+      "ctaNote": "QRコードからお申込みください",
+      "ctaUrl": "https://be-my-style.com"
+    }
+  ],
+  "cta": {
+    "qrImage": "qr-singing.png"
+  }
+}
