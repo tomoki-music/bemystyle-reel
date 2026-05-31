@@ -30,10 +30,27 @@
       "Bash(ls /Users/tomokiimaizumi/bemystyle-reel/public/templates/custom-*.json && rm /Users/tomokiimaizumi/bemystyle-reel/public/templates/custom-*.json && echo \"テスト用ファイルを削除\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(list\\(d.keys\\(\\)\\)\\)\")",
       "Bash(python3 -m json.tool)",
-      "Bash(node -e \"const d = JSON.parse\\(require\\('fs'\\).readFileSync\\('public/templates/singing-diagnosis.json','utf-8'\\)\\); console.log\\(JSON.stringify\\({thumbnail: d.thumbnail, slide0_image: d.slides?.[0]?.image}, null, 2\\)\\)\")"
+      "Bash(node -e \"const d = JSON.parse\\(require\\('fs'\\).readFileSync\\('public/templates/singing-diagnosis.json','utf-8'\\)\\); console.log\\(JSON.stringify\\({thumbnail: d.thumbnail, slide0_image: d.slides?.[0]?.image}, null, 2\\)\\)\")",
+      "Bash(lsof -nP -iTCP -sTCP:LISTEN)",
+      "Bash(curl -s http://localhost:3002/)",
+      "Bash(node /tmp/verify-ai-generator.mjs)",
+      "Bash(nvm ls *)",
+      "Read(//usr/local/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//usr/bin/**)",
+      "Bash(/usr/bin/env node *)",
+      "Bash(/opt/homebrew/bin/node --version)",
+      "Bash(/opt/homebrew/bin/npm install *)",
+      "Bash(/opt/homebrew/bin/node /tmp/verify-ai-generator.mjs)",
+      "Bash(/opt/homebrew/bin/npx playwright *)",
+      "Read(//Applications/Google Chrome.app/**)",
+      "Read(//System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app/**)",
+      "Bash(/opt/homebrew/bin/node /tmp/verify-puppeteer.mjs)"
     ],
     "additionalDirectories": [
-      "/Users/tomokiimaizumi/bemystyle-reel/public/templates"
+      "/Users/tomokiimaizumi/bemystyle-reel/public/templates",
+      "/tmp",
+      "/private/tmp"
     ]
   }
 }

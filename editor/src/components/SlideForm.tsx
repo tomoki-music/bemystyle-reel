@@ -7,6 +7,9 @@ interface Props {
   ctaConfig: CTAConfig
   onCtaChange: (config: CTAConfig) => void
   disabled?: boolean
+  onGenerateImage?: () => void
+  isGeneratingImage?: boolean
+  generateImageError?: string
 }
 
 const inputStyle: React.CSSProperties = {
@@ -101,7 +104,7 @@ function ImageUploadField({ image, onChange }: { image: string; onChange: (img: 
   const [isDragOver, setIsDragOver] = useState(false)
 
   const previewUrl = image
-    ? image.startsWith('uploads/')
+    ? (image.startsWith('uploads/') || image.startsWith('generated/'))
       ? `/assets/${image}`
       : `/assets/slides/${image}`
     : null
@@ -243,7 +246,7 @@ function ImageUploadField({ image, onChange }: { image: string; onChange: (img: 
   )
 }
 
-export const SlideForm: React.FC<Props> = ({ slide, onChange, ctaConfig, onCtaChange, disabled = false }) => {
+export const SlideForm: React.FC<Props> = ({ slide, onChange, ctaConfig, onCtaChange, disabled = false, onGenerateImage, isGeneratingImage = false, generateImageError }) => {
   const isCTA = slide.layout === 'cta'
 
   return (
@@ -281,6 +284,55 @@ export const SlideForm: React.FC<Props> = ({ slide, onChange, ctaConfig, onCtaCh
           </>
         )}
       </Section>
+
+      {slide.imagePrompt && (
+        <Section title="AI 画像プロンプト">
+          <Field label="Image Prompt" hint="AI生成時に自動生成されたプロンプトです（読み取り専用）">
+            <textarea
+              value={slide.imagePrompt}
+              readOnly
+              style={{
+                ...textareaStyle,
+                color: 'rgba(255,255,255,0.45)',
+                cursor: 'default',
+                fontFamily: '"Courier New", monospace',
+                fontSize: 11,
+                lineHeight: 1.7,
+                minHeight: 90,
+              }}
+            />
+          </Field>
+          {onGenerateImage && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                onClick={onGenerateImage}
+                disabled={isGeneratingImage || disabled}
+                style={{
+                  width: '100%',
+                  padding: '9px 0',
+                  borderRadius: 8,
+                  border: '1px solid rgba(192,132,252,0.4)',
+                  background: isGeneratingImage ? 'rgba(192,132,252,0.06)' : 'rgba(192,132,252,0.12)',
+                  color: isGeneratingImage ? 'rgba(192,132,252,0.5)' : '#c084fc',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: isGeneratingImage || disabled ? 'not-allowed' : 'pointer',
+                  fontFamily: '"Noto Sans JP", -apple-system, sans-serif',
+                  letterSpacing: '0.04em',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {isGeneratingImage ? '生成中...' : 'AI画像生成'}
+              </button>
+              {generateImageError && (
+                <p style={{ fontSize: 11, color: '#f87171', marginTop: 6, lineHeight: 1.4 }}>
+                  画像生成に失敗しました
+                </p>
+              )}
+            </div>
+          )}
+        </Section>
+      )}
 
       <Section title="背景・演出">
         <Field label="背景画像">

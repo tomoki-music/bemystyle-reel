@@ -10,6 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const SLIDES_PATH = resolve(__dirname, '../public/data/slides.json')
 const TEMPLATES_DIR = resolve(__dirname, '../public/templates')
 const UPLOADS_DIR = resolve(__dirname, '../public/assets/uploads')
+const GENERATED_DIR = resolve(__dirname, '../public/assets/generated')
 const OUT_DIR = resolve(__dirname, '../out')
 const REELS_DIR = resolve(OUT_DIR, 'reels')
 const LATEST_FILE = resolve(OUT_DIR, 'reel.mp4')
@@ -30,6 +31,7 @@ let renderState = {
 }
 
 mkdirSync(UPLOADS_DIR, { recursive: true })
+mkdirSync(GENERATED_DIR, { recursive: true })
 mkdirSync(REELS_DIR, { recursive: true })
 mkdirSync(TEMPLATES_DIR, { recursive: true })
 
@@ -344,6 +346,446 @@ app.get('/api/render/history', (_req, res) => {
     res.json({ ok: true, items: files })
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message })
+  }
+})
+
+const STORY_PRESETS = {
+  default: {
+    tone: 'motivational, inspiring, concise',
+    targetAudience: 'general audience interested in self-growth and music',
+    cta: 'encourage the viewer to visit the profile or check the link',
+    platform: 'short vertical video',
+    imageStyle: 'elegant anime style, cinematic lighting, vertical 9:16 composition, no text',
+    ctaJa: '続きはプロフィールへ',
+  },
+  note: {
+    tone: 'friendly, sincere, thoughtful, essay-like',
+    targetAudience: 'people who want personal growth through life, hobbies, work, and music',
+    cta: 'encourage the viewer to read the full post or visit the profile',
+    platform: 'Note article teaser and short video',
+    imageStyle: 'elegant anime style, musician or artist, thoughtful atmosphere, cinematic lighting, vertical 9:16 composition, no text',
+    ctaJa: '続きはプロフィールへ',
+  },
+  singing_pr: {
+    tone: 'encouraging, warm, trustworthy, beginner-friendly',
+    targetAudience: 'people who love singing and want to improve their voice',
+    cta: 'encourage the viewer to try a free singing diagnosis',
+    platform: 'short promotional video',
+    imageStyle: 'elegant anime style singer, music studio, warm lighting, professional yet friendly, vertical 9:16 composition, no text',
+    ctaJa: '無料診断はこちら',
+  },
+  session: {
+    tone: 'welcoming, lively, warm, community-oriented',
+    targetAudience: 'beginners and experienced musicians looking for a place to play music together',
+    cta: 'encourage the viewer to join the session or check event details',
+    platform: 'music event announcement short video',
+    imageStyle: 'elegant anime style band session, cozy studio, friendly musicians, dynamic performance, vertical 9:16 composition, no text',
+    ctaJa: '詳細はイベントページへ',
+  },
+  youtube_shorts: {
+    tone: 'hook-driven, punchy, emotional, easy to understand',
+    targetAudience: 'YouTube Shorts viewers who decide within the first second',
+    cta: 'encourage the viewer to watch more or check the profile',
+    platform: 'YouTube Shorts',
+    imageStyle: 'dynamic anime style, bold composition, cinematic lighting, high-impact vertical frame, vertical 9:16 composition, no text',
+    ctaJa: '続きはプロフィールへ',
+  },
+  instagram_reels: {
+    tone: 'stylish, emotional, relatable, atmospheric',
+    targetAudience: 'Instagram users who like aesthetic, relatable, save-worthy content',
+    cta: 'encourage the viewer to save, share, or check the profile',
+    platform: 'Instagram Reels',
+    imageStyle: 'elegant anime style, stylish artist, dreamy lighting, refined color palette, vertical 9:16 composition, no text',
+    ctaJa: '保存して見返そう',
+  },
+}
+
+app.post('/api/custom-preset-insights', async (req, res) => {
+  const { presets } = req.body ?? {}
+  if (!Array.isArray(presets) || presets.length === 0) {
+    return res.status(400).json({ ok: false, message: 'presets が空です' })
+  }
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+  }
+
+  const presetSummary = presets.map((p, i) =>
+    `[${i + 1}] name="${p.name}" tone="${p.tone}" audience="${p.targetAudience}" platform="${p.platform}" imageStyle="${p.imageStyle}" cta="${p.ctaText}" useCount=${p.useCount} isFavorite=${p.isFavorite} usedAtCount=${p.usedAtCount} lastUsedAt="${p.lastUsedAt}"`
+  ).join('\n')
+
+  const systemPrompt = `あなたはショート動画マーケティングのエキスパートです。
+以下のカスタムプリセット利用データを分析し、改善提案をJSON形式で返してください。
+必ずJSON形式のみで返してください。説明文は不要です。
+
+{
+  "summary": "全体の利用傾向の総評（2〜3文）",
+  "strongestPresets": ["最もよく使われている・効果的なプリセット名を1〜3件"],
+  "improvementIdeas": ["使用頻度が低いまたは改善余地があるプリセットへの具体的な改善案を1〜3件"],
+  "recommendedCombinations": [
+    {
+      "name": "プリセット名（日本語・20文字以内）",
+      "tone": "トーン指定（英語または日本語）",
+      "targetAudience": "ターゲットオーディエンス",
+      "platform": "プラットフォーム名",
+      "imageStyle": "画像スタイル指定（英語推奨）",
+      "ctaText": "CTAテキスト（日本語）",
+      "reason": "このプリセットを勧める理由（1文）"
+    }
+  ]
+}
+recommendedCombinations は1〜2件。既存プリセットの勝ちパターンを組み合わせた、すぐ使える実用的なプリセットを提案すること。`
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `プリセットデータ:\n${presetSummary}` },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7,
+        max_tokens: 800,
+      }),
+    })
+
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+
+    const openaiData = await openaiRes.json()
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+
+    let insight
+    try { insight = JSON.parse(content) } catch {
+      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    }
+
+    if (typeof insight.summary !== 'string' || !Array.isArray(insight.strongestPresets) ||
+        !Array.isArray(insight.improvementIdeas) || !Array.isArray(insight.recommendedCombinations)) {
+      return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+    }
+
+    res.json({ ok: true, insight })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
+  }
+})
+
+app.post('/api/generate-story', async (req, res) => {
+  const { theme, presetKey, customPreset } = req.body ?? {}
+  if (!theme || typeof theme !== 'string' || !theme.trim()) {
+    return res.status(400).json({ ok: false, message: 'テーマが必要です' })
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません。環境変数を確認してください。' })
+  }
+
+  const preset = (presetKey && STORY_PRESETS[presetKey]) ? STORY_PRESETS[presetKey] : STORY_PRESETS.default
+
+  const effectivePreset = {
+    ...preset,
+    tone: customPreset?.tone || preset.tone,
+    targetAudience: customPreset?.targetAudience || preset.targetAudience,
+    platform: customPreset?.platform || preset.platform,
+    imageStyle: customPreset?.imageStyle || preset.imageStyle,
+    ctaJa: customPreset?.ctaText || preset.ctaJa,
+  }
+
+  const presetSection = `
+Preset instructions (apply strongly to all slides):
+- Tone: ${effectivePreset.tone}
+- Target audience: ${effectivePreset.targetAudience}
+- CTA direction: ${effectivePreset.cta}
+- Platform: ${effectivePreset.platform}
+- Image style: ${effectivePreset.imageStyle}
+`
+
+  const systemPrompt = `あなたはショート動画（Instagram Reels / TikTok）のストーリーライター兼ビジュアルディレクターです。
+日本語でスライドコンテンツを生成してください。
+${presetSection}
+必ずJSON形式のみで返してください。説明文は不要です。
+{
+  "slides": [
+    {
+      "headline": "スライドのメインテキスト",
+      "subline": "補足テキスト（任意）",
+      "emphasis": "強調する単語（任意）",
+      "imagePrompt": "Elegant anime-style musician on a softly lit stage, cinematic lighting, vertical 9:16 composition, no text"
+    }
+  ],
+  "variables": {
+    "title": "メインタイトル",
+    "subtitle": "キャッチコピー",
+    "cta": "${effectivePreset.ctaJa}"
+  }
+}
+
+ルール：
+- slides は必ず14枚（過不足なく）
+- 各 headline は10〜20文字程度、短く力強く
+- subline は10〜20文字程度の補足（省略可）
+- emphasis は headline 中の強調する単語1つ（省略可）
+- 最初は問いかけか共感、最後はまとめ・結論・行動促進
+- subtitle は15〜25文字のキャッチコピー
+- cta は必ず「${effectivePreset.ctaJa}」を使用する
+- imagePrompt は各スライドの内容に合った英語の画像生成プロンプト（必須・空文字NG）
+- imagePrompt には必ず以下のimage styleを反映すること: ${effectivePreset.imageStyle}
+- imagePrompt はスライドの感情・場面を具体的に表現する（例: solitary figure gazing at distant horizon, warm sunset tones）
+- Preset の tone・target audience・platform を全スライドの文章に強く反映すること`
+
+  const userPrompt = `テーマ: ${theme.trim()}`
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.8,
+        max_tokens: 2000,
+      }),
+    })
+
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+
+    const openaiData = await openaiRes.json()
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) {
+      return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+    }
+
+    let story
+    try {
+      story = JSON.parse(content)
+    } catch {
+      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    }
+
+    if (!Array.isArray(story.slides)) {
+      return res.status(502).json({ ok: false, message: 'OpenAI応答: slides が配列ではありません' })
+    }
+    if (story.slides.length !== 14) {
+      return res.status(502).json({ ok: false, message: `OpenAI応答: slides は14枚必要です（実際: ${story.slides.length}枚）` })
+    }
+    for (let i = 0; i < story.slides.length; i++) {
+      if (typeof story.slides[i].headline !== 'string') {
+        return res.status(502).json({ ok: false, message: `OpenAI応答: slides[${i}].headline が文字列ではありません` })
+      }
+      if (typeof story.slides[i].imagePrompt !== 'string' || !story.slides[i].imagePrompt.trim()) {
+        return res.status(502).json({ ok: false, message: `OpenAI応答: slides[${i}].imagePrompt が不正です（空文字またはstring以外）` })
+      }
+    }
+    if (
+      !story.variables ||
+      typeof story.variables.title !== 'string' ||
+      typeof story.variables.subtitle !== 'string' ||
+      typeof story.variables.cta !== 'string'
+    ) {
+      return res.status(502).json({ ok: false, message: 'OpenAI応答: variables.title/subtitle/cta が不正です' })
+    }
+
+    res.json({ ok: true, story })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
+  }
+})
+
+app.post('/api/generate-image', async (req, res) => {
+  const { prompt } = req.body ?? {}
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ ok: false, message: 'prompt が必要です' })
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+  }
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-image-1',
+        prompt: prompt.trim(),
+        n: 1,
+        size: '1024x1792',
+        response_format: 'b64_json',
+      }),
+    })
+
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+
+    const openaiData = await openaiRes.json()
+    const b64 = openaiData.data?.[0]?.b64_json
+    if (!b64) {
+      return res.status(502).json({ ok: false, message: '画像データが取得できませんでした' })
+    }
+
+    const now = new Date()
+    const timestamp = formatTimestamp(now)
+    const randomSuffix = randomUUID().slice(0, 8)
+    const filename = `ai-${timestamp}-${randomSuffix}.png`
+    const filePath = resolve(GENERATED_DIR, filename)
+    writeFileSync(filePath, Buffer.from(b64, 'base64'))
+
+    res.json({ ok: true, image: `generated/${filename}` })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `画像生成エラー: ${err.message}` })
+  }
+})
+
+app.get('/api/assets/generated', (_req, res) => {
+  try {
+    const files = readdirSync(GENERATED_DIR)
+      .filter((f) => f.endsWith('.png'))
+      .map((f) => {
+        const st = statSync(resolve(GENERATED_DIR, f))
+        return {
+          filename: f,
+          path: `generated/${f}`,
+          size: st.size,
+          createdAt: st.birthtime.toISOString(),
+        }
+      })
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    const totalSize = files.reduce((acc, f) => acc + f.size, 0)
+    res.json({ ok: true, assets: files, totalSize })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message })
+  }
+})
+
+app.delete('/api/assets/generated/:filename', (req, res) => {
+  const safeFilename = basename(req.params.filename)
+  if (!safeFilename.endsWith('.png')) {
+    return res.status(400).json({ ok: false, message: '.png ファイルのみ削除できます' })
+  }
+  if (safeFilename !== req.params.filename) {
+    return res.status(400).json({ ok: false, message: '不正なファイル名です' })
+  }
+  const filePath = resolve(GENERATED_DIR, safeFilename)
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ ok: false, message: 'ファイルが見つかりません' })
+  }
+  try {
+    unlinkSync(filePath)
+    res.json({ ok: true, message: '削除しました' })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message })
+  }
+})
+
+app.post('/api/sns-caption', async (req, res) => {
+  const { slides, title, selectedPresetKey, selectedCustomPreset } = req.body ?? {}
+  if (!Array.isArray(slides) || slides.length === 0) {
+    return res.status(400).json({ ok: false, message: 'slides が空です' })
+  }
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+  }
+
+  const slideSummary = slides
+    .filter((s) => s.visible !== false)
+    .slice(0, 8)
+    .map((s, i) => {
+      const parts = []
+      if (s.headline) parts.push(`headline: "${s.headline}"`)
+      if (s.subline) parts.push(`subline: "${s.subline}"`)
+      if (s.emphasis) parts.push(`emphasis: "${s.emphasis}"`)
+      if (s.ctaLabel) parts.push(`cta: "${s.ctaLabel}"`)
+      return `[${i + 1}] ${parts.join(' / ')}`
+    })
+    .join('\n')
+
+  const presetInfo = selectedCustomPreset
+    ? `カスタムプリセット: name="${selectedCustomPreset.name}" tone="${selectedCustomPreset.tone}" audience="${selectedCustomPreset.targetAudience}" platform="${selectedCustomPreset.platform}" cta="${selectedCustomPreset.ctaText}"`
+    : selectedPresetKey
+    ? `プリセット: ${selectedPresetKey}`
+    : 'プリセットなし'
+
+  const systemPrompt = `あなたはSNSマーケティングの専門家です。
+ショート動画（YouTube Shorts / Instagram Reels）のスライド内容を元に、投稿文をJSON形式で生成してください。
+必ずJSON形式のみで返してください。
+
+{
+  "youtubeTitle": "YouTube Shortsのタイトル（日本語・60文字以内・#を使わない）",
+  "youtubeDescription": "YouTube説明文（日本語・3〜5行・動画の内容を簡潔に・最後にハッシュタグを3〜5個）",
+  "instagramCaption": "Instagram投稿文（日本語・絵文字を適度に使用・3〜5行・最後にハッシュタグを5〜8個）",
+  "hashtags": ["タグ1", "タグ2", "...（#なしで10〜15個）"]
+}
+hashtagsの値には#を含めないこと。`
+
+  const userMessage = `動画タイトル: ${title || '（なし）'}
+${presetInfo}
+
+スライド内容:
+${slideSummary}`
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.8,
+        max_tokens: 1000,
+      }),
+    })
+
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+
+    const openaiData = await openaiRes.json()
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+
+    let caption
+    try { caption = JSON.parse(content) } catch {
+      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    }
+
+    if (typeof caption.youtubeTitle !== 'string' || typeof caption.youtubeDescription !== 'string' ||
+        typeof caption.instagramCaption !== 'string' || !Array.isArray(caption.hashtags)) {
+      return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+    }
+
+    res.json({ ok: true, caption })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
   }
 })
 

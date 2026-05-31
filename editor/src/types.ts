@@ -14,6 +14,7 @@ export interface Slide {
   ctaLabel?: string;
   ctaNote?: string;
   ctaUrl?: string;
+  imagePrompt?: string;
 }
 
 export interface CTAConfig {
