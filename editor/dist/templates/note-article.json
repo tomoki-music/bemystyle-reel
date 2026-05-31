@@ -1,0 +1,130 @@
+{
+  "id": "note-article",
+  "name": "Note記事紹介",
+  "category": "note",
+  "hints": {
+    "imageCount": 10,
+    "durationSec": 25,
+    "ctaNote": "Noteのリンクへ誘導"
+  },
+  "title": "Note記事紹介",
+  "slides": [
+    {
+      "id": 1,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "◯◯な悩み、\nありませんか？",
+      "subline": "多くの人が\n同じことで悩んでいます。",
+      "emphasis": "悩み",
+      "image": "slide01.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 2,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "私も\n同じでした。",
+      "subline": "ずっと解決策が\nわからなかった。",
+      "emphasis": "同じでした",
+      "image": "slide02.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 3,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "実は。",
+      "subline": "原因は\nシンプルでした。",
+      "emphasis": "実は",
+      "image": "slide03.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 4,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "学んだこと",
+      "subline": "◯◯◯◯◯◯\n◯◯◯◯◯◯",
+      "emphasis": "学んだこと",
+      "image": "slide04.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 5,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "気づきは\n◯◯◯だった。",
+      "subline": "知っているか\n知らないかの差だった。",
+      "emphasis": "気づき",
+      "image": "slide05.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 6,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "変わったこと",
+      "subline": "◯◯◯◯ができるように。\n◯◯◯◯が楽になった。",
+      "emphasis": "変わった",
+      "image": "slide06.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 7,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "まとめました。",
+      "subline": "Noteに詳しく\n書いています。",
+      "emphasis": "まとめ",
+      "image": "slide07.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 8,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "続きは\nNoteで。",
+      "subline": "プロフィールの\nリンクから読めます。",
+      "emphasis": "Note",
+      "image": "slide08.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 9,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "無料で\n読めます。",
+      "subline": "気になった方は\nぜひ読んでみてください。",
+      "emphasis": "無料",
+      "image": "slide09.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 10,
+      "durationSec": 4,
+      "visible": true,
+      "headline": " ",
+      "subline": "",
+      "emphasis": "",
+      "image": "slide10.jpg",
+      "layout": "cta",
+      "showParticles": true,
+      "showCTA": true,
+      "ctaLabel": "記事を読む",
+      "ctaNote": "プロフィールのリンクから",
+      "ctaUrl": "https://note.com"
+    }
+  ],
+  "cta": {
+    "qrImage": "qr-singing.png"
+  }
+}
