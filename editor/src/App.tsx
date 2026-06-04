@@ -10,6 +10,10 @@ import {
 } from './templateVariables'
 import { generateStory, AIPresetKey, CustomPreset } from './storyGenerator'
 import './App.css'
+import { FactoryPanel } from './components/factory/FactoryPanel'
+import { RenderQueuePanel } from './components/render/RenderQueuePanel'
+import { CompareDashboardPanel } from './components/compare/CompareDashboardPanel'
+import { TemplateGalleryPanel } from './components/template/TemplateGalleryPanel'
 
 const API_SERVER_ERROR = 'APIサーバーに接続できません。npm run editor で起動しているか確認してください。'
 
@@ -46,6 +50,116 @@ type SnsCaption = {
   hashtags: string[]
 }
 
+type RenderQueueItem = {
+  id: string
+  variantName: string
+  status: 'pending' | 'rendering' | 'completed' | 'failed'
+  outputPath?: string
+  renderedAt?: string
+  slidesSnapshot?: Slide[]
+  snapshotCreatedAt?: string
+}
+
+type LastPipeline = {
+  completedCount: number
+  failedCount: number
+  finishedAt: string
+}
+
+type LastSmartPipeline = {
+  generatedCount: number
+  recommendedCount: number
+  renderedCount: number
+  failedCount: number
+  finishedAt: string
+}
+
+type LastSmartRewritePipeline = {
+  selectedVariantName: string
+  selectedAngle: string
+  recommendation: number
+  renderedCount: number
+  failedCount: number
+  finishedAt: string
+}
+
+type LastMultiRewriteQueue = {
+  rewrittenCount: number
+  queuedCount: number
+  renderedCount: number
+  failedCount: number
+  selectedVariants: string[]
+  finishedAt: string
+}
+
+type BestVariantAnalysis = {
+  strengths: string[]
+  weaknesses: string[]
+  bestFor: string[]
+  nextActions: string[]
+  summary: string
+}
+
+// ==============================
+// AI Reel Factory — Types
+// ==============================
+type FactorySummary = {
+  generatedCount: number
+  selectedCount: number
+  averageRecommendation: number
+  bestVariantName: string
+  bestRecommendation: number
+  queueAddedCount: number
+  generatedAt: string
+  topVariants: {
+    name: string
+    recommendation: number
+    predictedViews?: number
+    savePotential?: number
+    ctaStrength?: number
+  }[]
+}
+
+type FactoryHistoryItem = FactorySummary & {
+  id: string
+  theme: string
+  favorite?: boolean
+  tags?: string[]
+}
+
+type FactoryHistoryFilter = 'all' | 'favorites' | 'highScore'
+
+type GeneratedVariant = {
+  name: string
+  description: string
+  angle: string
+}
+
+type RewrittenSlide = {
+  headline: string
+  subline?: string
+  emphasis?: string
+}
+
+type VariantLearningEvent = {
+  id: string
+  theme: string
+  variantName: string
+  angle: string
+  action: 'applied' | 'selected_best'
+  createdAt: string
+}
+
+type VariantScore = {
+  variantName: string
+  angle: string
+  recommendation: number
+  predictedViews: number
+  savePotential: number
+  ctaStrength: number
+  reason: string
+}
+
 type AIGenerationHistory = {
   id: string
   createdAt: string
@@ -58,7 +172,99 @@ type AIGenerationHistory = {
   renderStatus: RenderStatus
   renderOutputPath?: string
   renderErrorMessage?: string
+  renderVariantName?: string
+  renderedAt?: string
   snsCaption?: SnsCaption
+}
+
+type RewriteExplainResult = {
+  summary: string
+  reasons: string[]
+  improvedPoints: string[]
+  risks: string[]
+  nextSuggestions: string[]
+}
+
+function renderInlineDiff(
+  before: string,
+  after: string
+): { beforeNode: React.ReactNode; afterNode: React.ReactNode } {
+  if (!before) return { beforeNode: <span className="inline-diff-unchanged">(empty)</span>, afterNode: <span className="inline-diff-added">{after}</span> }
+  if (!after) return { beforeNode: <span className="inline-diff-removed">{before}</span>, afterNode: <span className="inline-diff-unchanged">(empty)</span> }
+
+  const minLen = Math.min(before.length, after.length)
+  let prefixLen = 0
+  while (prefixLen < minLen && before[prefixLen] === after[prefixLen]) prefixLen++
+
+  let suffixLen = 0
+  while (suffixLen < minLen - prefixLen && before[before.length - 1 - suffixLen] === after[after.length - 1 - suffixLen]) suffixLen++
+
+  const prefix = before.slice(0, prefixLen)
+  const suffix = suffixLen > 0 ? before.slice(before.length - suffixLen) : ''
+  const beforeMid = before.slice(prefixLen, before.length - suffixLen)
+  const afterMid = after.slice(prefixLen, after.length - suffixLen)
+
+  return {
+    beforeNode: (
+      <>
+        {prefix && <span className="inline-diff-unchanged">{prefix}</span>}
+        {beforeMid && <span className="inline-diff-removed">{beforeMid}</span>}
+        {suffix && <span className="inline-diff-unchanged">{suffix}</span>}
+      </>
+    ),
+    afterNode: (
+      <>
+        {prefix && <span className="inline-diff-unchanged">{prefix}</span>}
+        {afterMid && <span className="inline-diff-added">{afterMid}</span>}
+        {suffix && <span className="inline-diff-unchanged">{suffix}</span>}
+      </>
+    ),
+  }
+}
+
+function renderDiffPanel(currentSlides: Slide[], snapshotSlides: Slide[]) {
+  type DiffEntry = { field: string; before: string; after: string }
+  const diffItems = currentSlides
+    .map((slide, i) => {
+      const snap = snapshotSlides[i]
+      if (!snap) return null
+      const diffs: DiffEntry[] = []
+      if (slide.headline !== snap.headline) diffs.push({ field: 'Headline', before: slide.headline, after: snap.headline })
+      if (slide.subline !== snap.subline) diffs.push({ field: 'Subline', before: slide.subline, after: snap.subline })
+      if (slide.emphasis !== snap.emphasis) diffs.push({ field: 'Emphasis', before: slide.emphasis, after: snap.emphasis })
+      return diffs.length > 0 ? { idx: i, diffs } : null
+    })
+    .filter((x): x is { idx: number; diffs: DiffEntry[] } => x !== null)
+
+  return (
+    <div className="snapshot-diff-panel">
+      {diffItems.length === 0 ? (
+        <p className="snapshot-diff-empty">No content changes detected</p>
+      ) : (
+        diffItems.map(item => (
+          <div key={item.idx} className="snapshot-diff-slide">
+            <p className="snapshot-preview-label">Slide {item.idx + 1}</p>
+            {item.diffs.map(d => {
+              const { beforeNode, afterNode } = renderInlineDiff(d.before, d.after)
+              return (
+                <div key={d.field} className="snapshot-diff-row">
+                  <p className="snapshot-diff-field">{d.field}</p>
+                  <div className="snapshot-diff-before">
+                    <span className="snapshot-diff-label">Before</span>
+                    <span className="snapshot-diff-text">{beforeNode}</span>
+                  </div>
+                  <div className="snapshot-diff-after">
+                    <span className="snapshot-diff-label">After</span>
+                    <span className="snapshot-diff-text">{afterNode}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ))
+      )}
+    </div>
+  )
 }
 
 const AI_PRESETS: AIPreset[] = [
@@ -107,9 +313,96 @@ const CUSTOM_PRESETS_KEY = 'bemystyle-reel-custom-presets'
 const VALID_CUSTOM_PRESET_KEYS = new Set<string>(['note', 'singing_pr', 'session', 'youtube_shorts', 'instagram_reels', ''])
 const RECENT_MAX = 5
 
-const VIEW_MODE_KEY = 'bemystyle-reel:view-mode'
 const USAGE_KEY = 'bemystyle-reel:template-usage'
 const AI_GENERATION_HISTORY_KEY = 'bemystyle-reel-ai-generation-history'
+const RENDER_QUEUE_KEY = 'bemystyle-reel-render-queue'
+const BEST_VARIANT_KEY = 'bemystyle-reel-best-variant'
+const LAST_PIPELINE_KEY = 'bemystyle-reel-last-pipeline'
+const GENERATED_VARIANTS_KEY = 'bemystyle-reel-generated-variants'
+const REWRITTEN_STORIES_KEY = 'bemystyle-reel-rewritten-stories'
+const VARIANT_LEARNING_EVENTS_KEY = 'bemystyle-reel-variant-learning-events'
+const VARIANT_SCORES_KEY = 'bemystyle-reel-variant-scores'
+const LAST_SMART_PIPELINE_KEY = 'bemystyle-reel-last-smart-pipeline'
+const LAST_SMART_REWRITE_PIPELINE_KEY = 'bemystyle-reel-last-smart-rewrite-pipeline'
+const LAST_MULTI_REWRITE_QUEUE_KEY = 'bemystyle-reel-last-multi-rewrite-queue'
+const BEST_VARIANT_ANALYSIS_KEY = 'bemystyle-reel-best-variant-analysis'
+const REWRITE_EXPLAIN_CACHE_KEY = 'bemystyle-reel-rewrite-explain-cache'
+
+// ==============================
+// AI Reel Factory — Constants & Utilities
+// ==============================
+const FACTORY_SUMMARY_CACHE_KEY = 'bemystyle-reel-factory-summary-cache'
+const FACTORY_HISTORY_KEY = 'bemystyle-reel-factory-history'
+const MAX_HISTORY_THEME_LENGTH = 80
+const FACTORY_QUICK_TAGS = ['音楽', '成長', '習慣', 'AI', 'コミュニティ', '歌唱診断']
+
+const FACTORY_TAG_RULES: { tag: string; keywords: string[] }[] = [
+  { tag: '音楽',     keywords: ['音楽', '歌', '演奏', 'バンド', 'ライブ', 'セッション'] },
+  { tag: '成長',     keywords: ['成長', '挑戦', '努力', '練習', '上達', 'レベルアップ'] },
+  { tag: '習慣',     keywords: ['習慣', '継続', '毎日', '積み重ね', 'ルーティン'] },
+  { tag: 'AI',       keywords: ['ai', 'AI', '人工知能', '自動化'] },
+  { tag: 'コミュニティ', keywords: ['コミュニティ', '仲間', '居場所', 'サークル', 'つながり'] },
+  { tag: '歌唱診断', keywords: ['歌唱診断', 'ボーカル', 'ミックスボイス', '発声', '歌声'] },
+]
+
+const inferFactoryTags = (theme: string): string[] => {
+  const text = theme.toLowerCase()
+  return FACTORY_TAG_RULES
+    .filter(rule => rule.keywords.some(kw => text.includes(kw.toLowerCase())))
+    .map(rule => rule.tag)
+    .slice(0, 8)
+}
+
+const escapeCsvValue = (value: unknown): string => {
+  const text = String(value ?? '')
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`
+  }
+  return text
+}
+
+const isFactoryHistoryItem = (value: unknown): value is FactoryHistoryItem => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+
+  const item = value as Partial<FactoryHistoryItem>
+
+  if (
+    typeof item.id !== 'string' ||
+    typeof item.theme !== 'string' ||
+    typeof item.generatedAt !== 'string' ||
+    typeof item.generatedCount !== 'number' ||
+    typeof item.selectedCount !== 'number' ||
+    typeof item.averageRecommendation !== 'number' ||
+    typeof item.bestVariantName !== 'string' ||
+    typeof item.bestRecommendation !== 'number' ||
+    typeof item.queueAddedCount !== 'number' ||
+    !Array.isArray(item.topVariants)
+  ) return false
+
+  if (!item.topVariants.every(v =>
+    v && typeof v === 'object' &&
+    typeof (v as Record<string, unknown>).name === 'string' &&
+    typeof (v as Record<string, unknown>).recommendation === 'number'
+  )) return false
+
+  if (item.tags !== undefined && !Array.isArray(item.tags)) return false
+  if (Array.isArray(item.tags) && !item.tags.every(t => typeof t === 'string')) return false
+  if (item.favorite !== undefined && typeof item.favorite !== 'boolean') return false
+
+  return true
+}
+
+const AUTO_ANALYZE_ON_BEST_SELECT = false
+
+const AUTO_VARIANT_TEMPLATES = [
+  'Default',
+  'CTA強め版',
+  '感情訴求版',
+  '教育版',
+  'ストーリー版',
+  'YouTube版',
+  'Instagram版',
+]
 
 function loadRecentIds(): string[] {
   try {
@@ -133,11 +426,6 @@ function pushRecentId(id: string, current: string[]): string[] {
   return [id, ...current.filter((v) => v !== id)].slice(0, RECENT_MAX)
 }
 
-function loadViewMode(): 'grid' | 'list' {
-  const v = localStorage.getItem(VIEW_MODE_KEY)
-  return v === 'list' ? 'list' : 'grid'
-}
-
 function loadUsage(): Record<string, number> {
   try {
     const raw = localStorage.getItem(USAGE_KEY)
@@ -149,8 +437,6 @@ function loadUsage(): Record<string, number> {
     return {}
   }
 }
-
-type SortOrder = 'newest' | 'name' | 'favorite' | 'category'
 
 type AIWorkflowStep = 'theme' | 'story' | 'images' | 'save' | 'render' | 'done'
 
@@ -166,8 +452,6 @@ const CATEGORIES = [
   { id: 'campaign',  label: 'キャンペーン' },
   { id: 'other',     label: 'その他' },
 ] as const
-
-type CategoryId = typeof CATEGORIES[number]['id']
 
 interface HistoryItem {
   filename: string
@@ -241,7 +525,88 @@ export default function App() {
   // AI生成履歴 (Phase12-N/O)
   const [aiGenerationHistory, setAiGenerationHistory] = useState<AIGenerationHistory[]>([])
   const [importNotice, setImportNotice] = useState('')
+
+  // Render Variant / Queue / Compare / AutoGen (Phase13-G/H/I/K)
+  const [renderVariantName, setRenderVariantName] = useState("")
+  const [renderQueue, setRenderQueue] = useState<RenderQueueItem[]>([])
+  const [isBatchRendering, setIsBatchRendering] = useState(false)
+  const [bestVariantId, setBestVariantId] = useState("")
+  const [autoGenerateNotice, setAutoGenerateNotice] = useState("")
   const importInputRef = useRef<HTMLInputElement>(null)
+
+  // AI Variant Generator (Phase14-D)
+  const [generatedVariants, setGeneratedVariants] = useState<GeneratedVariant[]>([])
+  const [isGeneratingVariants, setIsGeneratingVariants] = useState(false)
+  const [variantGenerateError, setVariantGenerateError] = useState('')
+
+  // AI Story Rewriter (Phase14-E)
+  const [rewrittenStories, setRewrittenStories] = useState<Record<string, Slide[]>>({})
+  const [isRewritingStory, setIsRewritingStory] = useState<Record<string, boolean>>({})
+  const [rewriteStoryError, setRewriteStoryError] = useState<Record<string, string>>({})
+
+  // Best Variant Learning (Phase14-F)
+  const [variantLearningEvents, setVariantLearningEvents] = useState<VariantLearningEvent[]>([])
+
+  // AI Variant Scoring (Phase14-G)
+  const [variantScores, setVariantScores] = useState<VariantScore[]>([])
+  const [isScoringVariants, setIsScoringVariants] = useState(false)
+  const [variantScoreError, setVariantScoreError] = useState('')
+
+  // Smart Queue (Phase14-H)
+  const [smartQueueMessage, setSmartQueueMessage] = useState('')
+
+  // Auto Render Pipeline (Phase14-C)
+  const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState(false)
+  const [pipelineStatus, setPipelineStatus] = useState('')
+  const [lastPipeline, setLastPipeline] = useState<LastPipeline | null>(null)
+  const compareDashboardRef = useRef<HTMLDivElement | null>(null)
+  const batchRenderRef = useRef<() => Promise<void>>(async () => {})
+  const renderQueueRef = useRef<RenderQueueItem[]>([])
+
+  // Best Variant Analyzer (Phase14-J)
+  const [bestVariantAnalysis, setBestVariantAnalysis] = useState<BestVariantAnalysis | null>(null)
+  const [isAnalyzingBestVariant, setIsAnalyzingBestVariant] = useState(false)
+  const [bestVariantAnalysisError, setBestVariantAnalysisError] = useState('')
+
+  // Smart Pipeline (Phase14-I)
+  const [isSmartPipelineRunning, setIsSmartPipelineRunning] = useState(false)
+  const [smartPipelineStatus, setSmartPipelineStatus] = useState('')
+  const [smartPipelineError, setSmartPipelineError] = useState('')
+  const [lastSmartPipeline, setLastSmartPipeline] = useState<LastSmartPipeline | null>(null)
+  const generatedVariantsRef = useRef<GeneratedVariant[]>([])
+  const variantScoresRef = useRef<VariantScore[]>([])
+
+  // Smart Rewrite Pipeline (Phase14-K)
+  const [isSmartRewritePipelineRunning, setIsSmartRewritePipelineRunning] = useState(false)
+  const [smartRewritePipelineStatus, setSmartRewritePipelineStatus] = useState('')
+  const [smartRewritePipelineError, setSmartRewritePipelineError] = useState('')
+  const [lastSmartRewritePipeline, setLastSmartRewritePipeline] = useState<LastSmartRewritePipeline | null>(null)
+
+  // Multi Rewrite Queue (Phase14-L)
+  const [isMultiRewriteQueueRunning, setIsMultiRewriteQueueRunning] = useState(false)
+  const [multiRewriteQueueStatus, setMultiRewriteQueueStatus] = useState('')
+  const [multiRewriteQueueError, setMultiRewriteQueueError] = useState('')
+  const [lastMultiRewriteQueue, setLastMultiRewriteQueue] = useState<LastMultiRewriteQueue | null>(null)
+
+  // AI Reel Factory (Phase15-A / Phase15-B)
+  const [factoryRunning, setFactoryRunning] = useState(false)
+  const [factoryStep, setFactoryStep] = useState('')
+  const [factoryError, setFactoryError] = useState('')
+  const [factoryLog, setFactoryLog] = useState<string[]>([])
+  const [factorySummary, setFactorySummary] = useState<FactorySummary | null>(null)
+  const [factoryHistory, setFactoryHistory] = useState<FactoryHistoryItem[]>([])
+  const [factoryNotice, setFactoryNotice] = useState('')
+
+  // Snapshot Preview (Phase14-N)
+  const [expandedSnapshotIds, setExpandedSnapshotIds] = useState<string[]>([])
+
+  // Snapshot Diff View (Phase14-O)
+  const [expandedDiffIds, setExpandedDiffIds] = useState<string[]>([])
+
+  // AI Rewrite Explain (Phase14-R)
+  const [rewriteExplainResults, setRewriteExplainResults] = useState<Record<string, RewriteExplainResult>>({})
+  const [rewriteExplainLoadingIds, setRewriteExplainLoadingIds] = useState<string[]>([])
+  const [rewriteExplainErrors, setRewriteExplainErrors] = useState<Record<string, string>>({})
 
   // カスタムプリセット (Phase12-P)
   const [customPresets, setCustomPresets] = useState<CustomPreset[]>([])
@@ -301,18 +666,9 @@ export default function App() {
   const [assetsMessage, setAssetsMessage] = useState('')
 
   // テンプレート管理 (Phase11 / Phase11.5-B)
-  const [templateSearch, setTemplateSearch] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState<CategoryId>('all')
   const [recentTemplateIds, setRecentTemplateIds] = useState<string[]>(() => loadRecentIds())
-  const [renameTemplateId, setRenameTemplateId] = useState<string | null>(null)
-  const [renameTemplateName, setRenameTemplateName] = useState('')
-  const [renameTemplateStatus, setRenameTemplateStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const [deleteStatus, setDeleteStatus] = useState<'idle' | 'deleting' | 'error'>('idle')
 
   // テンプレートギャラリー強化 (Phase11.5-F)
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => loadViewMode())
-  const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   const [usageMap, setUsageMap] = useState<Record<string, number>>(() => loadUsage())
 
   const fetchGeneratedAssets = useCallback(async () => {
@@ -434,44 +790,23 @@ export default function App() {
   }, [fetchTemplates])
 
   const deleteTemplate = useCallback(async (id: string) => {
-    setDeleteStatus('deleting')
-    try {
-      const res = await fetch(`/api/templates/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message)
-      if (selectedTemplateId === id) setSelectedTemplateId('')
-      setDeleteConfirmId(null)
-      setDeleteStatus('idle')
-      await fetchTemplates()
-    } catch (_) {
-      setDeleteStatus('error')
-      setTimeout(() => setDeleteStatus('idle'), 3000)
-    }
+    const res = await fetch(`/api/templates/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    const data = await res.json()
+    if (!data.ok) throw new Error(data.message)
+    if (selectedTemplateId === id) setSelectedTemplateId('')
+    await fetchTemplates()
   }, [fetchTemplates, selectedTemplateId])
 
-  const renameTemplate = useCallback(async () => {
-    if (!renameTemplateId || !renameTemplateName.trim()) return
-    setRenameTemplateStatus('saving')
-    try {
-      const res = await fetch(`/api/templates/${encodeURIComponent(renameTemplateId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: renameTemplateName.trim() }),
-      })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message)
-      setRenameTemplateStatus('ok')
-      await fetchTemplates()
-      setTimeout(() => {
-        setRenameTemplateStatus('idle')
-        setRenameTemplateId(null)
-        setRenameTemplateName('')
-      }, 1200)
-    } catch (_) {
-      setRenameTemplateStatus('error')
-      setTimeout(() => setRenameTemplateStatus('idle'), 3000)
-    }
-  }, [renameTemplateId, renameTemplateName, fetchTemplates])
+  const renameTemplate = useCallback(async (id: string, name: string) => {
+    const res = await fetch(`/api/templates/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    const data = await res.json()
+    if (!data.ok) throw new Error(data.message)
+    await fetchTemplates()
+  }, [fetchTemplates])
 
   const handleVariableChange = useCallback((key: string, value: string) => {
     setVariableValues((prev) => {
@@ -916,6 +1251,7 @@ export default function App() {
     setSelectedPresetKey(h.presetKey)
     setWorkflowStep('theme')
     setSnsCaption(h.snsCaption ?? null)
+    setRenderVariantName(h.renderVariantName ?? "")
     if (h.templateId && templates.some((t) => t.id === h.templateId)) {
       confirmLoadTemplate(h.templateId)
       setWorkflowMessage('履歴からテーマとテンプレートを復元しました。')
@@ -925,6 +1261,314 @@ export default function App() {
       setWorkflowMessage('履歴からテーマを復元しました。')
     }
   }, [templates, confirmLoadTemplate])
+
+  const scoreVariants = useCallback(async () => {
+    if (!aiTheme.trim() || generatedVariants.length === 0) return
+    setIsScoringVariants(true)
+    setVariantScoreError('')
+    try {
+      const res = await fetch('/api/score-variants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          theme: aiTheme.trim(),
+          variants: generatedVariants,
+          learningEvents: variantLearningEvents.slice(0, 50),
+        }),
+      })
+      const data = await res.json()
+      if (!data.ok) {
+        setVariantScoreError(data.message ?? 'Failed to score variants')
+        return
+      }
+      const scores: VariantScore[] = data.scores
+      setVariantScores(scores)
+      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
+    } catch {
+      setVariantScoreError('Failed to score variants')
+    } finally {
+      setIsScoringVariants(false)
+    }
+  }, [aiTheme, generatedVariants, variantLearningEvents])
+
+  const recordLearningEvent = useCallback((event: Omit<VariantLearningEvent, 'id' | 'createdAt'>) => {
+    const full: VariantLearningEvent = { ...event, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
+    setVariantLearningEvents((prev) => {
+      const next = [full, ...prev]
+      try { localStorage.setItem(VARIANT_LEARNING_EVENTS_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const clearLearningData = useCallback(() => {
+    setVariantLearningEvents([])
+    try { localStorage.removeItem(VARIANT_LEARNING_EVENTS_KEY) } catch {}
+  }, [])
+
+  const handleExplainRewrite = useCallback(async (item: RenderQueueItem, opts?: { force?: boolean }) => {
+    if (!item.slidesSnapshot || item.slidesSnapshot.length === 0) return
+    if (rewriteExplainLoadingIds.includes(item.id)) return
+    if (!opts?.force && rewriteExplainResults[item.id]) return
+    setRewriteExplainLoadingIds(prev => [...prev, item.id])
+    setRewriteExplainErrors(prev => { const n = { ...prev }; delete n[item.id]; return n })
+    const score = variantScores.find(s => s.variantName === item.variantName)
+    try {
+      const res = await fetch('/api/explain-rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          beforeSlides: slides,
+          afterSlides: item.slidesSnapshot,
+          variantName: item.variantName,
+          score: score ? {
+            recommendation: score.recommendation,
+            predictedViews: score.predictedViews,
+            savePotential: score.savePotential,
+            ctaStrength: score.ctaStrength,
+          } : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setRewriteExplainErrors(prev => ({ ...prev, [item.id]: data.message ?? 'Failed to analyze rewrite.' }))
+        return
+      }
+      setRewriteExplainResults(prev => {
+        const next = { ...prev, [item.id]: data.result }
+        try { localStorage.setItem(REWRITE_EXPLAIN_CACHE_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+    } catch {
+      setRewriteExplainErrors(prev => ({ ...prev, [item.id]: 'Failed to analyze rewrite.' }))
+    } finally {
+      setRewriteExplainLoadingIds(prev => prev.filter(x => x !== item.id))
+    }
+  }, [slides, variantScores, rewriteExplainLoadingIds, rewriteExplainResults])
+
+  const selectBestVariant = useCallback((id: string) => {
+    setBestVariantId(id)
+    try { localStorage.setItem(BEST_VARIANT_KEY, id) } catch {}
+    const item = renderQueue.find((q) => q.id === id)
+    if (item) {
+      const angle = generatedVariants.find((v) => v.name === item.variantName)?.angle ?? 'unknown'
+      recordLearningEvent({ theme: aiTheme, variantName: item.variantName, angle, action: 'selected_best' })
+      if (item.slidesSnapshot && item.slidesSnapshot.length > 0) {
+        setExpandedDiffIds(prev => prev.includes(id) ? prev : [...prev, id])
+        handleExplainRewrite(item)
+      }
+    }
+  }, [renderQueue, generatedVariants, aiTheme, recordLearningEvent, handleExplainRewrite])
+
+  const autoGenerateVariants = useCallback(() => {
+    let added = 0
+    let skipped = 0
+    setRenderQueue((prev) => {
+      const existingNames = new Set(prev.map((q) => q.variantName))
+      const newItems: RenderQueueItem[] = []
+      for (const variantName of AUTO_VARIANT_TEMPLATES) {
+        if (existingNames.has(variantName)) {
+          skipped++
+        } else {
+          newItems.push({ id: crypto.randomUUID(), variantName, status: 'pending' })
+          added++
+        }
+      }
+      const next = [...prev, ...newItems]
+      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+    setTimeout(() => {
+      setAutoGenerateNotice(
+        skipped > 0
+          ? `${added}件追加しました（${skipped}件は既に存在します）`
+          : `${added}件追加しました`
+      )
+      setTimeout(() => setAutoGenerateNotice(''), 4000)
+    }, 0)
+  }, [])
+
+  const addToQueue = useCallback(() => {
+    const item: RenderQueueItem = {
+      id: crypto.randomUUID(),
+      variantName: renderVariantName.trim() || 'Default',
+      status: 'pending',
+    }
+    setRenderQueue((prev) => {
+      const next = [...prev, item]
+      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [renderVariantName])
+
+  const removeFromQueue = useCallback((id: string) => {
+    setRenderQueue((prev) => {
+      const next = prev.filter((q) => q.id !== id)
+      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const clearQueue = useCallback(() => {
+    setRenderQueue((prev) => {
+      const rendering = prev.filter((q) => q.status === 'rendering')
+      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(rendering)) } catch {}
+      return rendering
+    })
+  }, [])
+
+  const toggleSnapshotPreview = useCallback((id: string) => {
+    setExpandedSnapshotIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }, [])
+
+  const toggleDiffView = useCallback((id: string) => {
+    setExpandedDiffIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }, [])
+
+  const generateAIVariants = useCallback(async () => {
+    if (!aiTheme.trim()) return
+    setIsGeneratingVariants(true)
+    setVariantGenerateError('')
+    try {
+      const res = await fetch('/api/variant-generator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: aiTheme.trim() }),
+      })
+      const data = await res.json()
+      if (!data.ok) {
+        setVariantGenerateError(data.message ?? 'Failed to generate variants')
+        return
+      }
+      const variants: GeneratedVariant[] = data.variants
+      setGeneratedVariants(variants)
+      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
+    } catch {
+      setVariantGenerateError('Failed to generate variants')
+    } finally {
+      setIsGeneratingVariants(false)
+    }
+  }, [aiTheme])
+
+  const rewriteStory = useCallback(async (angle: string) => {
+    if (slides.length === 0) return
+    setIsRewritingStory((prev) => ({ ...prev, [angle]: true }))
+    setRewriteStoryError((prev) => ({ ...prev, [angle]: '' }))
+    try {
+      const res = await fetch('/api/rewrite-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          angle,
+          slides: slides.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
+        }),
+      })
+      const data = await res.json()
+      if (!data.ok) {
+        setRewriteStoryError((prev) => ({ ...prev, [angle]: data.message ?? 'Failed to rewrite story' }))
+        return
+      }
+      const rewritten: RewrittenSlide[] = data.slides
+      const merged: Slide[] = slides.map((s, i) => ({
+        ...s,
+        headline: rewritten[i]?.headline ?? s.headline,
+        subline:  rewritten[i]?.subline  ?? s.subline,
+        emphasis: rewritten[i]?.emphasis ?? s.emphasis,
+      }))
+      setRewrittenStories((prev) => {
+        const next = { ...prev, [angle]: merged }
+        try { localStorage.setItem(REWRITTEN_STORIES_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+    } catch {
+      setRewriteStoryError((prev) => ({ ...prev, [angle]: 'Failed to rewrite story' }))
+    } finally {
+      setIsRewritingStory((prev) => ({ ...prev, [angle]: false }))
+    }
+  }, [slides])
+
+  const applyRewrittenStory = useCallback((angle: string) => {
+    const rewritten = rewrittenStories[angle]
+    if (!rewritten) return
+    const merged: Slide[] = slides.map((s, i) => {
+      const r = rewritten[i]
+      if (!r) return s
+      return { ...s, headline: r.headline, subline: r.subline, emphasis: r.emphasis }
+    })
+    setSlides(merged)
+    const variantName = generatedVariants.find((v) => v.angle === angle)?.name ?? angle
+    recordLearningEvent({ theme: aiTheme, variantName, angle, action: 'applied' })
+  }, [rewrittenStories, slides, generatedVariants, aiTheme, recordLearningEvent])
+
+  const addVariantToQueue = useCallback((variantName: string) => {
+    setRenderQueue((prev) => {
+      if (prev.some((q) => q.variantName === variantName)) return prev
+      const next = [...prev, { id: crypto.randomUUID(), variantName, status: 'pending' as const }]
+      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const addAllVariantsToQueue = useCallback(() => {
+    setRenderQueue((prev) => {
+      const existingNames = new Set(prev.map((q) => q.variantName))
+      const newItems = generatedVariants
+        .filter((v) => !existingNames.has(v.name))
+        .map((v) => ({ id: crypto.randomUUID(), variantName: v.name, status: 'pending' as const }))
+      if (newItems.length === 0) return prev
+      const next = [...prev, ...newItems]
+      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [generatedVariants])
+
+  const addSmartQueue = useCallback(() => {
+    const recommended = variantScores.filter((s) => s.recommendation >= 4)
+    if (recommended.length === 0) {
+      setSmartQueueMessage('おすすめ度4以上のVariantがありません')
+      return
+    }
+    const targets = recommended.flatMap((score) => {
+      const v = generatedVariants.find(
+        (v) => v.name === score.variantName || v.angle === score.angle
+      )
+      return v ? [v] : []
+    })
+    const existingNames = new Set(renderQueue.map((q) => q.variantName))
+    const toAdd = targets.filter((v) => !existingNames.has(v.name))
+    const addedCount = toAdd.length
+    const skippedCount = targets.length - addedCount
+    if (addedCount > 0) {
+      setRenderQueue((prev) => {
+        const prevNames = new Set(prev.map((q) => q.variantName))
+        const newItems = toAdd
+          .filter((v) => !prevNames.has(v.name))
+          .map((v) => ({ id: crypto.randomUUID(), variantName: v.name, status: 'pending' as const }))
+        if (newItems.length === 0) return prev
+        const next = [...prev, ...newItems]
+        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+    }
+    if (addedCount === 0) {
+      setSmartQueueMessage(`全${targets.length}件は既にQueueにあります`)
+    } else if (skippedCount > 0) {
+      setSmartQueueMessage(`${addedCount}件追加しました / ${skippedCount}件は既にQueueにあります`)
+    } else {
+      setSmartQueueMessage(`${addedCount}件をSmart Queueに追加しました`)
+    }
+  }, [variantScores, generatedVariants, renderQueue])
+
+  const updateQueueItem = useCallback((id: string, patch: Partial<RenderQueueItem>) => {
+    setRenderQueue((prev) => {
+      const next = prev.map((q) => q.id === id ? { ...q, ...patch } : q)
+      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
 
   const deleteGeneratedAsset = useCallback(async (filename: string) => {
     try {
@@ -964,10 +1608,6 @@ export default function App() {
   }, [fetchTemplates])
 
   useEffect(() => {
-    localStorage.setItem(VIEW_MODE_KEY, viewMode)
-  }, [viewMode])
-
-  useEffect(() => {
     try {
       const raw = localStorage.getItem(AI_GENERATION_HISTORY_KEY)
       if (!raw) return
@@ -983,6 +1623,157 @@ export default function App() {
       const parsed: unknown = JSON.parse(raw)
       if (Array.isArray(parsed)) setCustomPresets(parsed.slice(0, 10))
     } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RENDER_QUEUE_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) setRenderQueue(parsed)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(BEST_VARIANT_KEY)
+      if (raw) setBestVariantId(raw)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAST_PIPELINE_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setLastPipeline(parsed as LastPipeline)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(GENERATED_VARIANTS_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) setGeneratedVariants(parsed as GeneratedVariant[])
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(REWRITTEN_STORIES_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setRewrittenStories(parsed as Record<string, Slide[]>)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(VARIANT_LEARNING_EVENTS_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) setVariantLearningEvents(parsed as VariantLearningEvent[])
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(VARIANT_SCORES_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) setVariantScores(parsed as VariantScore[])
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAST_SMART_PIPELINE_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setLastSmartPipeline(parsed as LastSmartPipeline)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAST_SMART_REWRITE_PIPELINE_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setLastSmartRewritePipeline(parsed as LastSmartRewritePipeline)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAST_MULTI_REWRITE_QUEUE_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setLastMultiRewriteQueue(parsed as LastMultiRewriteQueue)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(BEST_VARIANT_ANALYSIS_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setBestVariantAnalysis(parsed as BestVariantAnalysis)
+      }
+    } catch {}
+  }, [])
+
+  // Rewrite Explain Cache 復元 (Phase14-S)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(REWRITE_EXPLAIN_CACHE_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setRewriteExplainResults(parsed as Record<string, RewriteExplainResult>)
+      }
+    } catch {
+      console.warn('[Phase14-S] rewrite explain cache parse failed')
+    }
+  }, [])
+
+  // Factory Summary Cache 復元 (Phase15-C)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FACTORY_SUMMARY_CACHE_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setFactorySummary(parsed as FactorySummary)
+      }
+    } catch {
+      console.warn('[Phase15-C] factory summary cache parse failed')
+    }
+  }, [])
+
+  // Factory History 復元 (Phase15-E)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FACTORY_HISTORY_KEY)
+      if (!raw) return
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        setFactoryHistory((parsed as FactoryHistoryItem[]).slice(0, 20))
+      }
+    } catch {
+      console.warn('[Phase15-E] factory history parse failed')
+    }
   }, [])
 
   // 自動テンプレ適用 (Phase12-M)
@@ -1118,6 +1909,20 @@ export default function App() {
     setHasUnsavedChanges(true)
   }, [])
 
+  const saveSnapshotToServer = useCallback(async (snapshotSlides: Slide[]): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/slides', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, slides: snapshotSlides, cta: ctaConfig }),
+      })
+      const body = await parseJsonResponse(res)
+      return res.ok && (body as { ok: boolean }).ok
+    } catch {
+      return false
+    }
+  }, [title, ctaConfig])
+
   const saveToServer = useCallback(async (): Promise<boolean> => {
     const data: SlidesData = { title, slides, cta: ctaConfig }
     setSaveStatus('saving')
@@ -1141,6 +1946,995 @@ export default function App() {
       return false
     }
   }, [title, slides, ctaConfig])
+
+  const batchRender = useCallback(async () => {
+    const pending = renderQueue.filter((q) => q.status === 'pending')
+    if (pending.length === 0 || isBatchRendering) return
+
+    setIsBatchRendering(true)
+
+    // For non-snapshot items, save current slides once upfront if needed
+    const hasNonSnapshot = pending.some((q) => !q.slidesSnapshot)
+    if (hasNonSnapshot && hasUnsavedChanges) {
+      setIsPreparingRender(true)
+      const ok = await saveToServer()
+      setIsPreparingRender(false)
+      if (!ok) {
+        setIsBatchRendering(false)
+        return
+      }
+    }
+
+    let snapshotWasUsed = false
+
+    for (const item of pending) {
+      // Save snapshot or restore current slides as needed
+      if (item.slidesSnapshot) {
+        setIsPreparingRender(true)
+        const ok = await saveSnapshotToServer(item.slidesSnapshot)
+        setIsPreparingRender(false)
+        if (!ok) {
+          updateQueueItem(item.id, { status: 'failed' })
+          updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: 'Snapshot save failed' })
+          continue
+        }
+        snapshotWasUsed = true
+      } else if (snapshotWasUsed) {
+        // Restore current editor slides before rendering a non-snapshot item
+        setIsPreparingRender(true)
+        const ok = await saveToServer()
+        setIsPreparingRender(false)
+        if (!ok) {
+          updateQueueItem(item.id, { status: 'failed' })
+          updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: 'Slide save failed' })
+          continue
+        }
+        snapshotWasUsed = false
+      }
+
+      updateQueueItem(item.id, { status: 'rendering' })
+      setRenderVariantName(item.variantName)
+      setRenderError('')
+      setRenderStatus('idle')
+      setRenderStartedAt(Date.now())
+      setElapsedSec(0)
+
+      try {
+        const res = await fetch('/api/render', { method: 'POST' })
+        const data = await parseJsonResponse(res)
+        if (!res.ok) throw new Error((data.message as string) ?? `HTTP ${res.status}`)
+        setRenderStatus('running')
+
+        const result = await new Promise<{ success: boolean; url?: string; error?: string }>((resolve) => {
+          const intId = setInterval(async () => {
+            try {
+              const sr = await fetch('/api/render/status')
+              const sd = await parseJsonResponse(sr)
+              const st = sd.status as string
+              setRenderStatus(st as 'idle' | 'running' | 'completed' | 'failed')
+              if (st === 'completed') {
+                clearInterval(intId)
+                resolve({ success: true, url: sd.downloadUrl as string })
+              } else if (st === 'failed') {
+                clearInterval(intId)
+                resolve({ success: false, error: (sd.error as string) ?? '不明なエラー' })
+              }
+            } catch (err) {
+              clearInterval(intId)
+              resolve({ success: false, error: String(err) })
+            }
+          }, 2000)
+        })
+
+        if (result.success) {
+          if (result.url) setLatestDownloadUrl(result.url)
+          fetchHistory()
+          updateQueueItem(item.id, {
+            status: 'completed',
+            outputPath: result.url,
+            renderedAt: new Date().toISOString(),
+          })
+          updateLatestHistory({
+            renderStatus: 'completed',
+            renderOutputPath: result.url,
+            renderVariantName: item.variantName,
+            renderedAt: new Date().toISOString(),
+          })
+        } else {
+          const errMsg = result.error ?? '不明なエラー'
+          setRenderError(errMsg)
+          updateQueueItem(item.id, { status: 'failed' })
+          updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: errMsg })
+        }
+      } catch (err) {
+        const errMsg = String(err)
+        setRenderError(errMsg)
+        setRenderStatus('failed')
+        updateQueueItem(item.id, { status: 'failed' })
+        updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: errMsg })
+      }
+    }
+
+    // Restore current editor slides to server if snapshots dirtied it
+    if (snapshotWasUsed) {
+      await saveToServer()
+    }
+
+    setIsBatchRendering(false)
+  }, [renderQueue, isBatchRendering, hasUnsavedChanges, saveToServer, saveSnapshotToServer, updateQueueItem, updateLatestHistory, fetchHistory])
+
+  // Keep refs updated so pipelines always read the latest state
+  batchRenderRef.current = batchRender
+  renderQueueRef.current = renderQueue
+  generatedVariantsRef.current = generatedVariants
+  variantScoresRef.current = variantScores
+
+  const handleAutoRenderPipeline = useCallback(async () => {
+    if (isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
+    setIsAutoPipelineRunning(true)
+    setPipelineStatus('Generating variants...')
+    try {
+      autoGenerateVariants()
+      // Wait for React to flush the setRenderQueue update so batchRenderRef picks up new items
+      await new Promise<void>((resolve) => setTimeout(resolve, 200))
+      setPipelineStatus('Rendering variants...')
+      await batchRenderRef.current()
+      setPipelineStatus('Compare dashboard ready')
+      const q = renderQueueRef.current
+      const completedCount = q.filter((item) => item.status === 'completed').length
+      const failedCount = q.filter((item) => item.status === 'failed').length
+      const data: LastPipeline = { completedCount, failedCount, finishedAt: new Date().toISOString() }
+      try { localStorage.setItem(LAST_PIPELINE_KEY, JSON.stringify(data)) } catch {}
+      setLastPipeline(data)
+      setTimeout(() => {
+        compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' })
+      }, 300)
+    } catch {
+      setPipelineStatus('Pipeline failed')
+    } finally {
+      setIsAutoPipelineRunning(false)
+    }
+  }, [isAutoPipelineRunning, isBatchRendering, isPreparingRender, renderStatus, autoGenerateVariants])
+
+  const handleSmartPipeline = useCallback(async () => {
+    if (isSmartPipelineRunning || isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
+    if (!aiTheme.trim()) return
+    setIsSmartPipelineRunning(true)
+    setSmartPipelineError('')
+    try {
+      // Step 1: AI Variant 生成
+      setSmartPipelineStatus('Generating AI variants...')
+      const genRes = await fetch('/api/variant-generator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: aiTheme.trim() }),
+      })
+      const genData = await genRes.json()
+      if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
+      const variants: GeneratedVariant[] = genData.variants
+      setGeneratedVariants(variants)
+      generatedVariantsRef.current = variants
+      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
+
+      // Step 2: AI Score
+      setSmartPipelineStatus('Scoring variants...')
+      const scoreRes = await fetch('/api/score-variants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          theme: aiTheme.trim(),
+          variants,
+          learningEvents: variantLearningEvents.slice(0, 50),
+        }),
+      })
+      const scoreData = await scoreRes.json()
+      if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
+      const scores: VariantScore[] = scoreData.scores
+      setVariantScores(scores)
+      variantScoresRef.current = scores
+      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
+
+      // Step 3: Smart Queue 投入
+      setSmartPipelineStatus('Adding recommended variants to queue...')
+      const recommended = scores.filter((s) => s.recommendation >= 4)
+      const recommendedCount = recommended.length
+      if (recommendedCount === 0) {
+        setSmartPipelineStatus('Compare dashboard ready')
+        setSmartPipelineError('おすすめ度4以上のVariantがありませんでした。Renderをスキップしました。')
+        const data: LastSmartPipeline = {
+          generatedCount: variants.length,
+          recommendedCount: 0,
+          renderedCount: 0,
+          failedCount: 0,
+          finishedAt: new Date().toISOString(),
+        }
+        try { localStorage.setItem(LAST_SMART_PIPELINE_KEY, JSON.stringify(data)) } catch {}
+        setLastSmartPipeline(data)
+        setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
+        return
+      }
+      const targets = recommended.flatMap((score) => {
+        const v = variants.find((v) => v.name === score.variantName || v.angle === score.angle)
+        return v ? [v] : []
+      })
+      setRenderQueue((prev) => {
+        const existingNames = new Set(prev.map((q) => q.variantName))
+        const newItems = targets
+          .filter((v) => !existingNames.has(v.name))
+          .map((v) => ({ id: crypto.randomUUID(), variantName: v.name, status: 'pending' as const }))
+        if (newItems.length === 0) return prev
+        const next = [...prev, ...newItems]
+        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+      // React の flush を待つ
+      await new Promise<void>((resolve) => setTimeout(resolve, 200))
+
+      // Step 4: Batch Render
+      setSmartPipelineStatus('Rendering recommended variants...')
+      await batchRenderRef.current()
+
+      // Step 5: Compare Dashboard
+      setSmartPipelineStatus('Compare dashboard ready')
+      const q = renderQueueRef.current
+      const renderedCount = q.filter((item) => targets.some((t) => t.name === item.variantName) && item.status === 'completed').length
+      const failedCount = q.filter((item) => targets.some((t) => t.name === item.variantName) && item.status === 'failed').length
+      const data: LastSmartPipeline = {
+        generatedCount: variants.length,
+        recommendedCount,
+        renderedCount,
+        failedCount,
+        finishedAt: new Date().toISOString(),
+      }
+      try { localStorage.setItem(LAST_SMART_PIPELINE_KEY, JSON.stringify(data)) } catch {}
+      setLastSmartPipeline(data)
+      setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
+    } catch (err) {
+      setSmartPipelineError(err instanceof Error ? err.message : 'Smart Pipeline failed')
+      setSmartPipelineStatus('Smart Pipeline failed')
+    } finally {
+      setIsSmartPipelineRunning(false)
+    }
+  }, [isSmartPipelineRunning, isAutoPipelineRunning, isBatchRendering, isPreparingRender, renderStatus, aiTheme, variantLearningEvents])
+
+  const handleSmartRewritePipeline = useCallback(async () => {
+    if (isSmartRewritePipelineRunning || isSmartPipelineRunning || isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
+    if (!aiTheme.trim()) return
+    setIsSmartRewritePipelineRunning(true)
+    setSmartRewritePipelineError('')
+    try {
+      // Step 1: AI Variant 生成
+      setSmartRewritePipelineStatus('Generating AI variants...')
+      const genRes = await fetch('/api/variant-generator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: aiTheme.trim() }),
+      })
+      const genData = await genRes.json()
+      if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
+      const variants: GeneratedVariant[] = genData.variants
+      setGeneratedVariants(variants)
+      generatedVariantsRef.current = variants
+      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
+
+      // Step 2: Score
+      setSmartRewritePipelineStatus('Scoring variants...')
+      const scoreRes = await fetch('/api/score-variants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          theme: aiTheme.trim(),
+          variants,
+          learningEvents: variantLearningEvents.slice(0, 50),
+        }),
+      })
+      const scoreData = await scoreRes.json()
+      if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
+      const scores: VariantScore[] = scoreData.scores
+      setVariantScores(scores)
+      variantScoresRef.current = scores
+      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
+
+      // Step 3: Top Variant 選定
+      setSmartRewritePipelineStatus('Selecting top variant...')
+      type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
+      const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
+        const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
+        return v ? [{ ...s, variant: v }] : []
+      })
+      const topScoredVariant = scoredWithVariant
+        .filter((sv) => sv.recommendation >= 4)
+        .sort((a, b) => {
+          if (b.recommendation !== a.recommendation) return b.recommendation - a.recommendation
+          if (b.predictedViews !== a.predictedViews) return b.predictedViews - a.predictedViews
+          return b.savePotential - a.savePotential
+        })[0]
+
+      if (!topScoredVariant) {
+        setSmartRewritePipelineStatus('Smart Rewrite Pipeline complete')
+        setSmartRewritePipelineError('おすすめ度4以上のVariantがありません')
+        const data: LastSmartRewritePipeline = {
+          selectedVariantName: '',
+          selectedAngle: '',
+          recommendation: 0,
+          renderedCount: 0,
+          failedCount: 0,
+          finishedAt: new Date().toISOString(),
+        }
+        try { localStorage.setItem(LAST_SMART_REWRITE_PIPELINE_KEY, JSON.stringify(data)) } catch {}
+        setLastSmartRewritePipeline(data)
+        setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
+        return
+      }
+
+      // Step 4: Rewrite Story
+      setSmartRewritePipelineStatus('Rewriting story for top variant...')
+      const rewriteRes = await fetch('/api/rewrite-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          angle: topScoredVariant.variant.angle,
+          slides: slides.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
+        }),
+      })
+      const rewriteData = await rewriteRes.json()
+      if (!rewriteData.ok) throw new Error(rewriteData.message ?? 'Failed to rewrite story')
+      const rewritten: RewrittenSlide[] = rewriteData.slides
+
+      // Step 5: Apply rewritten story
+      setSmartRewritePipelineStatus('Applying rewritten story...')
+      const mergedSlides: Slide[] = slides.map((s, i) => ({
+        ...s,
+        headline: rewritten[i]?.headline ?? s.headline,
+        subline: rewritten[i]?.subline ?? s.subline,
+        emphasis: rewritten[i]?.emphasis ?? s.emphasis,
+      }))
+      setSlides(mergedSlides)
+      await new Promise<void>((resolve) => setTimeout(resolve, 100))
+
+      // Step 6: Queue投入（slidesSnapshot付き）
+      setSmartRewritePipelineStatus('Adding rewritten variant to queue...')
+      const rewriteVariantName = `${topScoredVariant.variant.name}（Rewrite）`
+      setRenderQueue((prev) => {
+        if (prev.some((q) => q.variantName === rewriteVariantName)) return prev
+        const next = [...prev, {
+          id: crypto.randomUUID(),
+          variantName: rewriteVariantName,
+          status: 'pending' as const,
+          slidesSnapshot: mergedSlides,
+          snapshotCreatedAt: new Date().toISOString(),
+        }]
+        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+      await new Promise<void>((resolve) => setTimeout(resolve, 200))
+
+      // Step 7: Render
+      setSmartRewritePipelineStatus('Rendering...')
+      await batchRenderRef.current()
+
+      // Step 8: Compare Dashboard
+      setSmartRewritePipelineStatus('Smart Rewrite Pipeline complete')
+      const q = renderQueueRef.current
+      const renderedCount = q.filter((item) => item.variantName === rewriteVariantName && item.status === 'completed').length
+      const failedCount = q.filter((item) => item.variantName === rewriteVariantName && item.status === 'failed').length
+      const data: LastSmartRewritePipeline = {
+        selectedVariantName: topScoredVariant.variant.name,
+        selectedAngle: topScoredVariant.variant.angle,
+        recommendation: topScoredVariant.recommendation,
+        renderedCount,
+        failedCount,
+        finishedAt: new Date().toISOString(),
+      }
+      try { localStorage.setItem(LAST_SMART_REWRITE_PIPELINE_KEY, JSON.stringify(data)) } catch {}
+      setLastSmartRewritePipeline(data)
+      setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
+    } catch (err) {
+      setSmartRewritePipelineError(err instanceof Error ? err.message : 'Smart Rewrite Pipeline failed')
+      setSmartRewritePipelineStatus('Smart Rewrite Pipeline failed')
+    } finally {
+      setIsSmartRewritePipelineRunning(false)
+    }
+  }, [isSmartRewritePipelineRunning, isSmartPipelineRunning, isAutoPipelineRunning, isBatchRendering, isPreparingRender, renderStatus, aiTheme, variantLearningEvents, slides])
+
+  const handleMultiRewriteQueue = useCallback(async () => {
+    if (isMultiRewriteQueueRunning || isSmartRewritePipelineRunning || isSmartPipelineRunning || isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
+    if (!aiTheme.trim()) return
+    setIsMultiRewriteQueueRunning(true)
+    setMultiRewriteQueueError('')
+    try {
+      // Step 1: AI Generate
+      setMultiRewriteQueueStatus('Generating AI variants...')
+      const genRes = await fetch('/api/variant-generator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: aiTheme.trim() }),
+      })
+      const genData = await genRes.json()
+      if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
+      const variants: GeneratedVariant[] = genData.variants
+      setGeneratedVariants(variants)
+      generatedVariantsRef.current = variants
+      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
+
+      // Step 2: Score
+      setMultiRewriteQueueStatus('Scoring variants...')
+      const scoreRes = await fetch('/api/score-variants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          theme: aiTheme.trim(),
+          variants,
+          learningEvents: variantLearningEvents.slice(0, 50),
+        }),
+      })
+      const scoreData = await scoreRes.json()
+      if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
+      const scores: VariantScore[] = scoreData.scores
+      setVariantScores(scores)
+      variantScoresRef.current = scores
+      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
+
+      // Step 3: Select Top 3
+      setMultiRewriteQueueStatus('Selecting top variants...')
+      type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
+      const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
+        const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
+        return v ? [{ ...s, variant: v }] : []
+      })
+      const targets = scoredWithVariant
+        .filter((sv) => sv.recommendation >= 4)
+        .sort((a, b) => {
+          if (b.recommendation !== a.recommendation) return b.recommendation - a.recommendation
+          if (b.predictedViews !== a.predictedViews) return b.predictedViews - a.predictedViews
+          return b.savePotential - a.savePotential
+        })
+        .slice(0, 3)
+
+      if (targets.length === 0) {
+        setMultiRewriteQueueStatus('Multi Rewrite Queue complete')
+        setMultiRewriteQueueError('おすすめ度4以上のVariantがありません')
+        const data: LastMultiRewriteQueue = {
+          rewrittenCount: 0,
+          queuedCount: 0,
+          renderedCount: 0,
+          failedCount: 0,
+          selectedVariants: [],
+          finishedAt: new Date().toISOString(),
+        }
+        try { localStorage.setItem(LAST_MULTI_REWRITE_QUEUE_KEY, JSON.stringify(data)) } catch {}
+        setLastMultiRewriteQueue(data)
+        setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
+        return
+      }
+
+      // Step 4: Rewrite each target (直列)
+      setMultiRewriteQueueStatus('Rewriting variants...')
+      const rewriteResults: { target: ScoredWithVariant; rewritten: RewrittenSlide[] }[] = []
+      for (const target of targets) {
+        const rewriteRes = await fetch('/api/rewrite-story', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            angle: target.variant.angle,
+            slides: slides.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
+          }),
+        })
+        const rewriteData = await rewriteRes.json()
+        if (!rewriteData.ok) throw new Error(rewriteData.message ?? `Failed to rewrite story for ${target.variant.name}`)
+        rewriteResults.push({ target, rewritten: rewriteData.slides })
+      }
+
+      // Step 5: Apply first rewrite to editor
+      setMultiRewriteQueueStatus('Applying first rewrite...')
+      const firstRewrite = rewriteResults[0]
+      if (firstRewrite) {
+        const mergedSlides: Slide[] = slides.map((s, i) => ({
+          ...s,
+          headline: firstRewrite.rewritten[i]?.headline ?? s.headline,
+          subline: firstRewrite.rewritten[i]?.subline ?? s.subline,
+          emphasis: firstRewrite.rewritten[i]?.emphasis ?? s.emphasis,
+        }))
+        setSlides(mergedSlides)
+        await new Promise<void>((resolve) => setTimeout(resolve, 100))
+      }
+
+      // Step 6: Queue rewritten variants（各Variant個別slidesSnapshot付き）
+      setMultiRewriteQueueStatus('Queueing rewritten variants...')
+      const rewriteQueueItems = rewriteResults.map((r) => ({
+        variantName: `${r.target.variant.name}（Rewrite）`,
+        snapshotSlides: slides.map((s, i) => ({
+          ...s,
+          headline: r.rewritten[i]?.headline ?? s.headline,
+          subline: r.rewritten[i]?.subline ?? s.subline,
+          emphasis: r.rewritten[i]?.emphasis ?? s.emphasis,
+        })) as Slide[],
+      }))
+      const rewriteVariantNames = rewriteQueueItems.map((r) => r.variantName)
+      setRenderQueue((prev) => {
+        const existingNames = new Set(prev.map((q) => q.variantName))
+        const newItems = rewriteQueueItems
+          .filter(({ variantName }) => !existingNames.has(variantName))
+          .map(({ variantName, snapshotSlides }) => ({
+            id: crypto.randomUUID(),
+            variantName,
+            status: 'pending' as const,
+            slidesSnapshot: snapshotSlides,
+            snapshotCreatedAt: new Date().toISOString(),
+          }))
+        if (newItems.length === 0) return prev
+        const next = [...prev, ...newItems]
+        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+      await new Promise<void>((resolve) => setTimeout(resolve, 200))
+
+      // Step 7: Batch Render
+      setMultiRewriteQueueStatus('Rendering...')
+      await batchRenderRef.current()
+
+      // Step 8: Compare Dashboard
+      setMultiRewriteQueueStatus('Multi Rewrite Queue complete')
+      const q = renderQueueRef.current
+      const renderedCount = q.filter((item) => rewriteVariantNames.includes(item.variantName) && item.status === 'completed').length
+      const failedCount = q.filter((item) => rewriteVariantNames.includes(item.variantName) && item.status === 'failed').length
+      const data: LastMultiRewriteQueue = {
+        rewrittenCount: rewriteResults.length,
+        queuedCount: rewriteVariantNames.length,
+        renderedCount,
+        failedCount,
+        selectedVariants: targets.map((t) => t.variant.name),
+        finishedAt: new Date().toISOString(),
+      }
+      try { localStorage.setItem(LAST_MULTI_REWRITE_QUEUE_KEY, JSON.stringify(data)) } catch {}
+      setLastMultiRewriteQueue(data)
+      setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
+    } catch (err) {
+      setMultiRewriteQueueError(err instanceof Error ? err.message : 'Multi Rewrite Queue failed')
+      setMultiRewriteQueueStatus('Multi Rewrite Queue failed')
+    } finally {
+      setIsMultiRewriteQueueRunning(false)
+    }
+  }, [isMultiRewriteQueueRunning, isSmartRewritePipelineRunning, isSmartPipelineRunning, isAutoPipelineRunning, isBatchRendering, isPreparingRender, renderStatus, aiTheme, variantLearningEvents, slides])
+
+  const findFactoryQueueItem = useCallback((variantName: string) => {
+    return renderQueue.find(
+      (item) =>
+        item.variantName === `${variantName}（Rewrite）` ||
+        item.variantName === variantName
+    )
+  }, [renderQueue])
+
+  const handleJumpToQueueItem = useCallback((variantName: string) => {
+    const item = findFactoryQueueItem(variantName)
+    if (!item) return
+    setExpandedSnapshotIds((prev) =>
+      prev.includes(item.id) ? prev : [...prev, item.id]
+    )
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`render-queue-item-${item.id}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }, [findFactoryQueueItem])
+
+  // ==============================
+  // AI Reel Factory
+  // ==============================
+  const handleRunReelFactory = useCallback(async (overrideTheme?: string) => {
+    const themeForRun = (overrideTheme ?? aiTheme).trim()
+    if (factoryRunning || !themeForRun) {
+      if (!themeForRun) setFactoryError('テーマを入力してください')
+      return
+    }
+    setFactoryRunning(true)
+    setFactoryError('')
+    setFactoryLog([])
+
+    const addLog = (msg: string) => setFactoryLog((prev) => [...prev, msg])
+
+    try {
+      // Step 1: Story Generate
+      setFactoryStep('Step 1/6: Generating story...')
+      addLog('[1/6] Story Generate 開始')
+      const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId)
+      const story = await generateStory(
+        themeForRun,
+        selectedPresetKey,
+        selectedCustomPreset
+          ? {
+              tone: selectedCustomPreset.tone,
+              targetAudience: selectedCustomPreset.targetAudience,
+              platform: selectedCustomPreset.platform,
+              imageStyle: selectedCustomPreset.imageStyle,
+              ctaText: selectedCustomPreset.ctaText,
+            }
+          : null
+      )
+      const storySlides: Slide[] = slides.map((slide, index) => {
+        const generated = story.slides[index]
+        if (!generated) return slide
+        return {
+          ...slide,
+          headline: generated.headline,
+          subline: generated.subline ?? slide.subline,
+          emphasis: generated.emphasis ?? slide.emphasis,
+          imagePrompt: generated.imagePrompt ?? slide.imagePrompt,
+        }
+      })
+      setSlides(storySlides)
+      setHasUnsavedChanges(true)
+      addLog(`[1/6] Story生成完了 (${storySlides.length}スライド)`)
+
+      // Step 2: Variant Generate
+      setFactoryStep('Step 2/6: Generating variants...')
+      addLog('[2/6] Variant Generate 開始')
+      const genRes = await fetch('/api/variant-generator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: themeForRun }),
+      })
+      const genData = await genRes.json()
+      if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
+      const variants: GeneratedVariant[] = genData.variants
+      setGeneratedVariants(variants)
+      generatedVariantsRef.current = variants
+      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
+      addLog(`[2/6] Variant生成完了 (${variants.length}件)`)
+
+      // Step 3: Score Variants
+      setFactoryStep('Step 3/6: Scoring variants...')
+      addLog('[3/6] Score Variants 開始')
+      const scoreRes = await fetch('/api/score-variants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          theme: themeForRun,
+          variants,
+          learningEvents: variantLearningEvents.slice(0, 50),
+        }),
+      })
+      const scoreData = await scoreRes.json()
+      if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
+      const scores: VariantScore[] = scoreData.scores
+      setVariantScores(scores)
+      variantScoresRef.current = scores
+      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
+      addLog(`[3/6] スコア完了 (${scores.length}件)`)
+
+      // Step 4: Select top 3 with recommendation >= 4
+      setFactoryStep('Step 4/6: Selecting top variants...')
+      addLog('[4/6] Top Variant 選定')
+      type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
+      const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
+        const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
+        return v ? [{ ...s, variant: v }] : []
+      })
+      const targets = scoredWithVariant
+        .filter((sv) => sv.recommendation >= 4)
+        .sort((a, b) => {
+          if (b.recommendation !== a.recommendation) return b.recommendation - a.recommendation
+          if (b.predictedViews !== a.predictedViews) return b.predictedViews - a.predictedViews
+          return b.savePotential - a.savePotential
+        })
+        .slice(0, 3)
+
+      if (targets.length === 0) {
+        addLog('[4/6] recommendation >= 4 のVariantが見つかりませんでした')
+        setFactoryStep('Factory complete')
+        setFactoryError('recommendation >= 4 のVariantが見つかりませんでした。Queue投入をスキップしました。')
+        return
+      }
+      addLog(`[4/6] ${targets.length}件 選定 (Recommend: ${targets.map((t) => t.recommendation).join(', ')})`)
+
+      // Step 5: Rewrite each target
+      setFactoryStep('Step 5/6: Rewriting variants...')
+      addLog('[5/6] Rewrite 開始')
+      const queueItems: RenderQueueItem[] = []
+      for (const target of targets) {
+        addLog(`  Rewriting: ${target.variant.name}`)
+        const rewriteRes = await fetch('/api/rewrite-story', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            angle: target.variant.angle,
+            slides: storySlides.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
+          }),
+        })
+        const rewriteData = await rewriteRes.json()
+        if (!rewriteData.ok) throw new Error(rewriteData.message ?? `Failed to rewrite story for ${target.variant.name}`)
+        const rewritten: RewrittenSlide[] = rewriteData.slides
+        const rewrittenSlides: Slide[] = storySlides.map((s, i) => ({
+          ...s,
+          headline: rewritten[i]?.headline ?? s.headline,
+          subline: rewritten[i]?.subline ?? s.subline,
+          emphasis: rewritten[i]?.emphasis ?? s.emphasis,
+        }))
+        queueItems.push({
+          id: crypto.randomUUID(),
+          variantName: `${target.variant.name}（Rewrite）`,
+          status: 'pending',
+          slidesSnapshot: rewrittenSlides,
+          snapshotCreatedAt: new Date().toISOString(),
+        })
+      }
+      addLog(`[5/6] Rewrite完了 (${queueItems.length}件)`)
+
+      // Step 6: Queue
+      setFactoryStep('Step 6/6: Queueing...')
+      addLog('[6/6] Queue投入')
+      let actualQueueAdded = 0
+      setRenderQueue((prev) => {
+        const existingNames = new Set(prev.map((q) => q.variantName))
+        const newItems = queueItems.filter((item) => !existingNames.has(item.variantName))
+        actualQueueAdded = newItems.length
+        if (newItems.length === 0) return prev
+        const next = [...prev, ...newItems]
+        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+      addLog(`[6/6] Queue投入完了 (${actualQueueAdded}件)`)
+
+      // Build Factory Summary (Phase15-B)
+      const sortedTargets = [...targets].sort((a, b) => {
+        if (b.recommendation !== a.recommendation) return b.recommendation - a.recommendation
+        if (b.predictedViews !== a.predictedViews) return b.predictedViews - a.predictedViews
+        return b.savePotential - a.savePotential
+      })
+      const best = sortedTargets[0]
+      const avgRec = scores.reduce((sum, s) => sum + s.recommendation, 0) / scores.length
+      const summary: FactorySummary = {
+        generatedCount: variants.length,
+        selectedCount: targets.length,
+        averageRecommendation: Math.round(avgRec * 10) / 10,
+        bestVariantName: best.variant.name,
+        bestRecommendation: best.recommendation,
+        queueAddedCount: actualQueueAdded,
+        generatedAt: new Date().toISOString(),
+        topVariants: sortedTargets.slice(0, 3).map((t) => ({
+          name: t.variant.name,
+          recommendation: t.recommendation,
+          predictedViews: t.predictedViews,
+          savePotential: t.savePotential,
+          ctaStrength: t.ctaStrength,
+        })),
+      }
+      setFactorySummary(summary)
+      try { localStorage.setItem(FACTORY_SUMMARY_CACHE_KEY, JSON.stringify(summary)) } catch {}
+
+      // Factory History 追加 (Phase15-E)
+      const autoTags = inferFactoryTags(themeForRun)
+      const historyItem: FactoryHistoryItem = {
+        ...summary,
+        id: crypto.randomUUID(),
+        theme: themeForRun,
+        tags: autoTags.length > 0 ? autoTags : undefined,
+      }
+      if (autoTags.length > 0) {
+        addLog(`Auto tags: ${autoTags.join(', ')}`)
+      }
+      setFactoryHistory((prev) => {
+        const next = [historyItem, ...prev].slice(0, 20)
+        try { localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+
+      setFactoryStep('Factory complete')
+      addLog('Factory Run 完了！Render Queueを確認してください。')
+      await new Promise<void>((resolve) => setTimeout(resolve, 300))
+      compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Factory Run failed'
+      setFactoryError(msg)
+      setFactoryStep('Factory failed')
+      addLog(`ERROR: ${msg}`)
+    } finally {
+      setFactoryRunning(false)
+    }
+  }, [factoryRunning, aiTheme, customPresets, selectedCustomPresetId, selectedPresetKey, slides, variantLearningEvents])
+
+  const showFactoryNotice = useCallback((message: string) => {
+    setFactoryNotice(message)
+    window.setTimeout(() => {
+      setFactoryNotice('')
+    }, 3500)
+  }, [])
+
+  const handleReuseFactoryTheme = useCallback((theme: string) => {
+    setAiTheme(theme)
+    showFactoryNotice('テーマを再利用できます。必要に応じて編集してください')
+    requestAnimationFrame(() => {
+      document
+        .getElementById('ai-theme-input')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }, [showFactoryNotice])
+
+  const handleDuplicateFactoryTheme = useCallback((theme: string) => {
+    setAiTheme(`${theme} `)
+    showFactoryNotice('テーマを編集してから Factory Run してください')
+    requestAnimationFrame(() => {
+      const el = document.getElementById('ai-theme-input') as HTMLInputElement | null
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el?.focus()
+      el?.setSelectionRange(el.value.length, el.value.length)
+    })
+  }, [showFactoryNotice])
+
+  const handleRerunFactoryTheme = useCallback(async (theme: string) => {
+    setAiTheme(theme)
+    showFactoryNotice('過去テーマで Factory を再実行します')
+    requestAnimationFrame(() => {
+      document
+        .getElementById('ai-theme-input')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    await handleRunReelFactory(theme)
+  }, [handleRunReelFactory, showFactoryNotice])
+
+  // ==============================
+  // Factory History
+  // ==============================
+  const toggleFactoryHistoryFavorite = useCallback((id: string) => {
+    setFactoryHistory((prev) => {
+      const next = prev.map((item) =>
+        item.id === id ? { ...item, favorite: !item.favorite } : item
+      )
+      try { localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const handleExportFactoryHistory = useCallback(() => {
+    const blob = new Blob([JSON.stringify(factoryHistory, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `bemystyle-reel-factory-history-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [factoryHistory])
+
+  const handleExportFactoryHistoryCsv = useCallback(() => {
+    const headers = [
+      'generatedAt',
+      'theme',
+      'favorite',
+      'bestVariantName',
+      'bestRecommendation',
+      'averageRecommendation',
+      'generatedCount',
+      'selectedCount',
+      'queueAddedCount',
+      'tags',
+      'topVariants',
+    ]
+
+    const rows = factoryHistory.map(item => [
+      item.generatedAt,
+      item.theme,
+      item.favorite ? 'true' : 'false',
+      item.bestVariantName,
+      item.bestRecommendation,
+      item.averageRecommendation,
+      item.generatedCount,
+      item.selectedCount,
+      item.queueAddedCount,
+      (item.tags ?? []).join('|'),
+      item.topVariants.map(v =>
+        `${v.name}:rec${v.recommendation}/views${v.predictedViews ?? ''}/save${v.savePotential ?? ''}/cta${v.ctaStrength ?? ''}`
+      ).join('|'),
+    ])
+
+    const csv = [
+      headers.map(escapeCsvValue).join(','),
+      ...rows.map(row => row.map(escapeCsvValue).join(',')),
+    ].join('\n')
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `bemystyle-reel-factory-history-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [factoryHistory])
+
+  const handleImportFactoryHistory = useCallback((file: File) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result))
+        if (!Array.isArray(parsed)) throw new Error('Invalid history file')
+        const validItems = parsed.filter(isFactoryHistoryItem)
+        if (validItems.length === 0) throw new Error('No valid history items')
+        const next = [...validItems, ...factoryHistory].slice(0, 20)
+        setFactoryHistory(next)
+        localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(next))
+        showFactoryNotice(`${validItems.length}件の履歴をImportしました`)
+      } catch {
+        showFactoryNotice('Factory History の読み込みに失敗しました')
+      }
+    }
+    reader.readAsText(file)
+  }, [factoryHistory, showFactoryNotice])
+
+  const handleDeleteFactoryHistoryItem = useCallback((id: string) => {
+    if (!window.confirm('この履歴を削除しますか？')) return
+    setFactoryHistory((prev) => {
+      const next = prev.filter((item) => item.id !== id)
+      try { localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const handleClearFactoryHistory = useCallback(() => {
+    setFactoryHistory([])
+    localStorage.removeItem(FACTORY_HISTORY_KEY)
+  }, [])
+
+  const handleFactoryHistoryUpdate = useCallback((items: FactoryHistoryItem[]) => {
+    setFactoryHistory(items)
+    try { localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(items)) } catch {}
+  }, [])
+
+  const analyzeBestVariant = useCallback(async () => {
+    if (!bestVariantId || isAnalyzingBestVariant) return
+    const bestQueueItem = renderQueue.find((q) => q.id === bestVariantId)
+    if (!bestQueueItem) return
+    const variant = generatedVariants.find((v) => v.name === bestQueueItem.variantName)
+    const score = variantScores.find(
+      (s) => s.variantName === bestQueueItem.variantName || (variant && s.angle === variant.angle)
+    )
+    setIsAnalyzingBestVariant(true)
+    setBestVariantAnalysisError('')
+    try {
+      const res = await fetch('/api/analyze-best-variant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          theme: aiTheme.trim(),
+          bestVariant: { name: bestQueueItem.variantName, angle: variant?.angle ?? 'unknown' },
+          score: score
+            ? {
+                recommendation: score.recommendation,
+                predictedViews: score.predictedViews,
+                savePotential: score.savePotential,
+                ctaStrength: score.ctaStrength,
+              }
+            : null,
+          learningSummary: {
+            topAngles: (() => {
+              const counts: Record<string, number> = {}
+              for (const e of variantLearningEvents) {
+                if (e.angle && e.angle !== 'unknown') counts[e.angle] = (counts[e.angle] ?? 0) + 1
+              }
+              return Object.entries(counts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5)
+                .map(([angle, count]) => ({ angle, count }))
+            })(),
+          },
+        }),
+      })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.message ?? 'Failed to analyze best variant')
+      const analysis: BestVariantAnalysis = data.analysis
+      setBestVariantAnalysis(analysis)
+      try { localStorage.setItem(BEST_VARIANT_ANALYSIS_KEY, JSON.stringify(analysis)) } catch {}
+    } catch (err) {
+      setBestVariantAnalysisError(err instanceof Error ? err.message : 'Failed to analyze best variant')
+    } finally {
+      setIsAnalyzingBestVariant(false)
+    }
+  }, [bestVariantId, isAnalyzingBestVariant, renderQueue, generatedVariants, variantScores, aiTheme, variantLearningEvents])
+
+  // AUTO_ANALYZE_ON_BEST_SELECT hook (MVP: OFF)
+  useEffect(() => {
+    if (!AUTO_ANALYZE_ON_BEST_SELECT) return
+    if (bestVariantId) analyzeBestVariant()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bestVariantId])
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -1168,7 +2962,12 @@ export default function App() {
             fetchHistory()
             const url = data.downloadUrl as string
             if (url) setLatestDownloadUrl(url)
-            updateLatestHistory({ renderStatus: 'completed', renderOutputPath: url ?? undefined })
+            updateLatestHistory({
+              renderStatus: 'completed',
+              renderOutputPath: url ?? undefined,
+              renderVariantName: renderVariantName.trim() || 'Default',
+              renderedAt: new Date().toISOString(),
+            })
           }
         }
       } catch (err) {
@@ -1179,7 +2978,7 @@ export default function App() {
         updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: errMsg })
       }
     }, 2000)
-  }, [stopPolling, fetchHistory, updateLatestHistory])
+  }, [stopPolling, fetchHistory, updateLatestHistory, renderVariantName])
 
   useEffect(() => {
     const active = isPreparingRender || renderStatus === 'running'
@@ -1371,48 +3170,6 @@ export default function App() {
     setTimeout(() => setSaved(false), 2500)
   }, [title, slides, ctaConfig])
 
-  const recentTemplates = recentTemplateIds
-    .map((id) => templates.find((t) => t.id === id))
-    .filter((t): t is TemplateInfo => t !== undefined)
-
-  const filteredTemplates = templates
-    .filter((t) => {
-      const catMatch = selectedCategory === 'all' || (t.category ?? 'other') === selectedCategory
-      const searchMatch = !templateSearch || t.name.toLowerCase().includes(templateSearch.toLowerCase())
-      return catMatch && searchMatch
-    })
-    .sort((a, b) => {
-      switch (sortOrder) {
-        case 'name':
-          return a.name.localeCompare(b.name, 'ja')
-        case 'favorite':
-          if (a.favorite && !b.favorite) return -1
-          if (!a.favorite && b.favorite) return 1
-          return 0
-        case 'category':
-          return (a.category ?? 'other').localeCompare(b.category ?? 'other')
-        default:
-          return 0
-      }
-    })
-
-  const categoryCounts: Record<string, number> = { all: templates.length }
-  for (const t of templates) {
-    const cat = t.category ?? 'other'
-    categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1
-  }
-
-  const templateStats = {
-    total: templates.length,
-    favorites: templates.filter((t) => t.favorite).length,
-    categoryCount: new Set(templates.map((t) => t.category ?? 'other')).size,
-  }
-
-  const popularTemplates = [...templates]
-    .filter((t) => (usageMap[t.id] ?? 0) > 0)
-    .sort((a, b) => (usageMap[b.id] ?? 0) - (usageMap[a.id] ?? 0))
-    .slice(0, 3)
-
   const sortedCustomPresets = useMemo(() => {
     return [...customPresets].sort((a, b) => {
       if (a.isFavorite && !b.isFavorite) return -1
@@ -1517,7 +3274,48 @@ export default function App() {
     return { checks, canRender: slides.length > 0 }
   }, [slides, hasUnsavedChanges])
 
+  const variantLearningSummary = useMemo(() => {
+    const totalEvents = variantLearningEvents.length
+    const appliedCount = variantLearningEvents.filter((e) => e.action === 'applied').length
+    const selectedBestCount = variantLearningEvents.filter((e) => e.action === 'selected_best').length
+
+    const angleCounts: Record<string, number> = {}
+    for (const e of variantLearningEvents) {
+      if (e.angle !== 'unknown') angleCounts[e.angle] = (angleCounts[e.angle] ?? 0) + 1
+    }
+    const topAngles = Object.entries(angleCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([angle, count]) => ({ angle, count }))
+
+    const variantCounts: Record<string, number> = {}
+    for (const e of variantLearningEvents) {
+      variantCounts[e.variantName] = (variantCounts[e.variantName] ?? 0) + 1
+    }
+    const topVariantNames = Object.entries(variantCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }))
+
+    const recentEvents = variantLearningEvents.slice(0, 5)
+
+    return { totalEvents, appliedCount, selectedBestCount, topAngles, topVariantNames, recentEvents }
+  }, [variantLearningEvents])
+
   const isRendering = isPreparingRender || renderStatus === 'running'
+
+  const completedVariants = useMemo(
+    () =>
+      [...renderQueue]
+        .filter((q) => q.status === 'completed')
+        .sort((a, b) => {
+          const ta = a.renderedAt ? new Date(a.renderedAt).getTime() : 0
+          const tb = b.renderedAt ? new Date(b.renderedAt).getTime() : 0
+          return tb - ta
+        }),
+    [renderQueue]
+  )
+
 
   const renderStepInfo = isPreparingRender
     ? { step: 1, total: 3, label: '保存中' }
@@ -1567,9 +3365,48 @@ export default function App() {
       ? 'render-status-msg render-status-msg--warning'
       : 'render-status-msg'
 
-  const deleteTargetName = deleteConfirmId
-    ? (templates.find((t) => t.id === deleteConfirmId)?.name ?? deleteConfirmId)
-    : ''
+  const pipelineStep =
+    pipelineStatus === 'Generating variants...' ? 1 :
+    pipelineStatus === 'Rendering variants...' ? 2 :
+    pipelineStatus === 'Compare dashboard ready' ? 3 : 0
+
+  const isPipelineDisabled = isAutoPipelineRunning || isBatchRendering || isRendering || isSmartPipelineRunning || isSmartRewritePipelineRunning || isMultiRewriteQueueRunning || factoryRunning
+
+  const factoryStepNum =
+    factoryStep === 'Step 1/6: Generating story...' ? 1 :
+    factoryStep === 'Step 2/6: Generating variants...' ? 2 :
+    factoryStep === 'Step 3/6: Scoring variants...' ? 3 :
+    factoryStep === 'Step 4/6: Selecting top variants...' ? 4 :
+    factoryStep === 'Step 5/6: Rewriting variants...' ? 5 :
+    factoryStep === 'Step 6/6: Queueing...' ? 6 :
+    factoryStep === 'Factory complete' ? 7 : 0
+
+  const multiRewriteQueueStep =
+    multiRewriteQueueStatus === 'Generating AI variants...' ? 1 :
+    multiRewriteQueueStatus === 'Scoring variants...' ? 2 :
+    multiRewriteQueueStatus === 'Selecting top variants...' ? 3 :
+    multiRewriteQueueStatus === 'Rewriting variants...' ? 4 :
+    multiRewriteQueueStatus === 'Applying first rewrite...' ? 5 :
+    multiRewriteQueueStatus === 'Queueing rewritten variants...' ? 6 :
+    multiRewriteQueueStatus === 'Rendering...' ? 7 :
+    multiRewriteQueueStatus === 'Multi Rewrite Queue complete' ? 8 : 0
+
+  const smartRewritePipelineStep =
+    smartRewritePipelineStatus === 'Generating AI variants...' ? 1 :
+    smartRewritePipelineStatus === 'Scoring variants...' ? 2 :
+    smartRewritePipelineStatus === 'Selecting top variant...' ? 3 :
+    smartRewritePipelineStatus === 'Rewriting story for top variant...' ? 4 :
+    smartRewritePipelineStatus === 'Applying rewritten story...' ? 5 :
+    smartRewritePipelineStatus === 'Adding rewritten variant to queue...' ? 6 :
+    smartRewritePipelineStatus === 'Rendering...' ? 7 :
+    smartRewritePipelineStatus === 'Smart Rewrite Pipeline complete' ? 8 : 0
+
+  const smartPipelineStep =
+    smartPipelineStatus === 'Generating AI variants...' ? 1 :
+    smartPipelineStatus === 'Scoring variants...' ? 2 :
+    smartPipelineStatus === 'Adding recommended variants to queue...' ? 3 :
+    smartPipelineStatus === 'Rendering recommended variants...' ? 4 :
+    smartPipelineStatus === 'Compare dashboard ready' ? 5 : 0
 
   if (loading) {
     return (
@@ -1659,72 +3496,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ── 名前変更モーダル ── */}
-      {renameTemplateId && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <p className="modal-title">テンプレート名を変更</p>
-            <input
-              className="modal-input"
-              type="text"
-              placeholder="新しいテンプレート名"
-              value={renameTemplateName}
-              onChange={(e) => setRenameTemplateName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && renameTemplate()}
-              autoFocus
-            />
-            {renameTemplateStatus === 'error' && (
-              <p className="save-error">名前変更に失敗しました</p>
-            )}
-            <div className="modal-actions">
-              <button
-                className="btn-modal-cancel"
-                onClick={() => { setRenameTemplateId(null); setRenameTemplateName(''); setRenameTemplateStatus('idle') }}
-                disabled={renameTemplateStatus === 'saving'}
-              >
-                キャンセル
-              </button>
-              <button
-                className="btn-modal-ok"
-                onClick={renameTemplate}
-                disabled={!renameTemplateName.trim() || renameTemplateStatus === 'saving'}
-              >
-                {renameTemplateStatus === 'saving' ? '保存中...' : renameTemplateStatus === 'ok' ? '✓ 完了' : '保存'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── 削除確認ダイアログ ── */}
-      {deleteConfirmId && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <p className="modal-title">テンプレートを削除しますか？</p>
-            <p className="modal-body">「{deleteTargetName}」を削除します。この操作は取り消せません。</p>
-            {deleteStatus === 'error' && (
-              <p className="save-error">削除に失敗しました</p>
-            )}
-            <div className="modal-actions">
-              <button
-                className="btn-modal-cancel"
-                onClick={() => { setDeleteConfirmId(null); setDeleteStatus('idle') }}
-                disabled={deleteStatus === 'deleting'}
-              >
-                キャンセル
-              </button>
-              <button
-                className="btn-modal-delete"
-                onClick={() => deleteTemplate(deleteConfirmId)}
-                disabled={deleteStatus === 'deleting'}
-              >
-                {deleteStatus === 'deleting' ? '削除中...' : '削除する'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── 左パネル: スライド一覧 ── */}
       <div className="panel panel-left">
         <div className="panel-header">
@@ -1737,182 +3508,18 @@ export default function App() {
 
         {/* テンプレートセクション */}
         <div className="template-section">
-          <div className="template-header-row">
-            <p className="template-label">テンプレート</p>
-            <input
-              className="template-search"
-              type="text"
-              placeholder="検索..."
-              value={templateSearch}
-              onChange={(e) => setTemplateSearch(e.target.value)}
-            />
-            <div className="template-view-toggle">
-              <button
-                className={`template-view-btn${viewMode === 'grid' ? ' template-view-btn--active' : ''}`}
-                onClick={() => setViewMode('grid')}
-                title="グリッド表示"
-              >⊞</button>
-              <button
-                className={`template-view-btn${viewMode === 'list' ? ' template-view-btn--active' : ''}`}
-                onClick={() => setViewMode('list')}
-                title="リスト表示"
-              >☰</button>
-            </div>
-          </div>
-          {templates.length > 0 && (
-            <div className="template-stats">
-              <span>テンプレート数 <strong>{templateStats.total}</strong></span>
-              <span>お気に入り <strong>{templateStats.favorites}</strong></span>
-              <span>カテゴリ数 <strong>{templateStats.categoryCount}</strong></span>
-            </div>
-          )}
-          {recentTemplates.length > 0 && (
-            <div className="template-recent">
-              <p className="template-recent-label">最近使った</p>
-              <div className="template-recent-list">
-                {recentTemplates.map((t) => (
-                  <button
-                    key={t.id}
-                    className={`template-recent-btn${t.id === selectedTemplateId ? ' template-recent-btn--active' : ''}`}
-                    onClick={() => !isRendering && confirmLoadTemplate(t.id)}
-                    disabled={isRendering}
-                    title={t.name}
-                  >
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {popularTemplates.length > 0 && (
-            <div className="template-popular">
-              <p className="template-popular-label">人気テンプレ</p>
-              <div className="template-popular-list">
-                {popularTemplates.map((t, i) => (
-                  <button
-                    key={t.id}
-                    className="template-popular-item"
-                    onClick={() => !isRendering && confirmLoadTemplate(t.id)}
-                    disabled={isRendering}
-                  >
-                    <span className="template-popular-rank">{i + 1}位</span>
-                    <span className="template-popular-name">{t.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="template-sort-row">
-            <select
-              className="template-sort-select"
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as SortOrder)}
-            >
-              <option value="newest">最新</option>
-              <option value="name">名前順</option>
-              <option value="favorite">お気に入り優先</option>
-              <option value="category">カテゴリ順</option>
-            </select>
-          </div>
-          <div className="template-category-filter">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                className={`template-cat-btn${selectedCategory === cat.id ? ' template-cat-btn--active' : ''}`}
-                onClick={() => setSelectedCategory(cat.id)}
-              >
-                {cat.label}({categoryCounts[cat.id] ?? 0})
-              </button>
-            ))}
-          </div>
-          <div className={`template-list${viewMode === 'list' ? ' template-list--list' : ''}`}>
-            {filteredTemplates.map((t) => {
-              const isCustom = t.id.startsWith('custom-')
-              const isLoaded = t.id === selectedTemplateId
-              const hasMeta = !!(t.description || (t.variables && t.variables.length > 0))
-              return (
-                <div key={t.id} className={`template-card${isLoaded ? ' template-card--active' : ''}`}>
-                  <button
-                    className="template-card-thumb-btn"
-                    onClick={() => !isRendering && confirmLoadTemplate(t.id)}
-                    disabled={isRendering}
-                    title={`${t.name} を読み込む`}
-                  >
-                    {t.thumbnail ? (
-                      <img src={t.thumbnail} alt={t.name} className="template-card-img" />
-                    ) : (
-                      <div className="template-card-no-img">No Image</div>
-                    )}
-                  </button>
-                  <div className="template-card-body">
-                    <div className="template-item-row">
-                      <button
-                        className={`template-fav-btn${t.favorite ? ' template-fav-btn--active' : ''}`}
-                        onClick={() => toggleFavorite(t.id, !!t.favorite)}
-                        disabled={isRendering}
-                        title="お気に入り"
-                      >
-                        {t.favorite ? '★' : '☆'}
-                      </button>
-                      <button
-                        className="template-name-btn"
-                        onClick={() => !isRendering && confirmLoadTemplate(t.id)}
-                        disabled={isRendering}
-                        title={t.name}
-                      >
-                        {t.name}
-                      </button>
-                      <button
-                        className="template-action-btn"
-                        onClick={() => duplicateTemplate(t.id)}
-                        disabled={isRendering}
-                        title="複製"
-                      >
-                        複製
-                      </button>
-                      {isCustom && (
-                        <>
-                          <button
-                            className="template-action-btn"
-                            onClick={() => {
-                              setRenameTemplateId(t.id)
-                              setRenameTemplateName(t.name)
-                              setRenameTemplateStatus('idle')
-                            }}
-                            disabled={isRendering}
-                            title="名前変更"
-                          >
-                            ✏
-                          </button>
-                          <button
-                            className="template-action-btn template-action-btn--danger"
-                            onClick={() => setDeleteConfirmId(t.id)}
-                            disabled={isRendering}
-                            title="削除"
-                          >
-                            削除
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    {hasMeta && (
-                      <div className="template-card-meta">
-                        {t.description && (
-                          <p className="template-item-desc">{t.description}</p>
-                        )}
-                        {t.variables && t.variables.length > 0 && (
-                          <p className="template-item-vars">変数: {t.variables.join(', ')}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-            {filteredTemplates.length === 0 && (
-              <p className="template-empty">テンプレートが見つかりません</p>
-            )}
-          </div>
+          <TemplateGalleryPanel
+            templates={templates}
+            selectedTemplateId={selectedTemplateId}
+            isRendering={isRendering}
+            recentTemplateIds={recentTemplateIds}
+            usageMap={usageMap}
+            onConfirmLoadTemplate={confirmLoadTemplate}
+            onDuplicateTemplate={duplicateTemplate}
+            onToggleFavorite={toggleFavorite}
+            onDeleteTemplate={deleteTemplate}
+            onRenameTemplate={renameTemplate}
+          />
           {templateHints && (
             <div className="template-hints">
               <span>推奨</span>
@@ -2427,6 +4034,7 @@ export default function App() {
               <p className="ai-generator-label" style={{ marginTop: 10 }}>テーマ入力</p>
               <div className="ai-generator-row">
                 <input
+                  id="ai-theme-input"
                   className="ai-generator-input"
                   type="text"
                   placeholder="テーマを入力..."
@@ -2687,6 +4295,14 @@ export default function App() {
                         <span className="ai-gen-history-sns-badge">SNS文あり</span>
                       )}
                     </div>
+                    {(h.renderVariantName || h.renderedAt) && (
+                      <div className="ai-gen-history-variant">
+                        <span>Variant: {h.renderVariantName ?? 'Default'}</span>
+                        {h.renderedAt && (
+                          <span>Rendered: {new Date(h.renderedAt).toLocaleString()}</span>
+                        )}
+                      </div>
+                    )}
                     {h.renderErrorMessage && (
                       <p className="ai-gen-history-render-error">{h.renderErrorMessage}</p>
                     )}
@@ -2799,6 +4415,18 @@ export default function App() {
           )}
 
           <div className="render-area">
+            <div className="render-variant-row">
+              <label className="render-variant-label" htmlFor="render-variant-input">Variant Name</label>
+              <input
+                id="render-variant-input"
+                className="render-variant-input"
+                type="text"
+                placeholder="例：CTA強め版 / Instagram版 / YouTube版"
+                value={renderVariantName}
+                onChange={(e) => setRenderVariantName(e.target.value)}
+                disabled={isRendering}
+              />
+            </div>
             <div className="render-precheck">
               {renderPrecheck.checks.map((c, i) => (
                 <p key={i} className={`render-precheck-item${c.ok ? '' : ' render-precheck-item--warn'}`}>
@@ -2828,7 +4456,7 @@ export default function App() {
             <button
               className={`btn-render ${isRendering ? 'btn-render--running' : renderStatus === 'completed' ? 'btn-render--ok' : renderStatus === 'failed' ? 'btn-render--error' : ''}`}
               onClick={startRender}
-              disabled={isRendering || !renderPrecheck.canRender}
+              disabled={isRendering || isBatchRendering || !renderPrecheck.canRender}
             >
               {renderBtnLabel}
             </button>
@@ -2952,6 +4580,547 @@ export default function App() {
                   {isGeneratingSnsCaption ? '⏳ 生成中...' : '再生成'}
                 </button>
               </div>
+            )}
+
+            {/* 🏭 AI Reel Factory (Phase16-L) */}
+            <FactoryPanel
+              factoryRunning={factoryRunning}
+              factoryStep={factoryStep}
+              factoryStepNum={factoryStepNum}
+              factoryError={factoryError}
+              factoryLog={factoryLog}
+              factoryNotice={factoryNotice}
+              isPipelineDisabled={isPipelineDisabled || !aiTheme.trim()}
+              onRunFactory={() => handleRunReelFactory()}
+              factorySummary={factorySummary}
+              findFactoryQueueItem={findFactoryQueueItem}
+              onClearSummary={() => {
+                setFactorySummary(null)
+                localStorage.removeItem(FACTORY_SUMMARY_CACHE_KEY)
+              }}
+              onJumpToQueueItem={handleJumpToQueueItem}
+              factoryHistory={factoryHistory}
+              maxThemeLength={MAX_HISTORY_THEME_LENGTH}
+              quickTags={FACTORY_QUICK_TAGS}
+              onHistoryUpdate={handleFactoryHistoryUpdate}
+              onToggleFavorite={toggleFactoryHistoryFavorite}
+              onReuseTheme={handleReuseFactoryTheme}
+              onDuplicateTheme={handleDuplicateFactoryTheme}
+              onRerunFactory={handleRerunFactoryTheme}
+              onDelete={handleDeleteFactoryHistoryItem}
+              onExportJson={handleExportFactoryHistory}
+              onExportCsv={handleExportFactoryHistoryCsv}
+              onImportFile={handleImportFactoryHistory}
+              onClearHistory={handleClearFactoryHistory}
+            />
+
+            {/* Render Queue (Phase13-H/K / Phase14-C) */}
+            <div className="render-queue-section">
+              {/* 🚀 Auto Render Pipeline (Phase14-C) */}
+              <button
+                className="btn-auto-pipeline"
+                onClick={handleAutoRenderPipeline}
+                disabled={isPipelineDisabled || !aiTheme.trim()}
+              >
+                {isAutoPipelineRunning ? '🚀 Pipeline Running...' : '🚀 Auto Render Pipeline'}
+              </button>
+
+              {/* 🧠⚡ Smart Pipeline (Phase14-I) */}
+              <button
+                className="btn-smart-pipeline"
+                onClick={handleSmartPipeline}
+                disabled={isPipelineDisabled || !aiTheme.trim()}
+              >
+                {isSmartPipelineRunning ? '🧠⚡ Smart Pipeline Running...' : '🧠⚡ Smart Pipeline'}
+              </button>
+
+              {/* Smart Pipeline Progress Card */}
+              {isSmartPipelineRunning && (
+                <div className="smart-pipeline-card smart-pipeline-card--running">
+                  <p className="smart-pipeline-card-title">🧠⚡ Smart Pipeline Running</p>
+                  <div className="smart-pipeline-steps">
+                    {[
+                      { num: 1, label: 'AI Generate' },
+                      { num: 2, label: 'Score' },
+                      { num: 3, label: 'Smart Queue' },
+                      { num: 4, label: 'Render' },
+                      { num: 5, label: 'Compare' },
+                    ].map(({ num, label }) => (
+                      <div key={num} className={`smart-pipeline-step${smartPipelineStep >= num ? ' smart-pipeline-step--active' : ''}`}>
+                        <span className="smart-pipeline-step-num">Step {num}/5</span>
+                        <span className="smart-pipeline-step-label">{label}</span>
+                        {smartPipelineStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
+                        {smartPipelineStep > num && <span className="smart-pipeline-step-done">✅</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="smart-pipeline-status-text">{smartPipelineStatus}</p>
+                </div>
+              )}
+
+              {/* Smart Pipeline Complete Card */}
+              {!isSmartPipelineRunning && smartPipelineStatus === 'Compare dashboard ready' && lastSmartPipeline && (
+                <div className="smart-pipeline-card smart-pipeline-card--complete">
+                  <p className="smart-pipeline-card-title">✅ Smart Pipeline Complete</p>
+                  <div className="smart-pipeline-stats">
+                    <span>Generated: <strong>{lastSmartPipeline.generatedCount}</strong></span>
+                    <span>Recommended: <strong>{lastSmartPipeline.recommendedCount}</strong></span>
+                    <span>Rendered: <strong>{lastSmartPipeline.renderedCount}</strong></span>
+                    {lastSmartPipeline.failedCount > 0 && (
+                      <span className="smart-pipeline-stat--fail">Failed: <strong>{lastSmartPipeline.failedCount}</strong></span>
+                    )}
+                  </div>
+                  {smartPipelineError && <p className="smart-pipeline-notice">{smartPipelineError}</p>}
+                </div>
+              )}
+
+              {/* Smart Pipeline Failed Card */}
+              {!isSmartPipelineRunning && smartPipelineStatus === 'Smart Pipeline failed' && (
+                <div className="smart-pipeline-card smart-pipeline-card--failed">
+                  <p className="smart-pipeline-card-title">❌ Smart Pipeline Failed</p>
+                  <p className="smart-pipeline-error-text">{smartPipelineError}</p>
+                </div>
+              )}
+
+              {/* 🪄⚡ Smart Rewrite Pipeline (Phase14-K) */}
+              <button
+                className="btn-smart-pipeline"
+                onClick={handleSmartRewritePipeline}
+                disabled={isPipelineDisabled || !aiTheme.trim()}
+              >
+                {isSmartRewritePipelineRunning ? '🪄⚡ Smart Rewrite Pipeline Running...' : '🪄⚡ Smart Rewrite Pipeline'}
+              </button>
+
+              {/* Smart Rewrite Pipeline Progress Card */}
+              {isSmartRewritePipelineRunning && (
+                <div className="smart-pipeline-card smart-pipeline-card--running">
+                  <p className="smart-pipeline-card-title">🪄⚡ Smart Rewrite Pipeline Running</p>
+                  <div className="smart-pipeline-steps">
+                    {[
+                      { num: 1, label: 'AI Generate' },
+                      { num: 2, label: 'Score' },
+                      { num: 3, label: 'Select Top Variant' },
+                      { num: 4, label: 'Rewrite Story' },
+                      { num: 5, label: 'Apply Story' },
+                      { num: 6, label: 'Queue' },
+                      { num: 7, label: 'Render' },
+                      { num: 8, label: 'Compare' },
+                    ].map(({ num, label }) => (
+                      <div key={num} className={`smart-pipeline-step${smartRewritePipelineStep >= num ? ' smart-pipeline-step--active' : ''}`}>
+                        <span className="smart-pipeline-step-num">Step {num}/8</span>
+                        <span className="smart-pipeline-step-label">{label}</span>
+                        {smartRewritePipelineStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
+                        {smartRewritePipelineStep > num && <span className="smart-pipeline-step-done">✅</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="smart-pipeline-status-text">{smartRewritePipelineStatus}</p>
+                </div>
+              )}
+
+              {/* Smart Rewrite Pipeline Complete Card */}
+              {!isSmartRewritePipelineRunning && smartRewritePipelineStatus === 'Smart Rewrite Pipeline complete' && lastSmartRewritePipeline && (
+                <div className="smart-pipeline-card smart-pipeline-card--complete">
+                  <p className="smart-pipeline-card-title">✅ Smart Rewrite Pipeline Complete</p>
+                  <div className="smart-pipeline-stats">
+                    {lastSmartRewritePipeline.selectedVariantName ? (
+                      <>
+                        <span>Selected: <strong>{lastSmartRewritePipeline.selectedVariantName}</strong></span>
+                        <span>Recommendation: <strong>{lastSmartRewritePipeline.recommendation}/5</strong></span>
+                        <span>Rendered: <strong>{lastSmartRewritePipeline.renderedCount}</strong></span>
+                        {lastSmartRewritePipeline.failedCount > 0 && (
+                          <span className="smart-pipeline-stat--fail">Failed: <strong>{lastSmartRewritePipeline.failedCount}</strong></span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="smart-pipeline-notice">{smartRewritePipelineError}</span>
+                    )}
+                  </div>
+                  {smartRewritePipelineError && lastSmartRewritePipeline.selectedVariantName && (
+                    <p className="smart-pipeline-notice">{smartRewritePipelineError}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Smart Rewrite Pipeline Failed Card */}
+              {!isSmartRewritePipelineRunning && smartRewritePipelineStatus === 'Smart Rewrite Pipeline failed' && (
+                <div className="smart-pipeline-card smart-pipeline-card--failed">
+                  <p className="smart-pipeline-card-title">❌ Smart Rewrite Pipeline Failed</p>
+                  <p className="smart-pipeline-error-text">{smartRewritePipelineError}</p>
+                </div>
+              )}
+
+              {/* 🪄🧩 Multi Rewrite Queue (Phase14-L) */}
+              <button
+                className="btn-smart-pipeline"
+                onClick={handleMultiRewriteQueue}
+                disabled={isPipelineDisabled || !aiTheme.trim()}
+              >
+                {isMultiRewriteQueueRunning ? '🪄🧩 Multi Rewrite Queue Running...' : '🪄🧩 Multi Rewrite Queue'}
+              </button>
+
+              {/* Multi Rewrite Queue Progress Card */}
+              {isMultiRewriteQueueRunning && (
+                <div className="smart-pipeline-card smart-pipeline-card--running">
+                  <p className="smart-pipeline-card-title">🪄🧩 Multi Rewrite Queue Running</p>
+                  <div className="smart-pipeline-steps">
+                    {[
+                      { num: 1, label: 'AI Generate' },
+                      { num: 2, label: 'Score' },
+                      { num: 3, label: 'Select Top 3' },
+                      { num: 4, label: 'Rewrite Variants' },
+                      { num: 5, label: 'Apply First Rewrite' },
+                      { num: 6, label: 'Queue Rewritten Variants' },
+                      { num: 7, label: 'Render' },
+                      { num: 8, label: 'Compare' },
+                    ].map(({ num, label }) => (
+                      <div key={num} className={`smart-pipeline-step${multiRewriteQueueStep >= num ? ' smart-pipeline-step--active' : ''}`}>
+                        <span className="smart-pipeline-step-num">Step {num}/8</span>
+                        <span className="smart-pipeline-step-label">{label}</span>
+                        {multiRewriteQueueStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
+                        {multiRewriteQueueStep > num && <span className="smart-pipeline-step-done">✅</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="smart-pipeline-status-text">{multiRewriteQueueStatus}</p>
+                </div>
+              )}
+
+              {/* Multi Rewrite Queue Complete Card */}
+              {!isMultiRewriteQueueRunning && multiRewriteQueueStatus === 'Multi Rewrite Queue complete' && lastMultiRewriteQueue && (
+                <div className="smart-pipeline-card smart-pipeline-card--complete">
+                  <p className="smart-pipeline-card-title">✅ Multi Rewrite Queue Complete</p>
+                  <div className="smart-pipeline-stats">
+                    {lastMultiRewriteQueue.selectedVariants.length > 0 ? (
+                      <>
+                        <span>Rewritten: <strong>{lastMultiRewriteQueue.rewrittenCount}</strong></span>
+                        <span>Queued: <strong>{lastMultiRewriteQueue.queuedCount}</strong></span>
+                        <span>Rendered: <strong>{lastMultiRewriteQueue.renderedCount}</strong></span>
+                        {lastMultiRewriteQueue.failedCount > 0 && (
+                          <span className="smart-pipeline-stat--fail">Failed: <strong>{lastMultiRewriteQueue.failedCount}</strong></span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="smart-pipeline-notice">{multiRewriteQueueError}</span>
+                    )}
+                  </div>
+                  {lastMultiRewriteQueue.selectedVariants.length > 0 && (
+                    <div className="smart-pipeline-selected-variants">
+                      <p className="smart-pipeline-selected-label">Selected:</p>
+                      {lastMultiRewriteQueue.selectedVariants.map((name) => (
+                        <span key={name} className="smart-pipeline-variant-tag">{name}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Multi Rewrite Queue Failed Card */}
+              {!isMultiRewriteQueueRunning && multiRewriteQueueStatus === 'Multi Rewrite Queue failed' && (
+                <div className="smart-pipeline-card smart-pipeline-card--failed">
+                  <p className="smart-pipeline-card-title">❌ Multi Rewrite Queue Failed</p>
+                  <p className="smart-pipeline-error-text">{multiRewriteQueueError}</p>
+                </div>
+              )}
+
+              {/* Pipeline Progress Card */}
+              {isAutoPipelineRunning && (
+                <div className="pipeline-progress-card">
+                  <p className="pipeline-progress-title">🚀 Auto Pipeline Running</p>
+                  <div className="pipeline-steps">
+                    <div className={`pipeline-step${pipelineStep >= 1 ? ' pipeline-step--active' : ''}`}>
+                      <span className="pipeline-step-num">Step 1/3</span>
+                      <span className="pipeline-step-label">Generating Variants</span>
+                      {pipelineStep === 1 && <span className="pipeline-step-spinner">⏳</span>}
+                      {pipelineStep > 1 && <span className="pipeline-step-done">✅</span>}
+                    </div>
+                    <div className={`pipeline-step${pipelineStep >= 2 ? ' pipeline-step--active' : ''}`}>
+                      <span className="pipeline-step-num">Step 2/3</span>
+                      <span className="pipeline-step-label">Rendering</span>
+                      {pipelineStep === 2 && <span className="pipeline-step-spinner">⏳</span>}
+                      {pipelineStep > 2 && <span className="pipeline-step-done">✅</span>}
+                    </div>
+                    <div className={`pipeline-step${pipelineStep >= 3 ? ' pipeline-step--active' : ''}`}>
+                      <span className="pipeline-step-num">Step 3/3</span>
+                      <span className="pipeline-step-label">Preparing Compare Dashboard</span>
+                      {pipelineStep === 3 && <span className="pipeline-step-spinner">⏳</span>}
+                    </div>
+                  </div>
+                  <p className="pipeline-status-text">{pipelineStatus}</p>
+                </div>
+              )}
+
+              {/* Pipeline Complete Card */}
+              {!isAutoPipelineRunning && pipelineStatus === 'Compare dashboard ready' && lastPipeline && (
+                <div className="pipeline-complete-card">
+                  <p className="pipeline-complete-title">✅ Pipeline Complete</p>
+                  <p className="pipeline-complete-stat">{lastPipeline.completedCount} variants rendered</p>
+                  <p className="pipeline-complete-sub">Ready to compare</p>
+                </div>
+              )}
+
+              {/* Pipeline Failed Card */}
+              {!isAutoPipelineRunning && pipelineStatus === 'Pipeline failed' && (
+                <div className="pipeline-failed-card">
+                  <p className="pipeline-failed-title">❌ Pipeline Failed</p>
+                  <p className="pipeline-failed-sub">Please check render logs</p>
+                </div>
+              )}
+
+              {/* 🧠 AI Variant Generator (Phase14-D) */}
+              <div className="ai-variant-generator">
+                <button
+                  className="btn-ai-generate-variants"
+                  onClick={generateAIVariants}
+                  disabled={isPipelineDisabled || isGeneratingVariants || !aiTheme.trim()}
+                >
+                  {isGeneratingVariants ? '🧠 Generating...' : '🧠 AI Generate Variants'}
+                </button>
+                {variantGenerateError && (
+                  <p className="variant-generate-error">{variantGenerateError}</p>
+                )}
+                {generatedVariants.length > 0 && (
+                  <div className="generated-variants-panel">
+                    <div className="generated-variants-header">
+                      <p className="generated-variants-title">Generated Variants</p>
+                      <div className="generated-variants-header-actions">
+                        <button
+                          className="btn-score-variants"
+                          onClick={scoreVariants}
+                          disabled={isPipelineDisabled || isScoringVariants || !aiTheme.trim()}
+                        >
+                          {isScoringVariants ? '📊 Scoring...' : '📊 Score Variants'}
+                        </button>
+                        <button
+                          className="btn-add-all-variants"
+                          onClick={addAllVariantsToQueue}
+                          disabled={isPipelineDisabled}
+                        >
+                          ＋ Add All To Queue
+                        </button>
+                        <button
+                          className="btn-smart-queue"
+                          onClick={addSmartQueue}
+                          disabled={isPipelineDisabled || variantScores.length === 0}
+                        >
+                          ⚡ Smart Queue
+                        </button>
+                      </div>
+                    </div>
+                    {(() => {
+                      const candidateCount = variantScores.filter((s) => s.recommendation >= 4).length
+                      return variantScores.length > 0 ? (
+                        <div className="smart-queue-summary">
+                          <span>Smart Queue Candidates: <strong>{candidateCount}</strong></span>
+                          <span className="smart-queue-threshold">Threshold: Recommend 4+</span>
+                        </div>
+                      ) : null
+                    })()}
+                    {smartQueueMessage && (
+                      <p className="smart-queue-message">{smartQueueMessage}</p>
+                    )}
+                    {variantScoreError && (
+                      <p className="variant-score-error">{variantScoreError}</p>
+                    )}
+                    <ul className="generated-variants-list">
+                      {generatedVariants.map((v, i) => {
+                        const sc = variantScores.find((s) => s.variantName === v.name || s.angle === v.angle)
+                        const isRecommended = sc ? sc.recommendation >= 4 : false
+                        return (
+                        <li key={i} className={`generated-variant-card${isRecommended ? ' generated-variant-card--recommended' : ''}`}>
+                          <div className="generated-variant-info">
+                            <span className="generated-variant-name">🧠 {v.name}</span>
+                            {isRecommended && <span className="variant-recommended-badge">⚡ Recommended</span>}
+                            <span className="generated-variant-desc">{v.description}</span>
+                          </div>
+                          {sc && (
+                              <div className="variant-score-panel">
+                                <p className="variant-score-title">AI Score</p>
+                                <div className="variant-score-grid">
+                                  <span className="vs-label">Recommend</span><span className="vs-value">{sc.recommendation}/5</span>
+                                  <span className="vs-label">Views</span><span className="vs-value">{sc.predictedViews}/5</span>
+                                  <span className="vs-label">Save</span><span className="vs-value">{sc.savePotential}/5</span>
+                                  <span className="vs-label">CTA</span><span className="vs-value">{sc.ctaStrength}/5</span>
+                                </div>
+                                <p className="vs-reason">{sc.reason}</p>
+                              </div>
+                          )}
+                          <div className="generated-variant-actions">
+                            <button
+                              className="btn-add-variant-queue"
+                              onClick={() => addVariantToQueue(v.name)}
+                              disabled={isPipelineDisabled || renderQueue.some((q) => q.variantName === v.name)}
+                            >
+                              {renderQueue.some((q) => q.variantName === v.name) ? '✓' : '＋ Queue'}
+                            </button>
+                            {rewrittenStories[v.angle] ? (
+                              <button
+                                className="btn-rewrite-story btn-rewrite-story--regen"
+                                onClick={() => rewriteStory(v.angle)}
+                                disabled={isRewritingStory[v.angle] || isPipelineDisabled}
+                              >
+                                {isRewritingStory[v.angle] ? '🪄 Rewriting...' : '🔄 Re-generate'}
+                              </button>
+                            ) : (
+                              <button
+                                className="btn-rewrite-story"
+                                onClick={() => rewriteStory(v.angle)}
+                                disabled={isRewritingStory[v.angle] || isPipelineDisabled || slides.length === 0}
+                              >
+                                {isRewritingStory[v.angle] ? '🪄 Rewriting...' : '🪄 Rewrite Story'}
+                              </button>
+                            )}
+                          </div>
+                          {rewriteStoryError[v.angle] && (
+                            <p className="rewrite-story-error">{rewriteStoryError[v.angle]}</p>
+                          )}
+                          {rewrittenStories[v.angle] && (
+                            <div className="story-preview">
+                              <div className="story-preview-header">
+                                <span className="story-preview-title">Story Preview</span>
+                                <button
+                                  className="btn-apply-story"
+                                  onClick={() => applyRewrittenStory(v.angle)}
+                                >
+                                  Apply To Slides
+                                </button>
+                              </div>
+                              {rewrittenStories[v.angle].slice(0, 3).map((s, si) => (
+                                <div key={si} className="story-preview-slide">
+                                  {s.headline && <p className="sps-headline">{s.headline}</p>}
+                                  {s.subline   && <p className="sps-subline">{s.subline}</p>}
+                                  {s.emphasis  && <p className="sps-emphasis">{s.emphasis}</p>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="render-queue-top-actions">
+                <button
+                  className="btn-auto-generate"
+                  onClick={autoGenerateVariants}
+                  disabled={isPipelineDisabled}
+                >
+                  ✨ Auto Generate
+                </button>
+                <button
+                  className="btn-add-queue"
+                  onClick={addToQueue}
+                  disabled={isPipelineDisabled}
+                >
+                  ＋ 追加
+                </button>
+              </div>
+              {autoGenerateNotice && (
+                <p className="auto-generate-notice">{autoGenerateNotice}</p>
+              )}
+
+              <RenderQueuePanel
+                renderQueue={renderQueue}
+                expandedSnapshotIds={expandedSnapshotIds}
+                expandedDiffIds={expandedDiffIds}
+                rewriteExplainResults={rewriteExplainResults}
+                rewriteExplainLoadingIds={rewriteExplainLoadingIds}
+                rewriteExplainErrors={rewriteExplainErrors}
+                isBatchRendering={isBatchRendering}
+                isAutoPipelineRunning={isAutoPipelineRunning}
+                isPipelineDisabled={isPipelineDisabled}
+                canRender={renderPrecheck.canRender}
+                slides={slides}
+                onToggleSnapshotPreview={toggleSnapshotPreview}
+                onToggleDiffView={toggleDiffView}
+                onExplainRewrite={(item) => handleExplainRewrite(item, rewriteExplainResults[item.id] ? { force: true } : undefined)}
+                onRemoveFromQueue={removeFromQueue}
+                onBatchRender={batchRender}
+                onClearQueue={clearQueue}
+                renderDiffPanel={renderDiffPanel}
+              />
+            </div>
+          </div>
+
+          {/* Render Compare Dashboard (Phase13-I / Phase14-C) */}
+          <div className="compare-dashboard" ref={compareDashboardRef}>
+            <CompareDashboardPanel
+              completedVariants={completedVariants}
+              lastPipeline={lastPipeline}
+              bestVariantId={bestVariantId}
+              bestVariantAnalysis={bestVariantAnalysis}
+              bestVariantAnalysisLoading={isAnalyzingBestVariant}
+              bestVariantAnalysisError={bestVariantAnalysisError}
+              expandedSnapshotIds={expandedSnapshotIds}
+              expandedDiffIds={expandedDiffIds}
+              rewriteExplainResults={rewriteExplainResults}
+              rewriteExplainLoadingIds={rewriteExplainLoadingIds}
+              rewriteExplainErrors={rewriteExplainErrors}
+              slides={slides}
+              onSelectBestVariant={selectBestVariant}
+              onAnalyzeBestVariant={analyzeBestVariant}
+              onToggleSnapshotPreview={toggleSnapshotPreview}
+              onToggleDiffView={toggleDiffView}
+              onExplainRewrite={(item) => handleExplainRewrite(item, rewriteExplainResults[item.id] ? { force: true } : undefined)}
+              renderDiffPanel={renderDiffPanel}
+            />
+          </div>
+
+          {/* Variant Learning (Phase14-F) */}
+          <div className="variant-learning-section">
+            <div className="variant-learning-header">
+              <p className="variant-learning-title">Variant Learning</p>
+              {variantLearningSummary.totalEvents > 0 && (
+                <button className="btn-clear-learning" onClick={clearLearningData}>
+                  Clear Learning Data
+                </button>
+              )}
+            </div>
+            {variantLearningSummary.totalEvents === 0 ? (
+              <p className="variant-learning-empty">
+                Apply To Slides または Select Best を行うと学習データが蓄積されます。
+              </p>
+            ) : (
+              <>
+                <div className="vl-stats">
+                  <span className="vl-stat">Total Events: {variantLearningSummary.totalEvents}</span>
+                  <span className="vl-stat">Applied: {variantLearningSummary.appliedCount}</span>
+                  <span className="vl-stat">Selected Best: {variantLearningSummary.selectedBestCount}</span>
+                </div>
+                {variantLearningSummary.topAngles.length > 0 && (
+                  <div className="vl-top-angles">
+                    <p className="vl-subsection-title">Top Angles</p>
+                    <ol className="vl-rank-list">
+                      {variantLearningSummary.topAngles.map((a, i) => (
+                        <li key={a.angle} className="vl-rank-item">
+                          <span className="vl-rank-num">{i + 1}.</span>
+                          <span className="vl-rank-label">{a.angle}</span>
+                          <span className="vl-rank-count">{a.count}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                {variantLearningSummary.recentEvents.length > 0 && (
+                  <div className="vl-recent">
+                    <p className="vl-subsection-title">Recent Learning</p>
+                    <ul className="vl-recent-list">
+                      {variantLearningSummary.recentEvents.map((e) => (
+                        <li key={e.id} className="vl-recent-item">
+                          <span className="vl-recent-date">
+                            {new Date(e.createdAt).toLocaleDateString('ja-JP')}
+                          </span>
+                          <span className="vl-recent-angle">{e.angle}</span>
+                          <span className="vl-recent-action">{e.action}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

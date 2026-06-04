@@ -1,5 +1,10 @@
 # bemystyle-reel — Claude 作業ガイド
 
+## 完了報告ルール
+
+**実装・作業が完了したら、毎回必ず完了報告を行う。**  
+フェーズ実装・バグ修正・機能追加・設定変更を問わず、作業が一段落したら報告する。
+
 ## 完了報告フォーマット
 
 フェーズ実装が完了したら、必ず以下の構成で完了報告を行う。
@@ -66,6 +71,33 @@ npx tsc --noEmit # 型チェックのみ
 | Phase13-D | Post Render Actions（完了カード・DLボタン強調・URLコピー・履歴導線・再レンダリング） | 完了 |
 | Phase13-E | SNS Caption Helper（投稿文生成API・YouTubeタイトル/説明文・Instagram文・ハッシュタグ・コピー） | 完了 |
 | Phase13-F | SNS Caption History（SnsCaption型・履歴保存・バッジ表示・履歴復元） | 完了 |
+| Phase14-C | Auto Render Pipeline MVP（ボタン1つで Auto Generate → Queue Render → Compare Dashboard） | 完了 |
+
+## Phase16 進捗サマリー（Factory Component Refactor）
+
+| フェーズ | 内容 | 状態 |
+|---|---|---|
+| Phase16-B | Factory分割設計メモ（コード変更なし） | 完了 |
+| Phase16-C | FactorySummaryCard 分離 | 完了 |
+| Phase16-D | FactoryHistoryStats 分離 | 完了 |
+| Phase16-E | FactoryHistoryFilters 分離 | 完了 |
+| Phase16-F | FactoryHistoryBulkBar 分離 | 完了 |
+| Phase16-G | FactoryHistoryActions 分離 | 完了 |
+| Phase16-H | FactoryHistoryTags 分離 | 完了 |
+| Phase16-I | FactoryHistoryItemCard 分離 | 完了 |
+| Phase16-J | FactoryHistoryPanel 分離 | 完了 |
+| Phase16-K | FactoryRunSection 分離 | 完了 |
+| Phase16-L | FactoryPanel 分離（最終統合） | 完了 |
+| Phase16-M | Refactor Docs Update（ドキュメント整備） | 完了 |
+| Phase16-P | CompareVariantCard 分離（Video/Best/Snapshot/Diff/ExplainRewrite） | 完了 |
+| Phase16-Q | BestVariantAnalysisPanel 整理（未使用 bestVariantId prop 削除） | 完了 |
+| Phase16-R | LastPipelineSummaryCard 整理（null 許容・Empty State 内部化） | 完了 |
+| Phase16-S | CompareDashboardHeader 分離（見出し描画の切り出し） | 完了 |
+| Phase16-T | Compare Dashboard 構成整理・ドキュメント更新 | 完了 |
+| Phase16-U | App.tsx 責務棚卸し・次フェーズ候補整理（コード変更なし） | 完了 |
+| Phase16-V | Factory History UI state を FactoryHistoryPanel local state へ移動 | 完了 |
+
+詳細: `editor/docs/factory-history-component-plan.md`
 
 ## カスタムプリセット仕様メモ（Phase12-P/Q/S）
 

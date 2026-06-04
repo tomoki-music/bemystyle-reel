@@ -789,6 +789,432 @@ ${slideSummary}`
   }
 })
 
+app.post('/api/variant-generator', async (req, res) => {
+  const { theme } = req.body ?? {}
+  if (!theme || typeof theme !== 'string' || !theme.trim()) {
+    return res.status(400).json({ ok: false, message: 'theme が空です' })
+  }
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+  }
+
+  const systemPrompt = `あなたはSNSショート動画マーケターです。
+テーマを元に、異なる切り口・異なる感情導線・異なる訴求方法を持つ7種類の動画企画を作成してください。
+出力形式はJSONのみ。コードブロックや説明文は一切含めず、以下の形式のJSONを返してください：
+{"variants":[{"name":"...","description":"...","angle":"..."},...]}`
+
+  const userPrompt = `テーマ: ${theme.trim()}
+
+7種類の動画バリアントをJSONで生成してください。
+- name: バリアント名（日本語、10文字以内）
+- description: このバリアントの訴求方針（日本語、30文字以内）
+- angle: 訴求タイプ（英語スネークケース例: emotion, problem, story, education, action, youtube, instagram）`
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.8,
+        max_tokens: 800,
+      }),
+    })
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+    const openaiData = await openaiRes.json()
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+
+    let parsed
+    try {
+      parsed = JSON.parse(content.trim())
+    } catch {
+      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    }
+    if (!Array.isArray(parsed?.variants)) {
+      return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+    }
+
+    res.json({ ok: true, variants: parsed.variants })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
+  }
+})
+
+app.post('/api/rewrite-story', async (req, res) => {
+  const { angle, slides } = req.body ?? {}
+  if (!angle || typeof angle !== 'string') {
+    return res.status(400).json({ ok: false, message: 'angle が必要です' })
+  }
+  if (!Array.isArray(slides) || slides.length === 0) {
+    return res.status(400).json({ ok: false, message: 'slides が空です' })
+  }
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+  }
+
+  const angleGuide = {
+    emotion:   '感情共感型：忙しい人の日常感情に寄り添い、共感を引き出す文体',
+    education: '教育型：実践的な知識・データ・行動習慣を学べる文体',
+    problem:   '問題提起型：読者が感じている課題や危機感を強調する文体',
+    story:     'ストーリー型：主人公の体験談を物語として語る文体',
+    cta:       '行動促進型：今すぐ行動したくなるような強いCTA文体',
+    authority: '専門性型：信頼感・権威性・データを前面に出した文体',
+  }
+  const guide = angleGuide[angle] ?? `${angle}型の訴求`
+
+  const systemPrompt = `あなたはSNSショート動画のプロ脚本家です。
+指定された訴求タイプに合わせて動画スライドをリライトしてください。
+
+重要：
+・スライド枚数は変更禁止
+・JSONのみ出力（コードブロック禁止）
+・headlineは短く強く（20文字以内推奨）
+・スマホ視認性を重視
+・元テーマは維持
+・改行は\\nを使用可
+
+訴求タイプ：${guide}
+
+出力形式：{"slides":[{"headline":"...","subline":"...","emphasis":"..."},...]}
+`
+
+  const slideSummary = slides
+    .filter((s) => s.visible !== false)
+    .map((s, i) => {
+      const parts = []
+      if (s.headline) parts.push(`headline: "${s.headline}"`)
+      if (s.subline) parts.push(`subline: "${s.subline}"`)
+      if (s.emphasis) parts.push(`emphasis: "${s.emphasis}"`)
+      return `[${i + 1}] ${parts.join(' / ')}`
+    })
+    .join('\n')
+
+  const userPrompt = `以下の${slides.length}枚のスライドを「${guide}」でリライトしてください。\n\n${slideSummary}\n\n必ず${slides.length}枚分のslides配列をJSONで返してください。`
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.8,
+        max_tokens: 1500,
+      }),
+    })
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+    const openaiData = await openaiRes.json()
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+
+    let parsed
+    try {
+      parsed = JSON.parse(content.trim())
+    } catch {
+      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    }
+    if (!Array.isArray(parsed?.slides)) {
+      return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+    }
+    if (parsed.slides.length !== slides.length) {
+      return res.status(502).json({ ok: false, message: `スライド枚数が一致しません（期待: ${slides.length}, 実際: ${parsed.slides.length}）` })
+    }
+
+    res.json({ ok: true, slides: parsed.slides })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
+  }
+})
+
+app.post('/api/score-variants', async (req, res) => {
+  const { theme, variants, learningEvents } = req.body ?? {}
+  if (!theme || typeof theme !== 'string') {
+    return res.status(400).json({ ok: false, message: 'theme が必要です' })
+  }
+  if (!Array.isArray(variants) || variants.length === 0) {
+    return res.status(400).json({ ok: false, message: 'variants が空です' })
+  }
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+  }
+
+  const events = Array.isArray(learningEvents) ? learningEvents.slice(0, 50) : []
+  const angleCounts = {}
+  for (const e of events) {
+    if (e.angle && e.angle !== 'unknown') angleCounts[e.angle] = (angleCounts[e.angle] ?? 0) + 1
+  }
+  const learningSummary = Object.entries(angleCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([angle, count]) => `${angle}: ${count}回`)
+    .join(', ') || 'なし'
+
+  const variantList = variants
+    .map((v, i) => `${i + 1}. name="${v.name}" angle="${v.angle}" description="${v.description}"`)
+    .join('\n')
+
+  const systemPrompt = `あなたはSNSショート動画のマーケティングアナリストです。
+現在のテーマ、候補Variant、過去の学習データを元に、各Variantの伸びやすさを1〜5で評価してください。
+
+重要：
+・出力はJSONのみ（コードブロック禁止）
+・variantsと同数のscores配列を返す
+・各スコアは1〜5の整数
+・reasonは日本語で30文字以内
+
+出力形式：{"scores":[{"variantName":"...","angle":"...","recommendation":5,"predictedViews":4,"savePotential":3,"ctaStrength":2,"reason":"..."},...]}
+`
+  const userPrompt = `テーマ: ${theme}
+
+Variants:
+${variantList}
+
+過去の学習データ（angle別選択回数）:
+${learningSummary}
+
+${variants.length}件分のscores配列をJSONで返してください。`
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 1000,
+      }),
+    })
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+    const openaiData = await openaiRes.json()
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+
+    let parsed
+    try {
+      parsed = JSON.parse(content.trim())
+    } catch {
+      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    }
+    if (!Array.isArray(parsed?.scores)) {
+      return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+    }
+    if (parsed.scores.length !== variants.length) {
+      return res.status(502).json({ ok: false, message: `スコア件数が一致しません（期待: ${variants.length}, 実際: ${parsed.scores.length}）` })
+    }
+
+    const clamp = (n) => Math.min(5, Math.max(1, Math.round(Number(n) || 3)))
+    const scores = parsed.scores.map((s, i) => ({
+      variantName: typeof s.variantName === 'string' ? s.variantName : (variants[i]?.name ?? ''),
+      angle: typeof s.angle === 'string' ? s.angle : (variants[i]?.angle ?? ''),
+      recommendation: clamp(s.recommendation),
+      predictedViews: clamp(s.predictedViews),
+      savePotential: clamp(s.savePotential),
+      ctaStrength: clamp(s.ctaStrength),
+      reason: typeof s.reason === 'string' && s.reason.trim() ? s.reason.trim() : '評価に基づく推定',
+    }))
+
+    res.json({ ok: true, scores })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
+  }
+})
+
+app.post('/api/analyze-best-variant', async (req, res) => {
+  const { theme, bestVariant, score, learningSummary } = req.body ?? {}
+  if (!theme || typeof theme !== 'string') {
+    return res.status(400).json({ ok: false, message: 'theme が必要です' })
+  }
+  if (!bestVariant || typeof bestVariant.name !== 'string') {
+    return res.status(400).json({ ok: false, message: 'bestVariant が必要です' })
+  }
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+  }
+
+  const topAnglesText = Array.isArray(learningSummary?.topAngles) && learningSummary.topAngles.length > 0
+    ? learningSummary.topAngles.map((a) => `${a.angle}: ${a.count}回`).join(', ')
+    : 'なし'
+
+  const scoreText = score
+    ? `recommendation=${score.recommendation}/5, predictedViews=${score.predictedViews}/5, savePotential=${score.savePotential}/5, ctaStrength=${score.ctaStrength}/5`
+    : 'なし'
+
+  const systemPrompt = `あなたはSNSショート動画の戦略アナリストです。
+選ばれたVariantとテーマ、過去の学習データから
+・なぜ選ばれたか（strengths）
+・どんなテーマに向くか（bestFor）
+・改善点（weaknesses）
+・次回どう活かすか（nextActions）
+・総評（summary）
+を分析してください。
+
+重要：
+・出力はJSONのみ（コードブロック禁止）
+・各配列は1〜4項目の日本語文字列
+・summaryは1〜2文の日本語
+
+出力形式：{"strengths":["..."],"weaknesses":["..."],"bestFor":["..."],"nextActions":["..."],"summary":"..."}`
+
+  const userPrompt = `テーマ: ${theme}
+選ばれたVariant: name="${bestVariant.name}" angle="${bestVariant.angle ?? '不明'}"
+AIスコア: ${scoreText}
+過去の学習データ（angle別選択回数）: ${topAnglesText}
+
+上記を分析してJSONで返してください。`
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 600,
+      }),
+    })
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+    const openaiData = await openaiRes.json()
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+
+    let parsed
+    try {
+      parsed = JSON.parse(content.trim())
+    } catch {
+      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    }
+    const toArr = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string') : [])
+    const analysis = {
+      strengths: toArr(parsed.strengths),
+      weaknesses: toArr(parsed.weaknesses),
+      bestFor: toArr(parsed.bestFor),
+      nextActions: toArr(parsed.nextActions),
+      summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+    }
+    res.json({ ok: true, analysis })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
+  }
+})
+
+app.post('/api/explain-rewrite', async (req, res) => {
+  const { beforeSlides, afterSlides, variantName, score } = req.body ?? {}
+  if (!Array.isArray(beforeSlides) || !Array.isArray(afterSlides)) {
+    return res.status(400).json({ ok: false, message: 'beforeSlides / afterSlides が必要です' })
+  }
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+  }
+
+  const fmtSlides = (slides) =>
+    slides.map((s, i) => {
+      const parts = []
+      if (s.headline) parts.push(`headline="${s.headline}"`)
+      if (s.subline) parts.push(`subline="${s.subline}"`)
+      if (s.emphasis) parts.push(`emphasis="${s.emphasis}"`)
+      return `Slide ${i + 1}: ${parts.join(', ')}`
+    }).join('\n')
+
+  const scoreText = score
+    ? `recommendation=${score.recommendation ?? '?'}/5, predictedViews=${score.predictedViews ?? '?'}/5, savePotential=${score.savePotential ?? '?'}/5, ctaStrength=${score.ctaStrength ?? '?'}/5`
+    : 'なし'
+
+  const systemPrompt = `あなたはSNSショート動画のコンテンツコーチです。
+RewriteのBefore/Afterスライドを比較し、以下の観点で分析してください：
+冒頭の引きの強さ / 共感性 / 保存されやすさ / CTAの自然さ / ストーリー性 / 視聴維持率 / 言葉の具体性 / 感情の動き
+
+重要：
+・出力はJSONのみ（コードブロック禁止）
+・各配列は1〜4項目の日本語文字列
+・summaryは1〜2文の日本語
+
+出力形式：{"summary":"...","reasons":["..."],"improvedPoints":["..."],"risks":["..."],"nextSuggestions":["..."]}`
+
+  const userPrompt = `Variant名: ${variantName ?? '不明'}
+AIスコア: ${scoreText}
+
+【Before】
+${fmtSlides(beforeSlides)}
+
+【After】
+${fmtSlides(afterSlides)}
+
+上記のRewriteを分析してJSONで返してください。`
+
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 600,
+      }),
+    })
+    if (!openaiRes.ok) {
+      const errData = await openaiRes.json().catch(() => ({}))
+      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+    }
+    const openaiData = await openaiRes.json()
+    const content = openaiData.choices?.[0]?.message?.content
+    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+
+    let parsed
+    try {
+      parsed = JSON.parse(content.trim())
+    } catch {
+      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    }
+    const toArr = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string') : [])
+    const result = {
+      summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+      reasons: toArr(parsed.reasons),
+      improvedPoints: toArr(parsed.improvedPoints),
+      risks: toArr(parsed.risks),
+      nextSuggestions: toArr(parsed.nextSuggestions),
+    }
+    res.json({ ok: true, result })
+  } catch (err) {
+    res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
+  }
+})
+
 app.post('/api/upload', upload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ ok: false, message: '画像ファイルがありません' })
