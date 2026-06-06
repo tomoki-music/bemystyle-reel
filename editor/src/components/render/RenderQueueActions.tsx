@@ -22,7 +22,7 @@ export function RenderQueueActions({
         onClick={onBatchRender}
         disabled={!canBatchRender}
       >
-        {isBatchRendering ? '🎬 レンダリング中...' : '▶ Queue Render'}
+        {isBatchRendering ? '🎬 レンダリング中...' : '▶ キューレンダー'}
       </button>
       <button
         className="btn-clear-queue"

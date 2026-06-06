@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import express from 'express'
 import { writeFileSync, readFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from 'fs'
 import { resolve, dirname, extname, basename } from 'path'
@@ -584,7 +585,11 @@ ${presetSection}
       return res.status(502).json({ ok: false, message: 'OpenAI応答: slides が配列ではありません' })
     }
     if (story.slides.length !== 14) {
-      return res.status(502).json({ ok: false, message: `OpenAI応答: slides は14枚必要です（実際: ${story.slides.length}枚）` })
+      if (story.slides.length > 14) {
+        story.slides = story.slides.slice(0, 14)
+      } else {
+        return res.status(502).json({ ok: false, message: `OpenAI応答: slides は14枚必要です（実際: ${story.slides.length}枚）` })
+      }
     }
     for (let i = 0; i < story.slides.length; i++) {
       if (typeof story.slides[i].headline !== 'string') {

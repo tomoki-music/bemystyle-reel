@@ -130,7 +130,7 @@ export const SlidePreview: React.FC<Props> = ({ slide, ctaConfig }) => {
             position: 'absolute',
             inset: 0,
             backgroundImage: slide.image
-              ? `url(${slide.image.startsWith('uploads/') ? `/assets/${slide.image}` : `/assets/slides/${slide.image}`})`
+              ? `url(${slide.image.startsWith('uploads/') || slide.image.startsWith('generated/') ? `/assets/${slide.image}` : `/assets/slides/${slide.image}`})`
               : undefined,
             backgroundSize: 'cover',
             backgroundPosition: 'center',

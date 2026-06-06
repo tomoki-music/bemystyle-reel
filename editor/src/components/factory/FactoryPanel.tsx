@@ -1,7 +1,9 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { FactoryRunSection } from './FactoryRunSection'
 import { FactorySummaryCard } from './FactorySummaryCard'
 import { FactoryHistoryPanel } from './FactoryHistoryPanel'
+
+type GeneratedSlide = { id: number; headline: string; image: string }
 
 type FactoryHistoryItemLike = {
   id: string
@@ -44,6 +46,7 @@ type FactoryPanelProps = {
   factoryLog: string[]
   factoryNotice: string
   isPipelineDisabled: boolean
+  hasTheme: boolean
   onRunFactory: () => void
 
   // FactorySummaryCard
@@ -51,6 +54,9 @@ type FactoryPanelProps = {
   findFactoryQueueItem: (variantName: string) => { id: string; variantName: string } | undefined
   onClearSummary: () => void
   onJumpToQueueItem: (variantName: string) => void
+
+  // Generated image gallery
+  generatedSlides: GeneratedSlide[]
 
   // FactoryHistoryPanel
   factoryHistory: FactoryHistoryItemLike[]
@@ -69,6 +75,33 @@ type FactoryPanelProps = {
   onClearHistory: () => void
 }
 
+function GeneratedImageGallery({ slides }: { slides: GeneratedSlide[] }) {
+  const [open, setOpen] = useState(false)
+  if (slides.length === 0) return null
+  return (
+    <div className="factory-image-gallery">
+      <button className="factory-image-gallery-toggle" onClick={() => setOpen((v) => !v)}>
+        <span>🖼️ 生成済み画像 ({slides.length}枚)</span>
+        <span className="factory-image-gallery-chevron">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="factory-image-gallery-grid">
+          {slides.map((s) => (
+            <div key={s.id} className="factory-image-gallery-item">
+              <img
+                src={`/assets/${s.image}`}
+                alt={s.headline || `Slide ${s.id}`}
+                className="factory-image-gallery-thumb"
+              />
+              <p className="factory-image-gallery-label">{s.id}. {s.headline?.slice(0, 12) || '—'}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function FactoryPanel({
   factoryRunning,
   factoryStep,
@@ -77,7 +110,9 @@ export function FactoryPanel({
   factoryLog,
   factoryNotice,
   isPipelineDisabled,
+  hasTheme,
   onRunFactory,
+  generatedSlides,
   factorySummary,
   findFactoryQueueItem,
   onClearSummary,
@@ -107,8 +142,10 @@ export function FactoryPanel({
         factoryLog={factoryLog}
         factoryNotice={factoryNotice}
         isPipelineDisabled={isPipelineDisabled}
+        hasTheme={hasTheme}
         onRunFactory={onRunFactory}
       />
+      <GeneratedImageGallery slides={generatedSlides} />
       {factorySummary && !factoryRunning && (
         <FactorySummaryCard
           factorySummary={factorySummary}

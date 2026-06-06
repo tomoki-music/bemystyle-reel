@@ -48,7 +48,15 @@
       "Bash(/opt/homebrew/bin/node /tmp/verify-puppeteer.mjs)",
       "Bash(awk 'NR>=1292 && NR<=2551 && /showFactoryNotice/' /Users/tomokiimaizumi/bemystyle-reel/editor/src/App.tsx)",
       "Bash(mkdir -p /Users/tomokiimaizumi/bemystyle-reel/editor/docs)",
-      "Bash(mkdir -p /Users/tomokiimaizumi/bemystyle-reel/editor/src/components/compare)"
+      "Bash(mkdir -p /Users/tomokiimaizumi/bemystyle-reel/editor/src/components/compare)",
+      "Bash(node -e \"const d = JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\('main:', d.main, 'exports:', JSON.stringify\\(d.exports, null, 2\\).slice\\(0, 400\\)\\)\")",
+      "Bash(node /tmp/test-puppeteer.mjs)",
+      "Bash(node /tmp/take-screenshots.mjs)",
+      "Bash(node /tmp/gen-manual.mjs)",
+      "Bash(open /Users/tomokiimaizumi/bemystyle-reel/editor/docs/user-manual.html)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'slides count: {len\\(d[\\\\\"slides\\\\\"]\\)}'\\)\")",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/Users/tomokiimaizumi/bemystyle-reel/public/data/slides.json'\\)\\); print\\(f'slides count: {len\\(d[\\\\\"slides\\\\\"]\\)}'\\)\")",
+      "Bash(python3 -c ' *)"
     ],
     "additionalDirectories": [
       "/Users/tomokiimaizumi/bemystyle-reel/public/templates",
