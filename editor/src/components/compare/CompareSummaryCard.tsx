@@ -8,10 +8,10 @@ interface CompareSummaryCardProps {
 export function CompareSummaryCard({ completedCount, bestVariantName }: CompareSummaryCardProps) {
   return (
     <div className="compare-summary">
-      <span>Completed Variants: {completedCount}</span>
+      <span>完了バリアント: {completedCount}</span>
       {bestVariantName && (
         <span className="compare-summary-best">
-          Best Variant: {bestVariantName}
+          最良バリアント: {bestVariantName}
         </span>
       )}
     </div>

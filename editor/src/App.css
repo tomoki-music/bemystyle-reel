@@ -38,7 +38,7 @@
 /* ── App Layout ── */
 .app {
   display: grid;
-  grid-template-columns: 256px 1fr 320px;
+  grid-template-columns: 360px 1fr 280px;
   height: 100vh;
   background: var(--bg);
   color: var(--text);
@@ -61,6 +61,12 @@
 .panel-left,
 .panel-right {
   background: var(--panel);
+}
+
+.panel-left-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 /* ── Panel Header ── */
@@ -88,6 +94,23 @@
   background: rgba(255, 255, 255, 0.06);
   padding: 2px 8px;
   border-radius: 99px;
+}
+
+.btn-new-project {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--purple);
+  background: rgba(138, 99, 255, 0.12);
+  border: 1px solid rgba(138, 99, 255, 0.3);
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.btn-new-project:hover {
+  background: rgba(138, 99, 255, 0.22);
+  border-color: var(--purple);
 }
 
 /* ── Preview nav ── */
@@ -4154,6 +4177,20 @@
   font-size: 11px;
   color: var(--text-secondary);
 }
+.factory-preconditions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 8px;
+}
+.factory-precondition-item {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.factory-precondition-item--ok { color: #4ade80; }
+.factory-precondition-item--warn { color: #fbbf24; }
+.factory-precondition-item--info { color: var(--text-secondary); opacity: 0.8; }
 .btn-factory-run {
   width: 100%;
   padding: 11px 14px;
@@ -4271,6 +4308,59 @@
   font-family: monospace;
   color: var(--text-secondary);
   line-height: 1.5;
+}
+
+/* ── Factory Generated Image Gallery ── */
+.factory-image-gallery {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.factory-image-gallery-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.factory-image-gallery-toggle:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.factory-image-gallery-chevron { font-size: 9px; }
+.factory-image-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.2);
+}
+.factory-image-gallery-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.factory-image-gallery-thumb {
+  width: 100%;
+  aspect-ratio: 9/16;
+  object-fit: cover;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.factory-image-gallery-label {
+  margin: 0;
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Factory Summary Card (Phase15-B) ── */

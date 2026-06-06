@@ -14,9 +14,14 @@
  *   OUTPUT_DIR = public/assets/slides
  */
 
-const fs   = require("fs");
-const path = require("path");
-const sharp = require("sharp");
+const fs             = require("fs");
+const path           = require("path");
+const os             = require("os");
+const { execSync }   = require("child_process");
+const sharp          = require("sharp");
+
+// HEIC/HEIF かどうか判定
+const HEIC_EXTS = new Set([".heic", ".heif"]);
 
 // ─── 設定 ──────────────────────────────────────────────────────────────────
 const EXPECTED_COUNT = 14;
@@ -29,7 +34,7 @@ const INPUT_DIR  = path.resolve(process.argv[2] ?? "public/assets/slides");
 const OUTPUT_DIR = path.resolve(process.argv[3] ?? "public/assets/slides");
 
 // 対象拡張子
-const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"]);
 
 // ─── ユーティリティ ─────────────────────────────────────────────────────────
 
@@ -128,9 +133,20 @@ async function main() {
       continue;
     }
 
+    // HEIC の場合は sips で中間 JPG に変換してから sharp へ渡す
+    const ext = path.extname(imageFiles[i]).toLowerCase();
+    let sharpSrc = srcFile;
+    let sipsTmp  = null;
+
     try {
+      if (HEIC_EXTS.has(ext)) {
+        sipsTmp = path.join(os.tmpdir(), `sips_${Date.now()}_${i}.jpg`);
+        execSync(`sips -s format jpeg "${srcFile}" --out "${sipsTmp}"`, { stdio: "pipe" });
+        sharpSrc = sipsTmp;
+      }
+
       // ── Sharp で変換 (一時ファイル経由で安全に書き出し) ──────────────────
-      await sharp(srcFile)
+      await sharp(sharpSrc)
         .resize(OUTPUT_WIDTH, OUTPUT_HEIGHT, {
           fit: "cover",        // 縦横比を保ちつつ中央クロップ
           position: "center",  // 中央を基準にトリミング
@@ -156,6 +172,9 @@ async function main() {
       if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
       console.error(`[FAIL] slide${pad2(i + 1)}.jpg : ${err.message}`);
       errorCount++;
+    } finally {
+      // sips 中間ファイルを削除
+      if (sipsTmp && fs.existsSync(sipsTmp)) fs.unlinkSync(sipsTmp);
     }
   }
 

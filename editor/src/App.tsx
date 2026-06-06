@@ -1821,6 +1821,25 @@ export default function App() {
   const selectedSlide = slides.find((s) => s.id === selectedId) ?? null
   const selectedIdx = slides.findIndex((s) => s.id === selectedId)
 
+  const handleNewProject = useCallback(() => {
+    if (hasUnsavedChanges && !window.confirm('未保存の変更があります。新規作成すると現在の内容が失われます。続けますか？')) return
+    const blankSlides: Slide[] = Array.from({ length: 14 }, (_, i) => ({
+      id: i + 1,
+      durationSec: i === 13 ? 5 : 3,
+      visible: true,
+      headline: '',
+      subline: '',
+      emphasis: '',
+      image: '',
+      layout: i === 13 ? 'cta' as const : 'bottom' as const,
+      showParticles: false,
+    }))
+    setSlides(blankSlides)
+    setSelectedId(1)
+    setHasUnsavedChanges(true)
+    setAiTheme('')
+  }, [hasUnsavedChanges])
+
   const updateSlide = useCallback((id: number, changes: Partial<Slide>) => {
     setSlides((prev) => prev.map((s) => (s.id === id ? { ...s, ...changes } : s)))
     setHasUnsavedChanges(true)
@@ -1847,7 +1866,7 @@ export default function App() {
   }, [updateSlide])
 
   const handleGenerateAllImages = useCallback(async (): Promise<boolean> => {
-    const targets = slides.filter((slide) => slide.imagePrompt)
+    const targets = slides.filter((slide) => slide.imagePrompt).slice(0, 14)
     if (targets.length === 0) return false
 
     setBulkImageGenerating(true)
@@ -2072,14 +2091,14 @@ export default function App() {
   const handleAutoRenderPipeline = useCallback(async () => {
     if (isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
     setIsAutoPipelineRunning(true)
-    setPipelineStatus('Generating variants...')
+    setPipelineStatus('バリアント生成中...')
     try {
       autoGenerateVariants()
       // Wait for React to flush the setRenderQueue update so batchRenderRef picks up new items
       await new Promise<void>((resolve) => setTimeout(resolve, 200))
-      setPipelineStatus('Rendering variants...')
+      setPipelineStatus('バリアントレンダリング中...')
       await batchRenderRef.current()
-      setPipelineStatus('Compare dashboard ready')
+      setPipelineStatus('比較ダッシュボード準備完了')
       const q = renderQueueRef.current
       const completedCount = q.filter((item) => item.status === 'completed').length
       const failedCount = q.filter((item) => item.status === 'failed').length
@@ -2090,7 +2109,7 @@ export default function App() {
         compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' })
       }, 300)
     } catch {
-      setPipelineStatus('Pipeline failed')
+      setPipelineStatus('パイプライン失敗')
     } finally {
       setIsAutoPipelineRunning(false)
     }
@@ -2103,7 +2122,7 @@ export default function App() {
     setSmartPipelineError('')
     try {
       // Step 1: AI Variant 生成
-      setSmartPipelineStatus('Generating AI variants...')
+      setSmartPipelineStatus('AIバリアント生成中...')
       const genRes = await fetch('/api/variant-generator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2117,7 +2136,7 @@ export default function App() {
       try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
 
       // Step 2: AI Score
-      setSmartPipelineStatus('Scoring variants...')
+      setSmartPipelineStatus('バリアントスコアリング中...')
       const scoreRes = await fetch('/api/score-variants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2135,11 +2154,11 @@ export default function App() {
       try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
 
       // Step 3: Smart Queue 投入
-      setSmartPipelineStatus('Adding recommended variants to queue...')
+      setSmartPipelineStatus('推奨バリアントをキューに追加中...')
       const recommended = scores.filter((s) => s.recommendation >= 4)
       const recommendedCount = recommended.length
       if (recommendedCount === 0) {
-        setSmartPipelineStatus('Compare dashboard ready')
+        setSmartPipelineStatus('比較ダッシュボード準備完了')
         setSmartPipelineError('おすすめ度4以上のVariantがありませんでした。Renderをスキップしました。')
         const data: LastSmartPipeline = {
           generatedCount: variants.length,
@@ -2171,11 +2190,11 @@ export default function App() {
       await new Promise<void>((resolve) => setTimeout(resolve, 200))
 
       // Step 4: Batch Render
-      setSmartPipelineStatus('Rendering recommended variants...')
+      setSmartPipelineStatus('推奨バリアントのレンダリング中...')
       await batchRenderRef.current()
 
       // Step 5: Compare Dashboard
-      setSmartPipelineStatus('Compare dashboard ready')
+      setSmartPipelineStatus('比較ダッシュボード準備完了')
       const q = renderQueueRef.current
       const renderedCount = q.filter((item) => targets.some((t) => t.name === item.variantName) && item.status === 'completed').length
       const failedCount = q.filter((item) => targets.some((t) => t.name === item.variantName) && item.status === 'failed').length
@@ -2190,8 +2209,8 @@ export default function App() {
       setLastSmartPipeline(data)
       setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
     } catch (err) {
-      setSmartPipelineError(err instanceof Error ? err.message : 'Smart Pipeline failed')
-      setSmartPipelineStatus('Smart Pipeline failed')
+      setSmartPipelineError(err instanceof Error ? err.message : 'スマートパイプライン失敗')
+      setSmartPipelineStatus('スマートパイプライン失敗')
     } finally {
       setIsSmartPipelineRunning(false)
     }
@@ -2204,7 +2223,7 @@ export default function App() {
     setSmartRewritePipelineError('')
     try {
       // Step 1: AI Variant 生成
-      setSmartRewritePipelineStatus('Generating AI variants...')
+      setSmartRewritePipelineStatus('AIバリアント生成中...')
       const genRes = await fetch('/api/variant-generator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2218,7 +2237,7 @@ export default function App() {
       try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
 
       // Step 2: Score
-      setSmartRewritePipelineStatus('Scoring variants...')
+      setSmartRewritePipelineStatus('バリアントスコアリング中...')
       const scoreRes = await fetch('/api/score-variants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2236,7 +2255,7 @@ export default function App() {
       try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
 
       // Step 3: Top Variant 選定
-      setSmartRewritePipelineStatus('Selecting top variant...')
+      setSmartRewritePipelineStatus('トップバリアントを選定中...')
       type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
       const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
         const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
@@ -2251,7 +2270,7 @@ export default function App() {
         })[0]
 
       if (!topScoredVariant) {
-        setSmartRewritePipelineStatus('Smart Rewrite Pipeline complete')
+        setSmartRewritePipelineStatus('スマートリライト完了')
         setSmartRewritePipelineError('おすすめ度4以上のVariantがありません')
         const data: LastSmartRewritePipeline = {
           selectedVariantName: '',
@@ -2268,7 +2287,7 @@ export default function App() {
       }
 
       // Step 4: Rewrite Story
-      setSmartRewritePipelineStatus('Rewriting story for top variant...')
+      setSmartRewritePipelineStatus('ストーリーをリライト中...')
       const rewriteRes = await fetch('/api/rewrite-story', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2282,7 +2301,7 @@ export default function App() {
       const rewritten: RewrittenSlide[] = rewriteData.slides
 
       // Step 5: Apply rewritten story
-      setSmartRewritePipelineStatus('Applying rewritten story...')
+      setSmartRewritePipelineStatus('リライトを適用中...')
       const mergedSlides: Slide[] = slides.map((s, i) => ({
         ...s,
         headline: rewritten[i]?.headline ?? s.headline,
@@ -2293,7 +2312,7 @@ export default function App() {
       await new Promise<void>((resolve) => setTimeout(resolve, 100))
 
       // Step 6: Queue投入（slidesSnapshot付き）
-      setSmartRewritePipelineStatus('Adding rewritten variant to queue...')
+      setSmartRewritePipelineStatus('リライトバリアントをキューに追加中...')
       const rewriteVariantName = `${topScoredVariant.variant.name}（Rewrite）`
       setRenderQueue((prev) => {
         if (prev.some((q) => q.variantName === rewriteVariantName)) return prev
@@ -2310,11 +2329,11 @@ export default function App() {
       await new Promise<void>((resolve) => setTimeout(resolve, 200))
 
       // Step 7: Render
-      setSmartRewritePipelineStatus('Rendering...')
+      setSmartRewritePipelineStatus('レンダリング中...')
       await batchRenderRef.current()
 
       // Step 8: Compare Dashboard
-      setSmartRewritePipelineStatus('Smart Rewrite Pipeline complete')
+      setSmartRewritePipelineStatus('スマートリライト完了')
       const q = renderQueueRef.current
       const renderedCount = q.filter((item) => item.variantName === rewriteVariantName && item.status === 'completed').length
       const failedCount = q.filter((item) => item.variantName === rewriteVariantName && item.status === 'failed').length
@@ -2330,8 +2349,8 @@ export default function App() {
       setLastSmartRewritePipeline(data)
       setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
     } catch (err) {
-      setSmartRewritePipelineError(err instanceof Error ? err.message : 'Smart Rewrite Pipeline failed')
-      setSmartRewritePipelineStatus('Smart Rewrite Pipeline failed')
+      setSmartRewritePipelineError(err instanceof Error ? err.message : 'スマートリライト失敗')
+      setSmartRewritePipelineStatus('スマートリライト失敗')
     } finally {
       setIsSmartRewritePipelineRunning(false)
     }
@@ -2344,7 +2363,7 @@ export default function App() {
     setMultiRewriteQueueError('')
     try {
       // Step 1: AI Generate
-      setMultiRewriteQueueStatus('Generating AI variants...')
+      setMultiRewriteQueueStatus('AIバリアント生成中...')
       const genRes = await fetch('/api/variant-generator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2358,7 +2377,7 @@ export default function App() {
       try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
 
       // Step 2: Score
-      setMultiRewriteQueueStatus('Scoring variants...')
+      setMultiRewriteQueueStatus('バリアントスコアリング中...')
       const scoreRes = await fetch('/api/score-variants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2376,7 +2395,7 @@ export default function App() {
       try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
 
       // Step 3: Select Top 3
-      setMultiRewriteQueueStatus('Selecting top variants...')
+      setMultiRewriteQueueStatus('トップバリアントを選定中...')
       type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
       const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
         const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
@@ -2392,7 +2411,7 @@ export default function App() {
         .slice(0, 3)
 
       if (targets.length === 0) {
-        setMultiRewriteQueueStatus('Multi Rewrite Queue complete')
+        setMultiRewriteQueueStatus('マルチリライトキュー完了')
         setMultiRewriteQueueError('おすすめ度4以上のVariantがありません')
         const data: LastMultiRewriteQueue = {
           rewrittenCount: 0,
@@ -2409,7 +2428,7 @@ export default function App() {
       }
 
       // Step 4: Rewrite each target (直列)
-      setMultiRewriteQueueStatus('Rewriting variants...')
+      setMultiRewriteQueueStatus('バリアントをリライト中...')
       const rewriteResults: { target: ScoredWithVariant; rewritten: RewrittenSlide[] }[] = []
       for (const target of targets) {
         const rewriteRes = await fetch('/api/rewrite-story', {
@@ -2426,7 +2445,7 @@ export default function App() {
       }
 
       // Step 5: Apply first rewrite to editor
-      setMultiRewriteQueueStatus('Applying first rewrite...')
+      setMultiRewriteQueueStatus('最初のリライトを適用中...')
       const firstRewrite = rewriteResults[0]
       if (firstRewrite) {
         const mergedSlides: Slide[] = slides.map((s, i) => ({
@@ -2440,7 +2459,7 @@ export default function App() {
       }
 
       // Step 6: Queue rewritten variants（各Variant個別slidesSnapshot付き）
-      setMultiRewriteQueueStatus('Queueing rewritten variants...')
+      setMultiRewriteQueueStatus('リライトバリアントをキューに投入中...')
       const rewriteQueueItems = rewriteResults.map((r) => ({
         variantName: `${r.target.variant.name}（Rewrite）`,
         snapshotSlides: slides.map((s, i) => ({
@@ -2470,11 +2489,11 @@ export default function App() {
       await new Promise<void>((resolve) => setTimeout(resolve, 200))
 
       // Step 7: Batch Render
-      setMultiRewriteQueueStatus('Rendering...')
+      setMultiRewriteQueueStatus('レンダリング中...')
       await batchRenderRef.current()
 
       // Step 8: Compare Dashboard
-      setMultiRewriteQueueStatus('Multi Rewrite Queue complete')
+      setMultiRewriteQueueStatus('マルチリライトキュー完了')
       const q = renderQueueRef.current
       const renderedCount = q.filter((item) => rewriteVariantNames.includes(item.variantName) && item.status === 'completed').length
       const failedCount = q.filter((item) => rewriteVariantNames.includes(item.variantName) && item.status === 'failed').length
@@ -2490,8 +2509,8 @@ export default function App() {
       setLastMultiRewriteQueue(data)
       setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
     } catch (err) {
-      setMultiRewriteQueueError(err instanceof Error ? err.message : 'Multi Rewrite Queue failed')
-      setMultiRewriteQueueStatus('Multi Rewrite Queue failed')
+      setMultiRewriteQueueError(err instanceof Error ? err.message : 'マルチリライトキュー失敗')
+      setMultiRewriteQueueStatus('マルチリライトキュー失敗')
     } finally {
       setIsMultiRewriteQueueRunning(false)
     }
@@ -2535,8 +2554,8 @@ export default function App() {
 
     try {
       // Step 1: Story Generate
-      setFactoryStep('Step 1/6: Generating story...')
-      addLog('[1/6] Story Generate 開始')
+      setFactoryStep('Step 1/7: ストーリー生成中...')
+      addLog('[1/7] Story Generate 開始')
       const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId)
       const story = await generateStory(
         themeForRun,
@@ -2564,11 +2583,41 @@ export default function App() {
       })
       setSlides(storySlides)
       setHasUnsavedChanges(true)
-      addLog(`[1/6] Story生成完了 (${storySlides.length}スライド)`)
+      addLog(`[1/7] Story生成完了 (${storySlides.length}スライド)`)
 
-      // Step 2: Variant Generate
-      setFactoryStep('Step 2/6: Generating variants...')
-      addLog('[2/6] Variant Generate 開始')
+      // Step 2: AI Image Generate
+      setFactoryStep('Step 2/7: AI画像生成中...')
+      addLog('[2/7] AI画像生成 開始')
+      let slidesWithImages = [...storySlides]
+      const imageTargets = storySlides.filter((s) => s.imagePrompt).slice(0, 14)
+      addLog(`[2/7] 画像生成対象: ${imageTargets.length}枚`)
+      for (let ii = 0; ii < imageTargets.length; ii++) {
+        const target = imageTargets[ii]
+        addLog(`  画像 ${ii + 1}/${imageTargets.length}: ${target.imagePrompt?.slice(0, 40)}...`)
+        try {
+          const imgRes = await fetch('/api/generate-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: target.imagePrompt }),
+          })
+          const imgData = await imgRes.json()
+          if (imgData.ok && imgData.image) {
+            slidesWithImages = slidesWithImages.map((s) =>
+              s.id === target.id ? { ...s, image: imgData.image } : s
+            )
+            setSlides([...slidesWithImages])
+          } else {
+            addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${imgData.message ?? 'APIエラー'}`)
+          }
+        } catch (imgErr) {
+          addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`)
+        }
+      }
+      addLog(`[2/7] AI画像生成完了`)
+
+      // Step 3: Variant Generate
+      setFactoryStep('Step 3/7: バリアント生成中...')
+      addLog('[3/7] Variant Generate 開始')
       const genRes = await fetch('/api/variant-generator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2580,11 +2629,11 @@ export default function App() {
       setGeneratedVariants(variants)
       generatedVariantsRef.current = variants
       try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
-      addLog(`[2/6] Variant生成完了 (${variants.length}件)`)
+      addLog(`[3/7] Variant生成完了 (${variants.length}件)`)
 
-      // Step 3: Score Variants
-      setFactoryStep('Step 3/6: Scoring variants...')
-      addLog('[3/6] Score Variants 開始')
+      // Step 4: Score Variants
+      setFactoryStep('Step 4/7: バリアントスコアリング中...')
+      addLog('[4/7] Score Variants 開始')
       const scoreRes = await fetch('/api/score-variants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2600,11 +2649,11 @@ export default function App() {
       setVariantScores(scores)
       variantScoresRef.current = scores
       try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
-      addLog(`[3/6] スコア完了 (${scores.length}件)`)
+      addLog(`[4/7] スコア完了 (${scores.length}件)`)
 
-      // Step 4: Select top 3 with recommendation >= 4
-      setFactoryStep('Step 4/6: Selecting top variants...')
-      addLog('[4/6] Top Variant 選定')
+      // Step 5: Select top 3 with recommendation >= 4
+      setFactoryStep('Step 5/7: トップバリアントを選定中...')
+      addLog('[5/7] Top Variant 選定')
       type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
       const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
         const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
@@ -2620,16 +2669,16 @@ export default function App() {
         .slice(0, 3)
 
       if (targets.length === 0) {
-        addLog('[4/6] recommendation >= 4 のVariantが見つかりませんでした')
+        addLog('[5/7] recommendation >= 4 のVariantが見つかりませんでした')
         setFactoryStep('Factory complete')
         setFactoryError('recommendation >= 4 のVariantが見つかりませんでした。Queue投入をスキップしました。')
         return
       }
-      addLog(`[4/6] ${targets.length}件 選定 (Recommend: ${targets.map((t) => t.recommendation).join(', ')})`)
+      addLog(`[5/7] ${targets.length}件 選定 (Recommend: ${targets.map((t) => t.recommendation).join(', ')})`)
 
-      // Step 5: Rewrite each target
-      setFactoryStep('Step 5/6: Rewriting variants...')
-      addLog('[5/6] Rewrite 開始')
+      // Step 6: Rewrite each target
+      setFactoryStep('Step 6/7: バリアントをリライト中...')
+      addLog('[6/7] Rewrite 開始')
       const queueItems: RenderQueueItem[] = []
       for (const target of targets) {
         addLog(`  Rewriting: ${target.variant.name}`)
@@ -2638,13 +2687,13 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             angle: target.variant.angle,
-            slides: storySlides.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
+            slides: slidesWithImages.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
           }),
         })
         const rewriteData = await rewriteRes.json()
         if (!rewriteData.ok) throw new Error(rewriteData.message ?? `Failed to rewrite story for ${target.variant.name}`)
         const rewritten: RewrittenSlide[] = rewriteData.slides
-        const rewrittenSlides: Slide[] = storySlides.map((s, i) => ({
+        const rewrittenSlides: Slide[] = slidesWithImages.map((s, i) => ({
           ...s,
           headline: rewritten[i]?.headline ?? s.headline,
           subline: rewritten[i]?.subline ?? s.subline,
@@ -2658,11 +2707,11 @@ export default function App() {
           snapshotCreatedAt: new Date().toISOString(),
         })
       }
-      addLog(`[5/6] Rewrite完了 (${queueItems.length}件)`)
+      addLog(`[6/7] Rewrite完了 (${queueItems.length}件)`)
 
-      // Step 6: Queue
-      setFactoryStep('Step 6/6: Queueing...')
-      addLog('[6/6] Queue投入')
+      // Step 7: Queue
+      setFactoryStep('Step 7/7: キューに投入中...')
+      addLog('[7/7] Queue投入')
       let actualQueueAdded = 0
       setRenderQueue((prev) => {
         const existingNames = new Set(prev.map((q) => q.variantName))
@@ -2673,7 +2722,7 @@ export default function App() {
         try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
         return next
       })
-      addLog(`[6/6] Queue投入完了 (${actualQueueAdded}件)`)
+      addLog(`[7/7] Queue投入完了 (${actualQueueAdded}件)`)
 
       // Build Factory Summary (Phase15-B)
       const sortedTargets = [...targets].sort((a, b) => {
@@ -3366,47 +3415,48 @@ export default function App() {
       : 'render-status-msg'
 
   const pipelineStep =
-    pipelineStatus === 'Generating variants...' ? 1 :
-    pipelineStatus === 'Rendering variants...' ? 2 :
-    pipelineStatus === 'Compare dashboard ready' ? 3 : 0
+    pipelineStatus === 'バリアント生成中...' ? 1 :
+    pipelineStatus === 'バリアントレンダリング中...' ? 2 :
+    pipelineStatus === '比較ダッシュボード準備完了' ? 3 : 0
 
   const isPipelineDisabled = isAutoPipelineRunning || isBatchRendering || isRendering || isSmartPipelineRunning || isSmartRewritePipelineRunning || isMultiRewriteQueueRunning || factoryRunning
 
   const factoryStepNum =
-    factoryStep === 'Step 1/6: Generating story...' ? 1 :
-    factoryStep === 'Step 2/6: Generating variants...' ? 2 :
-    factoryStep === 'Step 3/6: Scoring variants...' ? 3 :
-    factoryStep === 'Step 4/6: Selecting top variants...' ? 4 :
-    factoryStep === 'Step 5/6: Rewriting variants...' ? 5 :
-    factoryStep === 'Step 6/6: Queueing...' ? 6 :
-    factoryStep === 'Factory complete' ? 7 : 0
+    factoryStep === 'Step 1/7: ストーリー生成中...' ? 1 :
+    factoryStep === 'Step 2/7: AI画像生成中...' ? 2 :
+    factoryStep === 'Step 3/7: バリアント生成中...' ? 3 :
+    factoryStep === 'Step 4/7: バリアントスコアリング中...' ? 4 :
+    factoryStep === 'Step 5/7: トップバリアントを選定中...' ? 5 :
+    factoryStep === 'Step 6/7: バリアントをリライト中...' ? 6 :
+    factoryStep === 'Step 7/7: キューに投入中...' ? 7 :
+    factoryStep === 'Factory complete' ? 8 : 0
 
   const multiRewriteQueueStep =
-    multiRewriteQueueStatus === 'Generating AI variants...' ? 1 :
-    multiRewriteQueueStatus === 'Scoring variants...' ? 2 :
-    multiRewriteQueueStatus === 'Selecting top variants...' ? 3 :
-    multiRewriteQueueStatus === 'Rewriting variants...' ? 4 :
-    multiRewriteQueueStatus === 'Applying first rewrite...' ? 5 :
-    multiRewriteQueueStatus === 'Queueing rewritten variants...' ? 6 :
-    multiRewriteQueueStatus === 'Rendering...' ? 7 :
-    multiRewriteQueueStatus === 'Multi Rewrite Queue complete' ? 8 : 0
+    multiRewriteQueueStatus === 'AIバリアント生成中...' ? 1 :
+    multiRewriteQueueStatus === 'バリアントスコアリング中...' ? 2 :
+    multiRewriteQueueStatus === 'トップバリアントを選定中...' ? 3 :
+    multiRewriteQueueStatus === 'バリアントをリライト中...' ? 4 :
+    multiRewriteQueueStatus === '最初のリライトを適用中...' ? 5 :
+    multiRewriteQueueStatus === 'リライトバリアントをキューに投入中...' ? 6 :
+    multiRewriteQueueStatus === 'レンダリング中...' ? 7 :
+    multiRewriteQueueStatus === 'マルチリライトキュー完了' ? 8 : 0
 
   const smartRewritePipelineStep =
-    smartRewritePipelineStatus === 'Generating AI variants...' ? 1 :
-    smartRewritePipelineStatus === 'Scoring variants...' ? 2 :
-    smartRewritePipelineStatus === 'Selecting top variant...' ? 3 :
-    smartRewritePipelineStatus === 'Rewriting story for top variant...' ? 4 :
-    smartRewritePipelineStatus === 'Applying rewritten story...' ? 5 :
-    smartRewritePipelineStatus === 'Adding rewritten variant to queue...' ? 6 :
-    smartRewritePipelineStatus === 'Rendering...' ? 7 :
-    smartRewritePipelineStatus === 'Smart Rewrite Pipeline complete' ? 8 : 0
+    smartRewritePipelineStatus === 'AIバリアント生成中...' ? 1 :
+    smartRewritePipelineStatus === 'バリアントスコアリング中...' ? 2 :
+    smartRewritePipelineStatus === 'トップバリアントを選定中...' ? 3 :
+    smartRewritePipelineStatus === 'ストーリーをリライト中...' ? 4 :
+    smartRewritePipelineStatus === 'リライトを適用中...' ? 5 :
+    smartRewritePipelineStatus === 'リライトバリアントをキューに追加中...' ? 6 :
+    smartRewritePipelineStatus === 'レンダリング中...' ? 7 :
+    smartRewritePipelineStatus === 'スマートリライト完了' ? 8 : 0
 
   const smartPipelineStep =
-    smartPipelineStatus === 'Generating AI variants...' ? 1 :
-    smartPipelineStatus === 'Scoring variants...' ? 2 :
-    smartPipelineStatus === 'Adding recommended variants to queue...' ? 3 :
-    smartPipelineStatus === 'Rendering recommended variants...' ? 4 :
-    smartPipelineStatus === 'Compare dashboard ready' ? 5 : 0
+    smartPipelineStatus === 'AIバリアント生成中...' ? 1 :
+    smartPipelineStatus === 'バリアントスコアリング中...' ? 2 :
+    smartPipelineStatus === '推奨バリアントをキューに追加中...' ? 3 :
+    smartPipelineStatus === '推奨バリアントのレンダリング中...' ? 4 :
+    smartPipelineStatus === '比較ダッシュボード準備完了' ? 5 : 0
 
   if (loading) {
     return (
@@ -3503,8 +3553,15 @@ export default function App() {
             <span className="panel-title">スライド一覧</span>
             {hasUnsavedChanges && <span className="unsaved-badge">未保存</span>}
           </div>
-          <span className="panel-badge">{slides.length}枚</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn-new-project" onClick={handleNewProject} title="14枚の空白スライドで新規作成">
+              ＋ 新規
+            </button>
+            <span className="panel-badge">{slides.length}枚</span>
+          </div>
         </div>
+
+        <div className="panel-left-body">
 
         {/* テンプレートセクション */}
         <div className="template-section">
@@ -4031,32 +4088,6 @@ export default function App() {
                 )}
               </div>
 
-              <p className="ai-generator-label" style={{ marginTop: 10 }}>テーマ入力</p>
-              <div className="ai-generator-row">
-                <input
-                  id="ai-theme-input"
-                  className="ai-generator-input"
-                  type="text"
-                  placeholder="テーマを入力..."
-                  value={aiTheme}
-                  onChange={(e) => setAiTheme(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
-                  disabled={isGenerating || autoWorkflowRunning}
-                />
-                <button
-                  className={`ai-generator-btn${isGenerating ? ' ai-generator-btn--loading' : ''}`}
-                  onClick={handleAIGenerate}
-                  disabled={!aiTheme.trim() || isGenerating || autoWorkflowRunning}
-                >
-                  {isGenerating ? 'Generating...' : 'AI生成'}
-                </button>
-              </div>
-              {generateError && (
-                <p className="ai-generator-error">{generateError}</p>
-              )}
-              {generateSuccess && !generateError && (
-                <p className="ai-generator-success">14枚のストーリーを生成しました</p>
-              )}
             </div>
           )}
           {templateVariableKeys.length > 0 && (
@@ -4097,133 +4128,6 @@ export default function App() {
             </div>
           )}
 
-          {/* AIワークフロー (Phase12-H / Phase12-I) */}
-          {templateVariableKeys.length > 0 && (
-            <div className="ai-workflow">
-              <p className="ai-workflow-title">AIワークフロー</p>
-              <button
-                className={`ai-auto-btn${autoWorkflowRunning ? ' ai-auto-btn--running' : ''}`}
-                onClick={handleAutoWorkflow}
-                disabled={!hasTheme || autoWorkflowRunning || isGenerating || bulkImageGenerating}
-              >
-                {autoWorkflowRunning ? (workflowMessage || '自動生成中...') : '自動でまとめて生成'}
-              </button>
-              <div className="ai-workflow-steps">
-                {/* Step 1: テーマ入力 */}
-                <div className={`ai-workflow-step${workflowStep === 'theme' ? ' ai-workflow-step--active' : ''}`}>
-                  <span className="ai-workflow-step-icon">
-                    {WORKFLOW_ORDER.indexOf(workflowStep) > 0 ? '✅' : workflowStep === 'theme' ? '🔵' : '⚪️'}
-                  </span>
-                  <div className="ai-workflow-step-body">
-                    <span className="ai-workflow-step-name">Step 1 テーマ入力</span>
-                    {workflowStep === 'theme' && (
-                      <button
-                        className="ai-workflow-step-btn"
-                        disabled={!hasTheme || autoWorkflowRunning}
-                        onClick={() => { setWorkflowError(''); setWorkflowStep('story') }}
-                      >
-                        次へ
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Step 2: ストーリー生成 */}
-                <div className={`ai-workflow-step${workflowStep === 'story' ? ' ai-workflow-step--active' : ''}`}>
-                  <span className="ai-workflow-step-icon">
-                    {['images','save','render','done'].includes(workflowStep) ? '✅' : workflowStep === 'story' ? '🔵' : '⚪️'}
-                  </span>
-                  <div className="ai-workflow-step-body">
-                    <span className="ai-workflow-step-name">Step 2 14枚ストーリー生成</span>
-                    {workflowStep === 'story' && (
-                      <button
-                        className="ai-workflow-step-btn"
-                        disabled={isGenerating || autoWorkflowRunning}
-                        onClick={handleWorkflowStory}
-                      >
-                        {isGenerating ? 'Generating...' : '14枚ストーリーを生成'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Step 3: 画像生成 */}
-                <div className={`ai-workflow-step${workflowStep === 'images' ? ' ai-workflow-step--active' : ''}`}>
-                  <span className="ai-workflow-step-icon">
-                    {['save','render','done'].includes(workflowStep) ? '✅' : workflowStep === 'images' ? '🔵' : '⚪️'}
-                  </span>
-                  <div className="ai-workflow-step-body">
-                    <span className="ai-workflow-step-name">Step 3 14枚画像生成</span>
-                    {workflowStep === 'images' && (
-                      <button
-                        className="ai-workflow-step-btn"
-                        disabled={bulkImageGenerating || autoWorkflowRunning}
-                        onClick={handleWorkflowImages}
-                      >
-                        {bulkImageGenerating
-                          ? `${bulkImageProgress.current}/${bulkImageProgress.total} 生成中...`
-                          : '14枚画像を生成'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Step 4: 保存 */}
-                <div className={`ai-workflow-step${workflowStep === 'save' ? ' ai-workflow-step--active' : ''}`}>
-                  <span className="ai-workflow-step-icon">
-                    {['render','done'].includes(workflowStep) ? '✅' : workflowStep === 'save' ? '🔵' : '⚪️'}
-                  </span>
-                  <div className="ai-workflow-step-body">
-                    <span className="ai-workflow-step-name">Step 4 保存</span>
-                    {workflowStep === 'save' && (
-                      <button
-                        className="ai-workflow-step-btn"
-                        disabled={saveStatus === 'saving' || autoWorkflowRunning}
-                        onClick={handleWorkflowSave}
-                      >
-                        {saveStatus === 'saving' ? '保存中...' : '保存する'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Step 5: 動画生成 */}
-                <div className={`ai-workflow-step${workflowStep === 'render' ? ' ai-workflow-step--active' : ''}`}>
-                  <span className="ai-workflow-step-icon">
-                    {workflowStep === 'done' ? '✅' : workflowStep === 'render' ? '🔵' : '⚪️'}
-                  </span>
-                  <div className="ai-workflow-step-body">
-                    <span className="ai-workflow-step-name">Step 5 動画生成</span>
-                    {workflowStep === 'render' && (
-                      <button
-                        className="ai-workflow-step-btn"
-                        disabled={isRendering || autoWorkflowRunning}
-                        onClick={handleWorkflowRender}
-                      >
-                        動画生成する
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {workflowStep === 'done' && (
-                <p className="ai-workflow-done">全ステップ完了！動画が生成されています。</p>
-              )}
-              {workflowError && (
-                <p className="ai-workflow-error">{workflowError}</p>
-              )}
-              {workflowStep !== 'theme' && workflowStep !== 'done' && (
-                <button
-                  className="ai-workflow-reset-btn"
-                  onClick={() => { setWorkflowStep('theme'); setWorkflowError('') }}
-                  disabled={autoWorkflowRunning}
-                >
-                  最初からやり直す
-                </button>
-              )}
-            </div>
-          )}
 
           {/* AI生成履歴 (Phase12-N) */}
           {aiGenerationHistory.length > 0 && (
@@ -4582,6 +4486,36 @@ export default function App() {
               </div>
             )}
 
+            {/* テーマ入力 */}
+            <div className="ai-generator" style={{ marginBottom: 12 }}>
+              <p className="ai-generator-label">テーマ入力</p>
+              <div className="ai-generator-row">
+                <input
+                  id="ai-theme-input"
+                  className="ai-generator-input"
+                  type="text"
+                  placeholder="テーマを入力..."
+                  value={aiTheme}
+                  onChange={(e) => setAiTheme(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
+                  disabled={isGenerating}
+                />
+                <button
+                  className={`ai-generator-btn${isGenerating ? ' ai-generator-btn--loading' : ''}`}
+                  onClick={handleAIGenerate}
+                  disabled={!aiTheme.trim() || isGenerating}
+                >
+                  {isGenerating ? '生成中...' : 'ストーリー生成'}
+                </button>
+              </div>
+              {generateError && (
+                <p className="ai-generator-error">{generateError}</p>
+              )}
+              {generateSuccess && !generateError && (
+                <p className="ai-generator-success">14枚のストーリーを生成しました</p>
+              )}
+            </div>
+
             {/* 🏭 AI Reel Factory (Phase16-L) */}
             <FactoryPanel
               factoryRunning={factoryRunning}
@@ -4591,6 +4525,10 @@ export default function App() {
               factoryLog={factoryLog}
               factoryNotice={factoryNotice}
               isPipelineDisabled={isPipelineDisabled || !aiTheme.trim()}
+              hasTheme={aiTheme.trim().length > 0}
+              generatedSlides={slides
+                .filter((s): s is typeof s & { image: string } => !!s.image?.startsWith('generated/'))
+                .map((s) => ({ id: s.id, headline: s.headline, image: s.image }))}
               onRunFactory={() => handleRunReelFactory()}
               factorySummary={factorySummary}
               findFactoryQueueItem={findFactoryQueueItem}
@@ -4622,7 +4560,7 @@ export default function App() {
                 onClick={handleAutoRenderPipeline}
                 disabled={isPipelineDisabled || !aiTheme.trim()}
               >
-                {isAutoPipelineRunning ? '🚀 Pipeline Running...' : '🚀 Auto Render Pipeline'}
+                {isAutoPipelineRunning ? '🚀 パイプライン実行中...' : '🚀 自動レンダーパイプライン'}
               </button>
 
               {/* 🧠⚡ Smart Pipeline (Phase14-I) */}
@@ -4631,20 +4569,20 @@ export default function App() {
                 onClick={handleSmartPipeline}
                 disabled={isPipelineDisabled || !aiTheme.trim()}
               >
-                {isSmartPipelineRunning ? '🧠⚡ Smart Pipeline Running...' : '🧠⚡ Smart Pipeline'}
+                {isSmartPipelineRunning ? '🧠⚡ スマートパイプライン実行中...' : '🧠⚡ スマートパイプライン'}
               </button>
 
               {/* Smart Pipeline Progress Card */}
               {isSmartPipelineRunning && (
                 <div className="smart-pipeline-card smart-pipeline-card--running">
-                  <p className="smart-pipeline-card-title">🧠⚡ Smart Pipeline Running</p>
+                  <p className="smart-pipeline-card-title">🧠⚡ スマートパイプライン実行中</p>
                   <div className="smart-pipeline-steps">
                     {[
-                      { num: 1, label: 'AI Generate' },
-                      { num: 2, label: 'Score' },
-                      { num: 3, label: 'Smart Queue' },
-                      { num: 4, label: 'Render' },
-                      { num: 5, label: 'Compare' },
+                      { num: 1, label: 'AI生成' },
+                      { num: 2, label: 'スコアリング' },
+                      { num: 3, label: 'キュー投入' },
+                      { num: 4, label: 'レンダリング' },
+                      { num: 5, label: '比較' },
                     ].map(({ num, label }) => (
                       <div key={num} className={`smart-pipeline-step${smartPipelineStep >= num ? ' smart-pipeline-step--active' : ''}`}>
                         <span className="smart-pipeline-step-num">Step {num}/5</span>
@@ -4659,15 +4597,15 @@ export default function App() {
               )}
 
               {/* Smart Pipeline Complete Card */}
-              {!isSmartPipelineRunning && smartPipelineStatus === 'Compare dashboard ready' && lastSmartPipeline && (
+              {!isSmartPipelineRunning && smartPipelineStatus === '比較ダッシュボード準備完了' && lastSmartPipeline && (
                 <div className="smart-pipeline-card smart-pipeline-card--complete">
-                  <p className="smart-pipeline-card-title">✅ Smart Pipeline Complete</p>
+                  <p className="smart-pipeline-card-title">✅ スマートパイプライン完了</p>
                   <div className="smart-pipeline-stats">
-                    <span>Generated: <strong>{lastSmartPipeline.generatedCount}</strong></span>
-                    <span>Recommended: <strong>{lastSmartPipeline.recommendedCount}</strong></span>
-                    <span>Rendered: <strong>{lastSmartPipeline.renderedCount}</strong></span>
+                    <span>生成: <strong>{lastSmartPipeline.generatedCount}</strong></span>
+                    <span>推奨: <strong>{lastSmartPipeline.recommendedCount}</strong></span>
+                    <span>レンダリング: <strong>{lastSmartPipeline.renderedCount}</strong></span>
                     {lastSmartPipeline.failedCount > 0 && (
-                      <span className="smart-pipeline-stat--fail">Failed: <strong>{lastSmartPipeline.failedCount}</strong></span>
+                      <span className="smart-pipeline-stat--fail">失敗: <strong>{lastSmartPipeline.failedCount}</strong></span>
                     )}
                   </div>
                   {smartPipelineError && <p className="smart-pipeline-notice">{smartPipelineError}</p>}
@@ -4675,9 +4613,9 @@ export default function App() {
               )}
 
               {/* Smart Pipeline Failed Card */}
-              {!isSmartPipelineRunning && smartPipelineStatus === 'Smart Pipeline failed' && (
+              {!isSmartPipelineRunning && smartPipelineStatus === 'スマートパイプライン失敗' && (
                 <div className="smart-pipeline-card smart-pipeline-card--failed">
-                  <p className="smart-pipeline-card-title">❌ Smart Pipeline Failed</p>
+                  <p className="smart-pipeline-card-title">❌ スマートパイプライン失敗</p>
                   <p className="smart-pipeline-error-text">{smartPipelineError}</p>
                 </div>
               )}
@@ -4688,23 +4626,23 @@ export default function App() {
                 onClick={handleSmartRewritePipeline}
                 disabled={isPipelineDisabled || !aiTheme.trim()}
               >
-                {isSmartRewritePipelineRunning ? '🪄⚡ Smart Rewrite Pipeline Running...' : '🪄⚡ Smart Rewrite Pipeline'}
+                {isSmartRewritePipelineRunning ? '🪄⚡ スマートリライト実行中...' : '🪄⚡ スマートリライト'}
               </button>
 
               {/* Smart Rewrite Pipeline Progress Card */}
               {isSmartRewritePipelineRunning && (
                 <div className="smart-pipeline-card smart-pipeline-card--running">
-                  <p className="smart-pipeline-card-title">🪄⚡ Smart Rewrite Pipeline Running</p>
+                  <p className="smart-pipeline-card-title">🪄⚡ スマートリライト実行中</p>
                   <div className="smart-pipeline-steps">
                     {[
-                      { num: 1, label: 'AI Generate' },
-                      { num: 2, label: 'Score' },
-                      { num: 3, label: 'Select Top Variant' },
-                      { num: 4, label: 'Rewrite Story' },
-                      { num: 5, label: 'Apply Story' },
-                      { num: 6, label: 'Queue' },
-                      { num: 7, label: 'Render' },
-                      { num: 8, label: 'Compare' },
+                      { num: 1, label: 'AI生成' },
+                      { num: 2, label: 'スコアリング' },
+                      { num: 3, label: 'トップ選定' },
+                      { num: 4, label: 'ストーリーリライト' },
+                      { num: 5, label: 'ストーリー適用' },
+                      { num: 6, label: 'キュー投入' },
+                      { num: 7, label: 'レンダリング' },
+                      { num: 8, label: '比較' },
                     ].map(({ num, label }) => (
                       <div key={num} className={`smart-pipeline-step${smartRewritePipelineStep >= num ? ' smart-pipeline-step--active' : ''}`}>
                         <span className="smart-pipeline-step-num">Step {num}/8</span>
@@ -4719,17 +4657,17 @@ export default function App() {
               )}
 
               {/* Smart Rewrite Pipeline Complete Card */}
-              {!isSmartRewritePipelineRunning && smartRewritePipelineStatus === 'Smart Rewrite Pipeline complete' && lastSmartRewritePipeline && (
+              {!isSmartRewritePipelineRunning && smartRewritePipelineStatus === 'スマートリライト完了' && lastSmartRewritePipeline && (
                 <div className="smart-pipeline-card smart-pipeline-card--complete">
-                  <p className="smart-pipeline-card-title">✅ Smart Rewrite Pipeline Complete</p>
+                  <p className="smart-pipeline-card-title">✅ スマートリライト完了</p>
                   <div className="smart-pipeline-stats">
                     {lastSmartRewritePipeline.selectedVariantName ? (
                       <>
-                        <span>Selected: <strong>{lastSmartRewritePipeline.selectedVariantName}</strong></span>
-                        <span>Recommendation: <strong>{lastSmartRewritePipeline.recommendation}/5</strong></span>
-                        <span>Rendered: <strong>{lastSmartRewritePipeline.renderedCount}</strong></span>
+                        <span>選定: <strong>{lastSmartRewritePipeline.selectedVariantName}</strong></span>
+                        <span>推奨度: <strong>{lastSmartRewritePipeline.recommendation}/5</strong></span>
+                        <span>レンダリング: <strong>{lastSmartRewritePipeline.renderedCount}</strong></span>
                         {lastSmartRewritePipeline.failedCount > 0 && (
-                          <span className="smart-pipeline-stat--fail">Failed: <strong>{lastSmartRewritePipeline.failedCount}</strong></span>
+                          <span className="smart-pipeline-stat--fail">失敗: <strong>{lastSmartRewritePipeline.failedCount}</strong></span>
                         )}
                       </>
                     ) : (
@@ -4743,9 +4681,9 @@ export default function App() {
               )}
 
               {/* Smart Rewrite Pipeline Failed Card */}
-              {!isSmartRewritePipelineRunning && smartRewritePipelineStatus === 'Smart Rewrite Pipeline failed' && (
+              {!isSmartRewritePipelineRunning && smartRewritePipelineStatus === 'スマートリライト失敗' && (
                 <div className="smart-pipeline-card smart-pipeline-card--failed">
-                  <p className="smart-pipeline-card-title">❌ Smart Rewrite Pipeline Failed</p>
+                  <p className="smart-pipeline-card-title">❌ スマートリライト失敗</p>
                   <p className="smart-pipeline-error-text">{smartRewritePipelineError}</p>
                 </div>
               )}
@@ -4756,23 +4694,23 @@ export default function App() {
                 onClick={handleMultiRewriteQueue}
                 disabled={isPipelineDisabled || !aiTheme.trim()}
               >
-                {isMultiRewriteQueueRunning ? '🪄🧩 Multi Rewrite Queue Running...' : '🪄🧩 Multi Rewrite Queue'}
+                {isMultiRewriteQueueRunning ? '🪄🧩 マルチリライトキュー実行中...' : '🪄🧩 マルチリライトキュー'}
               </button>
 
               {/* Multi Rewrite Queue Progress Card */}
               {isMultiRewriteQueueRunning && (
                 <div className="smart-pipeline-card smart-pipeline-card--running">
-                  <p className="smart-pipeline-card-title">🪄🧩 Multi Rewrite Queue Running</p>
+                  <p className="smart-pipeline-card-title">🪄🧩 マルチリライトキュー実行中</p>
                   <div className="smart-pipeline-steps">
                     {[
-                      { num: 1, label: 'AI Generate' },
-                      { num: 2, label: 'Score' },
-                      { num: 3, label: 'Select Top 3' },
-                      { num: 4, label: 'Rewrite Variants' },
-                      { num: 5, label: 'Apply First Rewrite' },
-                      { num: 6, label: 'Queue Rewritten Variants' },
-                      { num: 7, label: 'Render' },
-                      { num: 8, label: 'Compare' },
+                      { num: 1, label: 'AI生成' },
+                      { num: 2, label: 'スコアリング' },
+                      { num: 3, label: 'トップ3選定' },
+                      { num: 4, label: 'バリアントリライト' },
+                      { num: 5, label: '最初のリライト適用' },
+                      { num: 6, label: 'リライトキュー投入' },
+                      { num: 7, label: 'レンダリング' },
+                      { num: 8, label: '比較' },
                     ].map(({ num, label }) => (
                       <div key={num} className={`smart-pipeline-step${multiRewriteQueueStep >= num ? ' smart-pipeline-step--active' : ''}`}>
                         <span className="smart-pipeline-step-num">Step {num}/8</span>
@@ -4787,17 +4725,17 @@ export default function App() {
               )}
 
               {/* Multi Rewrite Queue Complete Card */}
-              {!isMultiRewriteQueueRunning && multiRewriteQueueStatus === 'Multi Rewrite Queue complete' && lastMultiRewriteQueue && (
+              {!isMultiRewriteQueueRunning && multiRewriteQueueStatus === 'マルチリライトキュー完了' && lastMultiRewriteQueue && (
                 <div className="smart-pipeline-card smart-pipeline-card--complete">
-                  <p className="smart-pipeline-card-title">✅ Multi Rewrite Queue Complete</p>
+                  <p className="smart-pipeline-card-title">✅ マルチリライトキュー完了</p>
                   <div className="smart-pipeline-stats">
                     {lastMultiRewriteQueue.selectedVariants.length > 0 ? (
                       <>
-                        <span>Rewritten: <strong>{lastMultiRewriteQueue.rewrittenCount}</strong></span>
-                        <span>Queued: <strong>{lastMultiRewriteQueue.queuedCount}</strong></span>
-                        <span>Rendered: <strong>{lastMultiRewriteQueue.renderedCount}</strong></span>
+                        <span>リライト: <strong>{lastMultiRewriteQueue.rewrittenCount}</strong></span>
+                        <span>キュー投入: <strong>{lastMultiRewriteQueue.queuedCount}</strong></span>
+                        <span>レンダリング: <strong>{lastMultiRewriteQueue.renderedCount}</strong></span>
                         {lastMultiRewriteQueue.failedCount > 0 && (
-                          <span className="smart-pipeline-stat--fail">Failed: <strong>{lastMultiRewriteQueue.failedCount}</strong></span>
+                          <span className="smart-pipeline-stat--fail">失敗: <strong>{lastMultiRewriteQueue.failedCount}</strong></span>
                         )}
                       </>
                     ) : (
@@ -4806,7 +4744,7 @@ export default function App() {
                   </div>
                   {lastMultiRewriteQueue.selectedVariants.length > 0 && (
                     <div className="smart-pipeline-selected-variants">
-                      <p className="smart-pipeline-selected-label">Selected:</p>
+                      <p className="smart-pipeline-selected-label">選定:</p>
                       {lastMultiRewriteQueue.selectedVariants.map((name) => (
                         <span key={name} className="smart-pipeline-variant-tag">{name}</span>
                       ))}
@@ -4816,9 +4754,9 @@ export default function App() {
               )}
 
               {/* Multi Rewrite Queue Failed Card */}
-              {!isMultiRewriteQueueRunning && multiRewriteQueueStatus === 'Multi Rewrite Queue failed' && (
+              {!isMultiRewriteQueueRunning && multiRewriteQueueStatus === 'マルチリライトキュー失敗' && (
                 <div className="smart-pipeline-card smart-pipeline-card--failed">
-                  <p className="smart-pipeline-card-title">❌ Multi Rewrite Queue Failed</p>
+                  <p className="smart-pipeline-card-title">❌ マルチリライトキュー失敗</p>
                   <p className="smart-pipeline-error-text">{multiRewriteQueueError}</p>
                 </div>
               )}
@@ -4826,23 +4764,23 @@ export default function App() {
               {/* Pipeline Progress Card */}
               {isAutoPipelineRunning && (
                 <div className="pipeline-progress-card">
-                  <p className="pipeline-progress-title">🚀 Auto Pipeline Running</p>
+                  <p className="pipeline-progress-title">🚀 自動パイプライン実行中</p>
                   <div className="pipeline-steps">
                     <div className={`pipeline-step${pipelineStep >= 1 ? ' pipeline-step--active' : ''}`}>
                       <span className="pipeline-step-num">Step 1/3</span>
-                      <span className="pipeline-step-label">Generating Variants</span>
+                      <span className="pipeline-step-label">バリアント生成</span>
                       {pipelineStep === 1 && <span className="pipeline-step-spinner">⏳</span>}
                       {pipelineStep > 1 && <span className="pipeline-step-done">✅</span>}
                     </div>
                     <div className={`pipeline-step${pipelineStep >= 2 ? ' pipeline-step--active' : ''}`}>
                       <span className="pipeline-step-num">Step 2/3</span>
-                      <span className="pipeline-step-label">Rendering</span>
+                      <span className="pipeline-step-label">レンダリング</span>
                       {pipelineStep === 2 && <span className="pipeline-step-spinner">⏳</span>}
                       {pipelineStep > 2 && <span className="pipeline-step-done">✅</span>}
                     </div>
                     <div className={`pipeline-step${pipelineStep >= 3 ? ' pipeline-step--active' : ''}`}>
                       <span className="pipeline-step-num">Step 3/3</span>
-                      <span className="pipeline-step-label">Preparing Compare Dashboard</span>
+                      <span className="pipeline-step-label">比較ダッシュボード準備</span>
                       {pipelineStep === 3 && <span className="pipeline-step-spinner">⏳</span>}
                     </div>
                   </div>
@@ -4851,19 +4789,19 @@ export default function App() {
               )}
 
               {/* Pipeline Complete Card */}
-              {!isAutoPipelineRunning && pipelineStatus === 'Compare dashboard ready' && lastPipeline && (
+              {!isAutoPipelineRunning && pipelineStatus === '比較ダッシュボード準備完了' && lastPipeline && (
                 <div className="pipeline-complete-card">
-                  <p className="pipeline-complete-title">✅ Pipeline Complete</p>
-                  <p className="pipeline-complete-stat">{lastPipeline.completedCount} variants rendered</p>
-                  <p className="pipeline-complete-sub">Ready to compare</p>
+                  <p className="pipeline-complete-title">✅ パイプライン完了</p>
+                  <p className="pipeline-complete-stat">{lastPipeline.completedCount} バリアントをレンダリング</p>
+                  <p className="pipeline-complete-sub">比較できます</p>
                 </div>
               )}
 
               {/* Pipeline Failed Card */}
-              {!isAutoPipelineRunning && pipelineStatus === 'Pipeline failed' && (
+              {!isAutoPipelineRunning && pipelineStatus === 'パイプライン失敗' && (
                 <div className="pipeline-failed-card">
-                  <p className="pipeline-failed-title">❌ Pipeline Failed</p>
-                  <p className="pipeline-failed-sub">Please check render logs</p>
+                  <p className="pipeline-failed-title">❌ パイプライン失敗</p>
+                  <p className="pipeline-failed-sub">レンダーログを確認してください</p>
                 </div>
               )}
 
@@ -4874,7 +4812,7 @@ export default function App() {
                   onClick={generateAIVariants}
                   disabled={isPipelineDisabled || isGeneratingVariants || !aiTheme.trim()}
                 >
-                  {isGeneratingVariants ? '🧠 Generating...' : '🧠 AI Generate Variants'}
+                  {isGeneratingVariants ? '🧠 生成中...' : '🧠 AIバリアント生成'}
                 </button>
                 {variantGenerateError && (
                   <p className="variant-generate-error">{variantGenerateError}</p>
@@ -4882,28 +4820,28 @@ export default function App() {
                 {generatedVariants.length > 0 && (
                   <div className="generated-variants-panel">
                     <div className="generated-variants-header">
-                      <p className="generated-variants-title">Generated Variants</p>
+                      <p className="generated-variants-title">生成済みバリアント</p>
                       <div className="generated-variants-header-actions">
                         <button
                           className="btn-score-variants"
                           onClick={scoreVariants}
                           disabled={isPipelineDisabled || isScoringVariants || !aiTheme.trim()}
                         >
-                          {isScoringVariants ? '📊 Scoring...' : '📊 Score Variants'}
+                          {isScoringVariants ? '📊 スコアリング中...' : '📊 スコアリング'}
                         </button>
                         <button
                           className="btn-add-all-variants"
                           onClick={addAllVariantsToQueue}
                           disabled={isPipelineDisabled}
                         >
-                          ＋ Add All To Queue
+                          ＋ 全てキューに追加
                         </button>
                         <button
                           className="btn-smart-queue"
                           onClick={addSmartQueue}
                           disabled={isPipelineDisabled || variantScores.length === 0}
                         >
-                          ⚡ Smart Queue
+                          ⚡ スマートキュー
                         </button>
                       </div>
                     </div>
@@ -4911,8 +4849,8 @@ export default function App() {
                       const candidateCount = variantScores.filter((s) => s.recommendation >= 4).length
                       return variantScores.length > 0 ? (
                         <div className="smart-queue-summary">
-                          <span>Smart Queue Candidates: <strong>{candidateCount}</strong></span>
-                          <span className="smart-queue-threshold">Threshold: Recommend 4+</span>
+                          <span>スマートキュー候補: <strong>{candidateCount}</strong></span>
+                          <span className="smart-queue-threshold">基準: 推奨度4以上</span>
                         </div>
                       ) : null
                     })()}
@@ -4930,16 +4868,16 @@ export default function App() {
                         <li key={i} className={`generated-variant-card${isRecommended ? ' generated-variant-card--recommended' : ''}`}>
                           <div className="generated-variant-info">
                             <span className="generated-variant-name">🧠 {v.name}</span>
-                            {isRecommended && <span className="variant-recommended-badge">⚡ Recommended</span>}
+                            {isRecommended && <span className="variant-recommended-badge">⚡ 推奨</span>}
                             <span className="generated-variant-desc">{v.description}</span>
                           </div>
                           {sc && (
                               <div className="variant-score-panel">
-                                <p className="variant-score-title">AI Score</p>
+                                <p className="variant-score-title">AIスコア</p>
                                 <div className="variant-score-grid">
-                                  <span className="vs-label">Recommend</span><span className="vs-value">{sc.recommendation}/5</span>
-                                  <span className="vs-label">Views</span><span className="vs-value">{sc.predictedViews}/5</span>
-                                  <span className="vs-label">Save</span><span className="vs-value">{sc.savePotential}/5</span>
+                                  <span className="vs-label">推奨度</span><span className="vs-value">{sc.recommendation}/5</span>
+                                  <span className="vs-label">再生数</span><span className="vs-value">{sc.predictedViews}/5</span>
+                                  <span className="vs-label">保存率</span><span className="vs-value">{sc.savePotential}/5</span>
                                   <span className="vs-label">CTA</span><span className="vs-value">{sc.ctaStrength}/5</span>
                                 </div>
                                 <p className="vs-reason">{sc.reason}</p>
@@ -4951,7 +4889,7 @@ export default function App() {
                               onClick={() => addVariantToQueue(v.name)}
                               disabled={isPipelineDisabled || renderQueue.some((q) => q.variantName === v.name)}
                             >
-                              {renderQueue.some((q) => q.variantName === v.name) ? '✓' : '＋ Queue'}
+                              {renderQueue.some((q) => q.variantName === v.name) ? '✓' : '＋ キューに追加'}
                             </button>
                             {rewrittenStories[v.angle] ? (
                               <button
@@ -4959,7 +4897,7 @@ export default function App() {
                                 onClick={() => rewriteStory(v.angle)}
                                 disabled={isRewritingStory[v.angle] || isPipelineDisabled}
                               >
-                                {isRewritingStory[v.angle] ? '🪄 Rewriting...' : '🔄 Re-generate'}
+                                {isRewritingStory[v.angle] ? '🪄 リライト中...' : '🔄 再生成'}
                               </button>
                             ) : (
                               <button
@@ -4967,7 +4905,7 @@ export default function App() {
                                 onClick={() => rewriteStory(v.angle)}
                                 disabled={isRewritingStory[v.angle] || isPipelineDisabled || slides.length === 0}
                               >
-                                {isRewritingStory[v.angle] ? '🪄 Rewriting...' : '🪄 Rewrite Story'}
+                                {isRewritingStory[v.angle] ? '🪄 リライト中...' : '🪄 ストーリーリライト'}
                               </button>
                             )}
                           </div>
@@ -4977,12 +4915,12 @@ export default function App() {
                           {rewrittenStories[v.angle] && (
                             <div className="story-preview">
                               <div className="story-preview-header">
-                                <span className="story-preview-title">Story Preview</span>
+                                <span className="story-preview-title">ストーリープレビュー</span>
                                 <button
                                   className="btn-apply-story"
                                   onClick={() => applyRewrittenStory(v.angle)}
                                 >
-                                  Apply To Slides
+                                  スライドに適用
                                 </button>
                               </div>
                               {rewrittenStories[v.angle].slice(0, 3).map((s, si) => (
@@ -5008,7 +4946,7 @@ export default function App() {
                   onClick={autoGenerateVariants}
                   disabled={isPipelineDisabled}
                 >
-                  ✨ Auto Generate
+                  ✨ 自動生成
                 </button>
                 <button
                   className="btn-add-queue"
@@ -5166,6 +5104,8 @@ export default function App() {
             ※ ダウンロードは保険用です
           </p>
         </div>
+
+        </div>{/* panel-left-body */}
       </div>
 
       {/* ── 中央パネル: プレビュー ── */}

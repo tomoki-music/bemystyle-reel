@@ -18,12 +18,12 @@ export function RenderQueueHeader({ renderQueue }: RenderQueueHeaderProps) {
 
   return (
     <div className="render-queue-header">
-      <p className="render-queue-title">Render Queue</p>
+      <p className="render-queue-title">レンダーキュー</p>
       <div className="render-queue-summary">
-        <span className="rqs-pending">Pending: {queueSummary.pending}</span>
-        {queueSummary.rendering > 0 && <span className="rqs-rendering">Rendering: {queueSummary.rendering}</span>}
-        {queueSummary.completed > 0 && <span className="rqs-completed">Completed: {queueSummary.completed}</span>}
-        {queueSummary.failed > 0 && <span className="rqs-failed">Failed: {queueSummary.failed}</span>}
+        <span className="rqs-pending">待機: {queueSummary.pending}</span>
+        {queueSummary.rendering > 0 && <span className="rqs-rendering">レンダリング中: {queueSummary.rendering}</span>}
+        {queueSummary.completed > 0 && <span className="rqs-completed">完了: {queueSummary.completed}</span>}
+        {queueSummary.failed > 0 && <span className="rqs-failed">失敗: {queueSummary.failed}</span>}
       </div>
     </div>
   )

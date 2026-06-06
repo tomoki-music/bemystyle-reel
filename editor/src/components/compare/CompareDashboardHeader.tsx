@@ -1,3 +1,3 @@
 export function CompareDashboardHeader() {
-  return <p className="compare-dashboard-title">Render Compare Dashboard</p>
+  return <p className="compare-dashboard-title">レンダー比較ダッシュボード</p>
 }

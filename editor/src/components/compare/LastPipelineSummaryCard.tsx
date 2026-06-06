@@ -17,12 +17,12 @@ export function LastPipelineSummaryCard({
 
   return (
     <div className="pipeline-last-summary">
-      <p className="pipeline-last-title">Last Pipeline</p>
+      <p className="pipeline-last-title">直近パイプライン</p>
       <div className="pipeline-last-stats">
-        <span className="pipeline-last-stat pipeline-last-stat--ok">Completed: {lastPipeline.completedCount}</span>
-        <span className={`pipeline-last-stat${lastPipeline.failedCount > 0 ? ' pipeline-last-stat--fail' : ''}`}>Failed: {lastPipeline.failedCount}</span>
+        <span className="pipeline-last-stat pipeline-last-stat--ok">完了: {lastPipeline.completedCount}</span>
+        <span className={`pipeline-last-stat${lastPipeline.failedCount > 0 ? ' pipeline-last-stat--fail' : ''}`}>失敗: {lastPipeline.failedCount}</span>
         <span className="pipeline-last-stat pipeline-last-stat--best">
-          Best: {bestVariantName}
+          最良: {bestVariantName}
         </span>
       </div>
     </div>
