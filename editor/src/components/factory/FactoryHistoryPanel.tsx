@@ -198,20 +198,20 @@ export function FactoryHistoryPanel({
   return (
     <div className="factory-history-panel">
       <div className="factory-history-header">
-        <p className="factory-history-title">📋 Factory History</p>
+        <p className="factory-history-title">📋 AI自動作成履歴</p>
         <div className="factory-history-header-actions">
           {factoryHistory.length > 0 && (
             <>
               <button className="btn-factory-export" onClick={onExportJson}>
-                Export JSON
+                JSONエクスポート
               </button>
               <button className="btn-factory-export-csv" onClick={onExportCsv}>
-                Export CSV
+                CSVエクスポート
               </button>
             </>
           )}
           <label className="btn-factory-import">
-            Import
+            インポート
             <input
               className="factory-history-import-input"
               type="file"
@@ -225,7 +225,7 @@ export function FactoryHistoryPanel({
           </label>
           {factoryHistory.length > 0 && (
             <button className="btn-factory-clear-history" onClick={handleClearHistoryInternal}>
-              Clear History
+              履歴をクリア
             </button>
           )}
         </div>
@@ -248,9 +248,9 @@ export function FactoryHistoryPanel({
         onSelectedTagChange={(tag) => setSelectedTag((prev) => (prev === tag ? '' : tag))}
       />
       {factoryHistory.length === 0 ? (
-        <p className="factory-history-empty">No factory history yet</p>
+        <p className="factory-history-empty">AI自動作成の履歴がありません</p>
       ) : visibleFactoryHistory.length === 0 ? (
-        <p className="factory-history-empty">No matching factory history</p>
+        <p className="factory-history-empty">該当する履歴がありません</p>
       ) : (
         <ul className="factory-history-list">
           {visibleFactoryHistory.map((item) => (

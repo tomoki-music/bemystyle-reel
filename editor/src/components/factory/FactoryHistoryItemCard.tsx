@@ -114,9 +114,9 @@ export function FactoryHistoryItemCard({
           {new Date(item.generatedAt).toLocaleString()}
         </span>
         <span className="factory-history-stats">
-          Gen: {item.generatedCount} · Sel: {item.selectedCount} · AvgRec: {item.averageRecommendation} · Q: {item.queueAddedCount}
+          生成：{item.generatedCount} · 選定：{item.selectedCount} · 推奨：{item.averageRecommendation} · キュー：{item.queueAddedCount}
         </span>
-        {item.favorite && <span className="factory-history-favorite-badge">★ Favorite</span>}
+        {item.favorite && <span className="factory-history-favorite-badge">★ お気に入り</span>}
       </div>
       <div className="factory-history-theme-row">
         {isEditingTheme ? (
@@ -132,14 +132,14 @@ export function FactoryHistoryItemCard({
               autoFocus
             />
             <div className="factory-history-theme-edit-actions">
-              <button className="btn-factory-theme-save" onClick={onSaveThemeEdit}>Save</button>
-              <button className="btn-factory-theme-cancel" onClick={onCancelThemeEdit}>Cancel</button>
+              <button className="btn-factory-theme-save" onClick={onSaveThemeEdit}>保存</button>
+              <button className="btn-factory-theme-cancel" onClick={onCancelThemeEdit}>キャンセル</button>
             </div>
           </div>
         ) : (
           <p className={`factory-history-theme${isTruncated ? ' factory-history-theme--truncated' : ''}`}>
             "<span title={item.theme}>{displayTheme}</span>"
-            <span className="factory-history-theme-length">{item.theme.length} chars</span>
+            <span className="factory-history-theme-length">{item.theme.length} 文字</span>
           </p>
         )}
         <FactoryHistoryActions
@@ -156,7 +156,7 @@ export function FactoryHistoryItemCard({
         />
       </div>
       <p className="factory-history-best">
-        Best: {item.bestVariantName} {'★'.repeat(item.bestRecommendation)}{'☆'.repeat(Math.max(0, 5 - item.bestRecommendation))}
+        ベスト: {item.bestVariantName} {'★'.repeat(item.bestRecommendation)}{'☆'.repeat(Math.max(0, 5 - item.bestRecommendation))}
       </p>
       {item.topVariants.length > 0 && (
         <div className="factory-history-top-variants">

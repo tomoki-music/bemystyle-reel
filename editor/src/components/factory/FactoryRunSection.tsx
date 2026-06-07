@@ -7,6 +7,7 @@ type FactoryRunSectionProps = {
   factoryError: string
   factoryLog: string[]
   factoryNotice: string
+  factoryWarning?: string
   isPipelineDisabled: boolean
   hasTheme: boolean
 
@@ -20,6 +21,7 @@ export function FactoryRunSection({
   factoryError,
   factoryLog,
   factoryNotice,
+  factoryWarning,
   isPipelineDisabled,
   hasTheme,
   onRunFactory,
@@ -49,6 +51,12 @@ export function FactoryRunSection({
         </div>
       )}
 
+      {factoryWarning && !factoryRunning && (
+        <div className="factory-warning">
+          {factoryWarning}
+        </div>
+      )}
+
       {/* Running */}
       {factoryRunning && (
         <div className="factory-card factory-card--running">
@@ -64,7 +72,7 @@ export function FactoryRunSection({
               { num: 7, label: 'キュー投入' },
             ].map(({ num, label }) => (
               <div key={num} className={`factory-step${factoryStepNum >= num ? ' factory-step--active' : ''}`}>
-                <span className="factory-step-num">Step {num}/7</span>
+                <span className="factory-step-num">ステップ {num}/7</span>
                 <span className="factory-step-label">{label}</span>
                 {factoryStepNum === num && <span className="factory-step-spinner">⏳</span>}
                 {factoryStepNum > num && <span className="factory-step-done">✅</span>}

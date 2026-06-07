@@ -45,6 +45,7 @@ type FactoryPanelProps = {
   factoryError: string
   factoryLog: string[]
   factoryNotice: string
+  factoryWarning: string
   isPipelineDisabled: boolean
   hasTheme: boolean
   onRunFactory: () => void
@@ -62,6 +63,7 @@ type FactoryPanelProps = {
   factoryHistory: FactoryHistoryItemLike[]
   maxThemeLength: number
   quickTags: string[]
+  hideHistory?: boolean
 
   onHistoryUpdate: (items: FactoryHistoryItemLike[]) => void
   onToggleFavorite: (id: string) => void
@@ -90,7 +92,7 @@ function GeneratedImageGallery({ slides }: { slides: GeneratedSlide[] }) {
             <div key={s.id} className="factory-image-gallery-item">
               <img
                 src={`/assets/${s.image}`}
-                alt={s.headline || `Slide ${s.id}`}
+                alt={s.headline || `スライド ${s.id}`}
                 className="factory-image-gallery-thumb"
               />
               <p className="factory-image-gallery-label">{s.id}. {s.headline?.slice(0, 12) || '—'}</p>
@@ -109,6 +111,7 @@ export function FactoryPanel({
   factoryError,
   factoryLog,
   factoryNotice,
+  factoryWarning,
   isPipelineDisabled,
   hasTheme,
   onRunFactory,
@@ -120,6 +123,7 @@ export function FactoryPanel({
   factoryHistory,
   maxThemeLength,
   quickTags,
+  hideHistory = false,
   onHistoryUpdate,
   onToggleFavorite,
   onReuseTheme,
@@ -133,7 +137,7 @@ export function FactoryPanel({
 }: FactoryPanelProps) {
   return (
     <div className="factory-panel">
-      <p className="factory-panel-title">🏭 AI Reel Factory</p>
+      <p className="factory-panel-title">🏭 AI自動作成</p>
       <FactoryRunSection
         factoryRunning={factoryRunning}
         factoryStep={factoryStep}
@@ -141,6 +145,7 @@ export function FactoryPanel({
         factoryError={factoryError}
         factoryLog={factoryLog}
         factoryNotice={factoryNotice}
+        factoryWarning={factoryWarning}
         isPipelineDisabled={isPipelineDisabled}
         hasTheme={hasTheme}
         onRunFactory={onRunFactory}
@@ -154,22 +159,24 @@ export function FactoryPanel({
           onJumpToQueueItem={onJumpToQueueItem}
         />
       )}
-      <FactoryHistoryPanel
-        factoryHistory={factoryHistory}
-        factoryRunning={factoryRunning}
-        maxThemeLength={maxThemeLength}
-        quickTags={quickTags}
-        onHistoryUpdate={onHistoryUpdate}
-        onToggleFavorite={onToggleFavorite}
-        onReuseTheme={onReuseTheme}
-        onDuplicateTheme={onDuplicateTheme}
-        onRerunFactory={onRerunFactory}
-        onDelete={onDelete}
-        onExportJson={onExportJson}
-        onExportCsv={onExportCsv}
-        onImportFile={onImportFile}
-        onClearHistory={onClearHistory}
-      />
+      {!hideHistory && (
+        <FactoryHistoryPanel
+          factoryHistory={factoryHistory}
+          factoryRunning={factoryRunning}
+          maxThemeLength={maxThemeLength}
+          quickTags={quickTags}
+          onHistoryUpdate={onHistoryUpdate}
+          onToggleFavorite={onToggleFavorite}
+          onReuseTheme={onReuseTheme}
+          onDuplicateTheme={onDuplicateTheme}
+          onRerunFactory={onRerunFactory}
+          onDelete={onDelete}
+          onExportJson={onExportJson}
+          onExportCsv={onExportCsv}
+          onImportFile={onImportFile}
+          onClearHistory={onClearHistory}
+        />
+      )}
     </div>
   )
 }

@@ -44,7 +44,7 @@ export function FactoryHistoryFilters({
             className={`btn-factory-history-filter${filter === f ? ' btn-factory-history-filter--active' : ''}`}
             onClick={() => onFilterChange(f)}
           >
-            {f === 'all' ? 'All' : f === 'favorites' ? 'Favorites' : 'High Score'}
+            {f === 'all' ? 'すべて' : f === 'favorites' ? 'お気に入り' : '高スコア'}
           </button>
         ))}
       </div>
@@ -53,22 +53,22 @@ export function FactoryHistoryFilters({
           className="factory-history-search"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search history..."
+          placeholder="履歴を検索..."
         />
         {search && (
           <button className="btn-factory-history-clear-search" onClick={onClearSearch}>
-            Clear
+            クリア
           </button>
         )}
       </div>
       {tagStats.length > 0 && (
         <div className="factory-history-tag-filter">
-          <span className="factory-history-tag-filter-label">Tags:</span>
+          <span className="factory-history-tag-filter-label">タグ：</span>
           <button
             className={`btn-factory-history-tag-filter${selectedTag === '' ? ' btn-factory-history-tag-filter--active' : ''}`}
             onClick={() => onSelectedTagChange('')}
           >
-            All Tags
+            すべてのタグ
           </button>
           {tagStats.map((stat) => (
             <button

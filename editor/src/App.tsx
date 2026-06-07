@@ -11,6 +11,7 @@ import {
 import { generateStory, AIPresetKey, CustomPreset } from './storyGenerator'
 import './App.css'
 import { FactoryPanel } from './components/factory/FactoryPanel'
+import { FactoryHistoryPanel } from './components/factory/FactoryHistoryPanel'
 import { RenderQueuePanel } from './components/render/RenderQueuePanel'
 import { CompareDashboardPanel } from './components/compare/CompareDashboardPanel'
 import { TemplateGalleryPanel } from './components/template/TemplateGalleryPanel'
@@ -47,7 +48,115 @@ type SnsCaption = {
   youtubeTitle: string
   youtubeDescription: string
   instagramCaption: string
+  tiktokCaption?: string
+  xCaption?: string
   hashtags: string[]
+}
+
+type CaptionEditKey =
+  | 'youtubeTitle'
+  | 'youtubeDescription'
+  | 'instagramCaption'
+  | 'tiktokCaption'
+  | 'xCaption'
+  | 'hashtags'
+
+type PostChecklistKey =
+  | 'downloaded'
+  | 'captionChecked'
+  | 'hashtagsChecked'
+  | 'snsSelected'
+  | 'posted'
+
+type PostedSns = 'instagram' | 'tiktok' | 'youtube' | 'x'
+
+type PostedRecord = {
+  sns: PostedSns
+  postedAt: string
+  url: string
+  memo: string
+}
+
+type UserUploadedImage = {
+  id: string
+  name: string
+  url: string
+}
+
+const POST_CHECKLIST_STORAGE_KEY = 'reel-post-checklist'
+const POSTED_RECORDS_STORAGE_KEY = 'reel-posted-records'
+
+const DEFAULT_POST_CHECKLIST: Record<PostChecklistKey, boolean> = {
+  downloaded: false,
+  captionChecked: false,
+  hashtagsChecked: false,
+  snsSelected: false,
+  posted: false,
+}
+
+const POST_CHECKLIST_ITEMS: { key: PostChecklistKey; label: string }[] = [
+  { key: 'downloaded', label: '動画をダウンロードした' },
+  { key: 'captionChecked', label: '投稿文を確認した' },
+  { key: 'hashtagsChecked', label: 'ハッシュタグを確認した' },
+  { key: 'snsSelected', label: '投稿先SNSを決めた' },
+  { key: 'posted', label: '実際に投稿した' },
+]
+
+const POSTED_SNS_LABELS: Record<PostedSns, string> = {
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
+  x: 'X',
+}
+
+const DEFAULT_POSTED_FORM: PostedRecord = {
+  sns: 'instagram',
+  postedAt: '',
+  url: '',
+  memo: '',
+}
+
+const formatCaptionHashtags = (caption: SnsCaption) => {
+  return caption.hashtags?.map((tag) => tag.startsWith('#') ? tag : `#${tag}`).join(' ') ?? ''
+}
+
+const formatYouTubeCaption = (caption: SnsCaption) => {
+  return [
+    caption.youtubeTitle,
+    '',
+    caption.youtubeDescription,
+    '',
+    formatCaptionHashtags(caption),
+  ].join('\n')
+}
+
+const formatInstagramCaption = (caption: SnsCaption) => {
+  return [
+    caption.instagramCaption,
+    '',
+    formatCaptionHashtags(caption),
+  ].join('\n')
+}
+
+const formatTikTokCaption = (caption: SnsCaption) => {
+  return [
+    caption.tiktokCaption || caption.instagramCaption,
+    '',
+    formatCaptionHashtags(caption),
+  ].join('\n')
+}
+
+const formatXCaption = (caption: SnsCaption) => {
+  const baseCaption = caption.xCaption || caption.instagramCaption
+  const shortCaption = baseCaption.length > 120
+    ? `${baseCaption.slice(0, 117)}...`
+    : baseCaption
+
+  return [
+    shortCaption,
+    '',
+    formatCaptionHashtags(caption),
+  ].join('\n')
 }
 
 type RenderQueueItem = {
@@ -243,18 +352,18 @@ function renderDiffPanel(currentSlides: Slide[], snapshotSlides: Slide[]) {
       ) : (
         diffItems.map(item => (
           <div key={item.idx} className="snapshot-diff-slide">
-            <p className="snapshot-preview-label">Slide {item.idx + 1}</p>
+            <p className="snapshot-preview-label">スライド {item.idx + 1}</p>
             {item.diffs.map(d => {
               const { beforeNode, afterNode } = renderInlineDiff(d.before, d.after)
               return (
                 <div key={d.field} className="snapshot-diff-row">
                   <p className="snapshot-diff-field">{d.field}</p>
                   <div className="snapshot-diff-before">
-                    <span className="snapshot-diff-label">Before</span>
+                    <span className="snapshot-diff-label">変更前</span>
                     <span className="snapshot-diff-text">{beforeNode}</span>
                   </div>
                   <div className="snapshot-diff-after">
-                    <span className="snapshot-diff-label">After</span>
+                    <span className="snapshot-diff-label">変更後</span>
                     <span className="snapshot-diff-text">{afterNode}</span>
                   </div>
                 </div>
@@ -335,6 +444,48 @@ const FACTORY_SUMMARY_CACHE_KEY = 'bemystyle-reel-factory-summary-cache'
 const FACTORY_HISTORY_KEY = 'bemystyle-reel-factory-history'
 const MAX_HISTORY_THEME_LENGTH = 80
 const FACTORY_QUICK_TAGS = ['音楽', '成長', '習慣', 'AI', 'コミュニティ', '歌唱診断']
+
+// Phase18-F: かんたんモード テーマサジェスト
+const SIMPLE_THEME_SUGGESTIONS = [
+  '無料歌唱診断キャンペーンを紹介するショート動画',
+  '音楽コミュニティの参加者募集動画',
+  '今月のセッションイベント告知動画',
+  'Note記事の内容を紹介するショート動画',
+  'YouTube動画の見どころを紹介するショート動画',
+]
+
+const SIMPLE_TEMPLATE_THEME_SUGGESTIONS: Record<string, string[]> = {
+  'free-diagnosis-campaign': [
+    '無料歌唱診断キャンペーンを紹介するショート動画',
+    '100名限定の無料歌唱診断を案内する動画',
+    '歌唱診断の申し込み方法を紹介する動画',
+  ],
+  'music-community': [
+    '音楽コミュニティの参加者募集動画',
+    '初心者歓迎のセッション会を紹介する動画',
+    '音楽仲間と繋がれるコミュニティ紹介動画',
+  ],
+  'event-announcement': [
+    '今月のセッションイベント告知動画',
+    'ライブハウスイベントの参加募集動画',
+    '6月開催の音楽イベントを告知するショート動画',
+  ],
+  'note-article': [
+    'Note記事の内容を紹介するショート動画',
+    '最新Noteの見どころを伝えるショート動画',
+    'Noteに書いた音楽体験を紹介する動画',
+  ],
+  'youtube-video': [
+    'YouTube動画の見どころを紹介するショート動画',
+    '最新YouTube動画へ誘導するショート動画',
+    'チャンネル登録を促すショート動画',
+  ],
+  'singing-diagnosis': [
+    '歌唱診断サービスの魅力を伝えるショート動画',
+    '歌唱力診断の申し込みを促す動画',
+    '無料歌唱診断を受けた体験を紹介する動画',
+  ],
+}
 
 const FACTORY_TAG_RULES: { tag: string; keywords: string[] }[] = [
   { tag: '音楽',     keywords: ['音楽', '歌', '演奏', 'バンド', 'ライブ', 'セッション'] },
@@ -492,8 +643,71 @@ export default function App() {
   const [isGeneratingSnsCaption, setIsGeneratingSnsCaption] = useState(false)
   const [snsCaptionError, setSnsCaptionError] = useState('')
   const [copiedSnsField, setCopiedSnsField] = useState<string | null>(null)
+  const [copiedAllCaption, setCopiedAllCaption] = useState(false)
+  const [copiedCaptionLabel, setCopiedCaptionLabel] = useState('')
+  const [editingCaptionKey, setEditingCaptionKey] = useState<CaptionEditKey | ''>('')
+  const [editingCaptionText, setEditingCaptionText] = useState('')
+  const [regeneratingCaptionKey, setRegeneratingCaptionKey] = useState<CaptionEditKey | ''>('')
+  const [postChecklist, setPostChecklist] = useState<Record<PostChecklistKey, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(POST_CHECKLIST_STORAGE_KEY)
+      if (!raw) return { ...DEFAULT_POST_CHECKLIST }
+      const parsed = JSON.parse(raw) as Partial<Record<PostChecklistKey, boolean>>
+      return {
+        ...DEFAULT_POST_CHECKLIST,
+        downloaded: parsed.downloaded === true,
+        captionChecked: parsed.captionChecked === true,
+        hashtagsChecked: parsed.hashtagsChecked === true,
+        snsSelected: parsed.snsSelected === true,
+        posted: parsed.posted === true,
+      }
+    } catch {
+      return { ...DEFAULT_POST_CHECKLIST }
+    }
+  })
+  const [postedRecords, setPostedRecords] = useState<PostedRecord[]>(() => {
+    try {
+      const raw = localStorage.getItem(POSTED_RECORDS_STORAGE_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+
+      return parsed
+        .filter((record): record is Partial<PostedRecord> => record && typeof record === 'object')
+        .filter((record) => (
+          record.sns === 'instagram' ||
+          record.sns === 'tiktok' ||
+          record.sns === 'youtube' ||
+          record.sns === 'x'
+        ))
+        .map((record) => ({
+          sns: record.sns as PostedSns,
+          postedAt: typeof record.postedAt === 'string' ? record.postedAt : '',
+          url: typeof record.url === 'string' ? record.url : '',
+          memo: typeof record.memo === 'string' ? record.memo : '',
+        }))
+        .filter((record) => record.postedAt)
+    } catch {
+      return []
+    }
+  })
+  const [postedForm, setPostedForm] = useState<PostedRecord>({ ...DEFAULT_POSTED_FORM })
+  const [postedRecordsImportMessage, setPostedRecordsImportMessage] = useState('')
+  const [postedRecordsImportError, setPostedRecordsImportError] = useState('')
+  const [userUploadedImages, setUserUploadedImages] = useState<UserUploadedImage[]>([])
+
+  // かんたんモード (Phase17-G)
+  const [simpleMode, setSimpleMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('reel-simple-mode') !== 'false' } catch { return true }
+  })
+  // かんたんモード ウィザードステップ (Phase18-B)
+  const [simpleStep, setSimpleStep] = useState<1 | 2 | 3>(1)
+  // かんたんモード 選択テンプレート (Phase18-E)
+  const [simpleTemplateId, setSimpleTemplateId] = useState('')
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const historyAreaRef = useRef<HTMLDivElement | null>(null)
+  const userUploadedImagesRef = useRef<UserUploadedImage[]>([])
 
   // テンプレート関連
   const [templates, setTemplates] = useState<TemplateInfo[]>([])
@@ -560,7 +774,7 @@ export default function App() {
   const [pipelineStatus, setPipelineStatus] = useState('')
   const [lastPipeline, setLastPipeline] = useState<LastPipeline | null>(null)
   const compareDashboardRef = useRef<HTMLDivElement | null>(null)
-  const batchRenderRef = useRef<() => Promise<void>>(async () => {})
+  const batchRenderRef = useRef<(itemIds?: string[]) => Promise<void>>(async () => {})
   const renderQueueRef = useRef<RenderQueueItem[]>([])
 
   // Best Variant Analyzer (Phase14-J)
@@ -596,6 +810,7 @@ export default function App() {
   const [factorySummary, setFactorySummary] = useState<FactorySummary | null>(null)
   const [factoryHistory, setFactoryHistory] = useState<FactoryHistoryItem[]>([])
   const [factoryNotice, setFactoryNotice] = useState('')
+  const [factoryWarning, setFactoryWarning] = useState('')
 
   // Snapshot Preview (Phase14-N)
   const [expandedSnapshotIds, setExpandedSnapshotIds] = useState<string[]>([])
@@ -1330,7 +1545,7 @@ export default function App() {
       })
       const data = await res.json()
       if (!res.ok || !data.ok) {
-        setRewriteExplainErrors(prev => ({ ...prev, [item.id]: data.message ?? 'Failed to analyze rewrite.' }))
+        setRewriteExplainErrors(prev => ({ ...prev, [item.id]: data.message ?? 'リライト分析に失敗しました。' }))
         return
       }
       setRewriteExplainResults(prev => {
@@ -1339,7 +1554,7 @@ export default function App() {
         return next
       })
     } catch {
-      setRewriteExplainErrors(prev => ({ ...prev, [item.id]: 'Failed to analyze rewrite.' }))
+      setRewriteExplainErrors(prev => ({ ...prev, [item.id]: 'リライト分析に失敗しました。' }))
     } finally {
       setRewriteExplainLoadingIds(prev => prev.filter(x => x !== item.id))
     }
@@ -1468,7 +1683,7 @@ export default function App() {
       })
       const data = await res.json()
       if (!data.ok) {
-        setRewriteStoryError((prev) => ({ ...prev, [angle]: data.message ?? 'Failed to rewrite story' }))
+        setRewriteStoryError((prev) => ({ ...prev, [angle]: data.message ?? 'ストーリーのリライトに失敗しました' }))
         return
       }
       const rewritten: RewrittenSlide[] = data.slides
@@ -1484,7 +1699,7 @@ export default function App() {
         return next
       })
     } catch {
-      setRewriteStoryError((prev) => ({ ...prev, [angle]: 'Failed to rewrite story' }))
+      setRewriteStoryError((prev) => ({ ...prev, [angle]: 'ストーリーのリライトに失敗しました' }))
     } finally {
       setIsRewritingStory((prev) => ({ ...prev, [angle]: false }))
     }
@@ -1565,6 +1780,7 @@ export default function App() {
   const updateQueueItem = useCallback((id: string, patch: Partial<RenderQueueItem>) => {
     setRenderQueue((prev) => {
       const next = prev.map((q) => q.id === id ? { ...q, ...patch } : q)
+      renderQueueRef.current = next
       try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
       return next
     })
@@ -1633,6 +1849,10 @@ export default function App() {
       if (Array.isArray(parsed)) setRenderQueue(parsed)
     } catch {}
   }, [])
+
+  useEffect(() => {
+    try { localStorage.setItem('reel-simple-mode', String(simpleMode)) } catch {}
+  }, [simpleMode])
 
   useEffect(() => {
     try {
@@ -1814,12 +2034,238 @@ export default function App() {
     fetchGeneratedAssets()
   }, [fetchHistory, fetchTemplates, fetchGeneratedAssets])
 
+  useEffect(() => {
+    userUploadedImagesRef.current = userUploadedImages
+  }, [userUploadedImages])
+
+  useEffect(() => {
+    return () => {
+      userUploadedImagesRef.current.forEach((image) => URL.revokeObjectURL(image.url))
+    }
+  }, [])
+
   const usedGeneratedImages = new Set(
     slides.map((s) => s.image).filter((img): img is string => !!img?.startsWith('generated/'))
   )
 
   const selectedSlide = slides.find((s) => s.id === selectedId) ?? null
   const selectedIdx = slides.findIndex((s) => s.id === selectedId)
+  const isPostChecklistComplete = POST_CHECKLIST_ITEMS.every((item) => postChecklist[item.key])
+  const postedReport = useMemo(() => {
+    const counts: Record<PostedSns, number> = {
+      instagram: 0,
+      tiktok: 0,
+      youtube: 0,
+      x: 0,
+    }
+
+    postedRecords.forEach((record) => {
+      counts[record.sns] += 1
+    })
+
+    const latest = [...postedRecords]
+      .filter((record) => record.postedAt)
+      .sort((a, b) => b.postedAt.localeCompare(a.postedAt))[0]
+
+    return {
+      total: postedRecords.length,
+      counts,
+      latest,
+      urlCount: postedRecords.filter((record) => record.url.trim()).length,
+    }
+  }, [postedRecords])
+
+  const handleUserImageUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length === 0) return
+
+    const images = files.map((file) => ({
+      id: typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${file.name}-${Math.random().toString(36).slice(2)}`,
+      name: file.name,
+      url: URL.createObjectURL(file),
+    }))
+    setUserUploadedImages((prev) => [...prev, ...images])
+  }, [])
+
+  const removeUserUploadedImage = useCallback((id: string) => {
+    setUserUploadedImages((prev) => {
+      const target = prev.find((image) => image.id === id)
+      if (target) URL.revokeObjectURL(target.url)
+      return prev.filter((image) => image.id !== id)
+    })
+  }, [])
+
+  const togglePostChecklist = useCallback((key: PostChecklistKey) => {
+    setPostChecklist((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }))
+  }, [])
+
+  const resetPostChecklist = useCallback(() => {
+    setPostChecklist({ ...DEFAULT_POST_CHECKLIST })
+  }, [])
+
+  const resetPostedRecords = useCallback(() => {
+    setPostedRecords([])
+    setPostedForm({ ...DEFAULT_POSTED_FORM })
+  }, [])
+
+  const addPostedRecord = useCallback(() => {
+    if (!postedForm.postedAt) return
+
+    const nextRecord: PostedRecord = {
+      sns: postedForm.sns,
+      postedAt: postedForm.postedAt,
+      url: postedForm.url.trim(),
+      memo: postedForm.memo.trim(),
+    }
+
+    setPostedRecords((prev) => [...prev, nextRecord])
+    setPostedForm({ ...DEFAULT_POSTED_FORM })
+    setPostChecklist((prev) => ({
+      ...prev,
+      posted: true,
+    }))
+  }, [postedForm])
+
+  const deletePostedRecord = useCallback((index: number) => {
+    setPostedRecords((prev) => prev.filter((_, i) => i !== index))
+  }, [])
+
+  const exportPostedRecordsCsv = useCallback(() => {
+    if (postedRecords.length === 0) return
+
+    const selectedTemplateName = selectedTemplateId || simpleTemplateId
+      ? templates.find((t) => t.id === (selectedTemplateId || simpleTemplateId))?.name ?? (selectedTemplateId || simpleTemplateId)
+      : ''
+    const videoTheme = aiTheme.trim() || title
+    const rows = [
+      ['SNS', '投稿日', '投稿URL', 'メモ', '動画テーマ', 'テンプレート'],
+      ...postedRecords.map((record) => [
+        POSTED_SNS_LABELS[record.sns],
+        record.postedAt,
+        record.url,
+        record.memo,
+        videoTheme,
+        selectedTemplateName,
+      ]),
+    ]
+
+    const csv = rows
+      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `posted-records-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [aiTheme, postedRecords, selectedTemplateId, simpleTemplateId, templates, title])
+
+  const exportPostedRecordsJson = useCallback(() => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      postedRecords,
+      postChecklist,
+      postedReport,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8;',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `posted-records-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [postChecklist, postedRecords, postedReport])
+
+  const handleImportPostedRecordsJson = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setPostedRecordsImportMessage('')
+    setPostedRecordsImportError('')
+
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text) as {
+        postedRecords?: unknown
+        postChecklist?: unknown
+      }
+
+      if (!Array.isArray(data.postedRecords)) {
+        throw new Error('JSONの形式が正しくありません')
+      }
+
+      const importedRecords: PostedRecord[] = data.postedRecords.map((record) => {
+        if (!record || typeof record !== 'object') {
+          throw new Error('JSONの形式が正しくありません')
+        }
+        const candidate = record as Partial<PostedRecord>
+        if (
+          candidate.sns !== 'instagram' &&
+          candidate.sns !== 'tiktok' &&
+          candidate.sns !== 'youtube' &&
+          candidate.sns !== 'x'
+        ) {
+          throw new Error('JSONの形式が正しくありません')
+        }
+        if (
+          typeof candidate.postedAt !== 'string' ||
+          typeof candidate.url !== 'string' ||
+          typeof candidate.memo !== 'string'
+        ) {
+          throw new Error('JSONの形式が正しくありません')
+        }
+
+        return {
+          sns: candidate.sns,
+          postedAt: candidate.postedAt,
+          url: candidate.url,
+          memo: candidate.memo,
+        }
+      })
+
+      if (data.postChecklist !== undefined) {
+        if (!data.postChecklist || typeof data.postChecklist !== 'object') {
+          throw new Error('JSONの形式が正しくありません')
+        }
+        const importedChecklist = data.postChecklist as Partial<Record<PostChecklistKey, unknown>>
+        setPostChecklist({
+          downloaded: importedChecklist.downloaded === true,
+          captionChecked: importedChecklist.captionChecked === true,
+          hashtagsChecked: importedChecklist.hashtagsChecked === true,
+          snsSelected: importedChecklist.snsSelected === true,
+          posted: importedChecklist.posted === true,
+        })
+      }
+
+      setPostedRecords(importedRecords)
+      setPostedRecordsImportMessage('投稿記録を復元しました')
+    } catch {
+      setPostedRecordsImportError('JSONの形式が正しくありません')
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(POST_CHECKLIST_STORAGE_KEY, JSON.stringify(postChecklist))
+    } catch {}
+  }, [postChecklist])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(POSTED_RECORDS_STORAGE_KEY, JSON.stringify(postedRecords))
+    } catch {}
+  }, [postedRecords])
 
   const handleNewProject = useCallback(() => {
     if (hasUnsavedChanges && !window.confirm('未保存の変更があります。新規作成すると現在の内容が失われます。続けますか？')) return
@@ -1838,7 +2284,9 @@ export default function App() {
     setSelectedId(1)
     setHasUnsavedChanges(true)
     setAiTheme('')
-  }, [hasUnsavedChanges])
+    resetPostChecklist()
+    resetPostedRecords()
+  }, [hasUnsavedChanges, resetPostChecklist, resetPostedRecords])
 
   const updateSlide = useCallback((id: number, changes: Partial<Slide>) => {
     setSlides((prev) => prev.map((s) => (s.id === id ? { ...s, ...changes } : s)))
@@ -1966,8 +2414,9 @@ export default function App() {
     }
   }, [title, slides, ctaConfig])
 
-  const batchRender = useCallback(async () => {
-    const pending = renderQueue.filter((q) => q.status === 'pending')
+  const batchRender = useCallback(async (itemIds?: string[]) => {
+    const targetIds = itemIds ? new Set(itemIds) : null
+    const pending = renderQueue.filter((q) => q.status === 'pending' && (!targetIds || targetIds.has(q.id)))
     if (pending.length === 0 || isBatchRendering) return
 
     setIsBatchRendering(true)
@@ -1994,7 +2443,7 @@ export default function App() {
         setIsPreparingRender(false)
         if (!ok) {
           updateQueueItem(item.id, { status: 'failed' })
-          updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: 'Snapshot save failed' })
+          updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: 'スナップショットの保存に失敗しました' })
           continue
         }
         snapshotWasUsed = true
@@ -2297,7 +2746,7 @@ export default function App() {
         }),
       })
       const rewriteData = await rewriteRes.json()
-      if (!rewriteData.ok) throw new Error(rewriteData.message ?? 'Failed to rewrite story')
+      if (!rewriteData.ok) throw new Error(rewriteData.message ?? 'ストーリーのリライトに失敗しました')
       const rewritten: RewrittenSlide[] = rewriteData.slides
 
       // Step 5: Apply rewritten story
@@ -2549,6 +2998,7 @@ export default function App() {
     setFactoryRunning(true)
     setFactoryError('')
     setFactoryLog([])
+    setFactoryWarning('')
 
     const addLog = (msg: string) => setFactoryLog((prev) => [...prev, msg])
 
@@ -2585,11 +3035,18 @@ export default function App() {
       setHasUnsavedChanges(true)
       addLog(`[1/7] Story生成完了 (${storySlides.length}スライド)`)
 
+      if (storySlides.length > 14) {
+        setFactoryWarning('⚠️ ストーリーが15枚以上生成されたため、先頭14枚に調整して続行しました。')
+      } else if (storySlides.length < 14) {
+        setFactoryWarning('⚠️ ストーリー枚数が不足しています。再生成をおすすめします。')
+      }
+
       // Step 2: AI Image Generate
       setFactoryStep('Step 2/7: AI画像生成中...')
       addLog('[2/7] AI画像生成 開始')
       let slidesWithImages = [...storySlides]
       const imageTargets = storySlides.filter((s) => s.imagePrompt).slice(0, 14)
+      let generatedImageCount = 0
       addLog(`[2/7] 画像生成対象: ${imageTargets.length}枚`)
       for (let ii = 0; ii < imageTargets.length; ii++) {
         const target = imageTargets[ii]
@@ -2605,7 +3062,9 @@ export default function App() {
             slidesWithImages = slidesWithImages.map((s) =>
               s.id === target.id ? { ...s, image: imgData.image } : s
             )
+            generatedImageCount += 1
             setSlides([...slidesWithImages])
+            addLog(`  ✅ 画像生成成功 (ID ${target.id}): ${imgData.path ?? imgData.image}`)
           } else {
             addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${imgData.message ?? 'APIエラー'}`)
           }
@@ -2613,7 +3072,10 @@ export default function App() {
           addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`)
         }
       }
-      addLog(`[2/7] AI画像生成完了`)
+      addLog(`[2/7] AI画像生成完了 (${generatedImageCount}/${imageTargets.length}枚)`)
+      if (generatedImageCount === 0) {
+        throw new Error('画像生成に失敗しました。\nサーバー側の画像生成API設定に問題がある可能性があります。\n開発者向けログで response_format の混入を確認してください。')
+      }
 
       // Step 3: Variant Generate
       setFactoryStep('Step 3/7: バリアント生成中...')
@@ -2712,16 +3174,17 @@ export default function App() {
       // Step 7: Queue
       setFactoryStep('Step 7/7: キューに投入中...')
       addLog('[7/7] Queue投入')
-      let actualQueueAdded = 0
-      setRenderQueue((prev) => {
-        const existingNames = new Set(prev.map((q) => q.variantName))
-        const newItems = queueItems.filter((item) => !existingNames.has(item.variantName))
-        actualQueueAdded = newItems.length
-        if (newItems.length === 0) return prev
-        const next = [...prev, ...newItems]
-        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
+      const existingNames = new Set(renderQueueRef.current.map((q) => q.variantName))
+      const newQueueItems = queueItems.filter((item) => !existingNames.has(item.variantName))
+      const actualQueueAdded = newQueueItems.length
+      if (newQueueItems.length > 0) {
+        setRenderQueue((prev) => {
+          const next = [...prev, ...newQueueItems]
+          renderQueueRef.current = next
+          try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
+          return next
+        })
+      }
       addLog(`[7/7] Queue投入完了 (${actualQueueAdded}件)`)
 
       // Build Factory Summary (Phase15-B)
@@ -2751,6 +3214,14 @@ export default function App() {
       setFactorySummary(summary)
       try { localStorage.setItem(FACTORY_SUMMARY_CACHE_KEY, JSON.stringify(summary)) } catch {}
 
+      if (newQueueItems.length === 0) {
+        const message = '動画生成キューに追加できませんでした。画像生成結果を確認してください。'
+        setFactoryStep('Factory failed')
+        setFactoryError(message)
+        addLog(`ERROR: ${message}`)
+        return
+      }
+
       // Factory History 追加 (Phase15-E)
       const autoTags = inferFactoryTags(themeForRun)
       const historyItem: FactoryHistoryItem = {
@@ -2760,7 +3231,7 @@ export default function App() {
         tags: autoTags.length > 0 ? autoTags : undefined,
       }
       if (autoTags.length > 0) {
-        addLog(`Auto tags: ${autoTags.join(', ')}`)
+        addLog(`自動タグ: ${autoTags.join(', ')}`)
       }
       setFactoryHistory((prev) => {
         const next = [historyItem, ...prev].slice(0, 20)
@@ -2768,8 +3239,29 @@ export default function App() {
         return next
       })
 
+      // Phase17-C: Auto-render after factory
+      setFactoryStep('動画生成中...')
+      addLog('AI自動作成が完了しました。続けて動画生成を開始しています。')
+      // Wait for React to flush the setRenderQueue update so batchRenderRef picks up new items
+      await new Promise<void>((resolve) => setTimeout(resolve, 200))
+      try {
+        const newQueueItemIds = new Set(newQueueItems.map((item) => item.id))
+        await batchRenderRef.current([...newQueueItemIds])
+        const q = renderQueueRef.current.filter((item) => newQueueItemIds.has(item.id))
+        const completedCount = q.filter((item) => item.status === 'completed').length
+        const failedCount = q.filter((item) => item.status === 'failed').length
+        if (failedCount > 0 && completedCount === 0) {
+          addLog(`自動動画生成に失敗しました。キューから再実行できます。(成功:${completedCount}件 / 失敗:${failedCount}件)`)
+        } else if (failedCount > 0) {
+          addLog(`動画生成が完了しました（一部失敗）。完成動画を確認できます。(成功:${completedCount}件 / 失敗:${failedCount}件)`)
+        } else {
+          addLog('動画生成が完了しました。完成動画を確認できます。')
+        }
+      } catch {
+        addLog('自動動画生成に失敗しました。キューから再実行できます。')
+      }
+
       setFactoryStep('Factory complete')
-      addLog('Factory Run 完了！Render Queueを確認してください。')
       await new Promise<void>((resolve) => setTimeout(resolve, 300))
       compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' })
     } catch (err) {
@@ -2967,12 +3459,12 @@ export default function App() {
         }),
       })
       const data = await res.json()
-      if (!data.ok) throw new Error(data.message ?? 'Failed to analyze best variant')
+      if (!data.ok) throw new Error(data.message ?? 'ベストバリアント分析に失敗しました')
       const analysis: BestVariantAnalysis = data.analysis
       setBestVariantAnalysis(analysis)
       try { localStorage.setItem(BEST_VARIANT_ANALYSIS_KEY, JSON.stringify(analysis)) } catch {}
     } catch (err) {
-      setBestVariantAnalysisError(err instanceof Error ? err.message : 'Failed to analyze best variant')
+      setBestVariantAnalysisError(err instanceof Error ? err.message : 'ベストバリアント分析に失敗しました')
     } finally {
       setIsAnalyzingBestVariant(false)
     }
@@ -3148,6 +3640,9 @@ export default function App() {
   const latestViewUrl = latestDownloadUrl
     ? latestDownloadUrl.replace('/api/render/download/', '/api/render/view/')
     : '/api/render/view'
+  const renderPreviewUrl = latestDownloadUrl
+    ? latestDownloadUrl.replace('/api/render/download/', '/api/render/view/')
+    : ''
 
   const copyRenderUrl = useCallback(async () => {
     const url = latestDownloadUrl ?? '/api/render/download'
@@ -3169,12 +3664,15 @@ export default function App() {
     setIsGeneratingSnsCaption(true)
     setSnsCaptionError('')
     setSnsCaption(null)
+    setEditingCaptionKey('')
+    setEditingCaptionText('')
+    setRegeneratingCaptionKey('')
     const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId) ?? null
     try {
       const res = await fetch('/api/sns-caption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slides, title, selectedPresetKey, selectedCustomPreset }),
+        body: JSON.stringify({ slides, title, selectedPresetKey, selectedCustomPreset, templateId: selectedTemplateId || simpleTemplateId || '' }),
       })
       const data = await res.json()
       if (!data.ok) throw new Error(data.message ?? '不明なエラー')
@@ -3186,7 +3684,42 @@ export default function App() {
     } finally {
       setIsGeneratingSnsCaption(false)
     }
-  }, [slides, title, selectedPresetKey, customPresets, selectedCustomPresetId, updateLatestHistory])
+  }, [slides, title, selectedPresetKey, customPresets, selectedCustomPresetId, selectedTemplateId, simpleTemplateId, updateLatestHistory])
+
+  const regenerateCaptionPart = useCallback(async (key: CaptionEditKey) => {
+    if (!snsCaption) return
+
+    setRegeneratingCaptionKey(key)
+    setSnsCaptionError('')
+    setEditingCaptionKey('')
+    setEditingCaptionText('')
+    const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId) ?? null
+
+    try {
+      const res = await fetch('/api/sns-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slides,
+          title,
+          selectedPresetKey,
+          selectedCustomPreset,
+          templateId: selectedTemplateId || simpleTemplateId || '',
+          regenerateTarget: key,
+          currentCaption: snsCaption,
+        }),
+      })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.message ?? '不明なエラー')
+      const caption = data.caption as SnsCaption
+      setSnsCaption(caption)
+      updateLatestHistory({ snsCaption: caption })
+    } catch (err) {
+      setSnsCaptionError(String(err instanceof Error ? err.message : err))
+    } finally {
+      setRegeneratingCaptionKey('')
+    }
+  }, [customPresets, selectedCustomPresetId, selectedPresetKey, selectedTemplateId, simpleTemplateId, slides, snsCaption, title, updateLatestHistory])
 
   const copySnsText = useCallback(async (field: string, text: string) => {
     try {
@@ -3197,6 +3730,80 @@ export default function App() {
       // clipboard API 非対応環境では無視
     }
   }, [])
+
+  const copyAllCaptions = useCallback(async (caption: SnsCaption) => {
+    const text = [
+      caption.youtubeTitle,
+      '',
+      caption.youtubeDescription,
+      '',
+      caption.instagramCaption,
+      '',
+      caption.tiktokCaption || caption.instagramCaption,
+      '',
+      caption.xCaption || caption.instagramCaption,
+      '',
+      formatCaptionHashtags(caption),
+    ].join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedAllCaption(true)
+      setTimeout(() => setCopiedAllCaption(false), 3000)
+    } catch {
+      // clipboard API 非対応環境では無視
+    }
+  }, [])
+
+  const copyCaptionText = useCallback(async (label: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedCaptionLabel(label)
+      setTimeout(() => setCopiedCaptionLabel(''), 3000)
+    } catch {
+      // clipboard API 非対応環境では無視
+    }
+  }, [])
+
+  const startCaptionEdit = useCallback((key: CaptionEditKey, text: string) => {
+    setEditingCaptionKey(key)
+    setEditingCaptionText(text)
+  }, [])
+
+  const cancelCaptionEdit = useCallback(() => {
+    setEditingCaptionKey('')
+    setEditingCaptionText('')
+  }, [])
+
+  const saveCaptionEdit = useCallback(() => {
+    if (!editingCaptionKey || !snsCaption) return
+
+    const nextCaption: SnsCaption = (() => {
+      switch (editingCaptionKey) {
+        case 'hashtags':
+          return {
+            ...snsCaption,
+            hashtags: editingCaptionText
+              .split(/\s+/)
+              .map((tag) => tag.trim().replace(/^#+/, ''))
+              .filter(Boolean),
+          }
+        case 'youtubeTitle':
+          return { ...snsCaption, youtubeTitle: editingCaptionText }
+        case 'youtubeDescription':
+          return { ...snsCaption, youtubeDescription: editingCaptionText }
+        case 'instagramCaption':
+          return { ...snsCaption, instagramCaption: editingCaptionText }
+        case 'tiktokCaption':
+          return { ...snsCaption, tiktokCaption: editingCaptionText }
+        case 'xCaption':
+          return { ...snsCaption, xCaption: editingCaptionText }
+      }
+    })()
+
+    setSnsCaption(nextCaption)
+    updateLatestHistory({ snsCaption: nextCaption })
+    cancelCaptionEdit()
+  }, [cancelCaptionEdit, editingCaptionKey, editingCaptionText, snsCaption, updateLatestHistory])
 
   const formatHistoryDate = (iso: string) => {
     const d = new Date(iso)
@@ -3468,7 +4075,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${simpleMode ? ' app--simple' : ''}`}>
       {/* ── テンプレート読み込み確認 ── */}
       {templateConfirmPending && (
         <div className="modal-overlay">
@@ -3548,21 +4155,73 @@ export default function App() {
 
       {/* ── 左パネル: スライド一覧 ── */}
       <div className="panel panel-left">
-        <div className="panel-header">
-          <div className="panel-header-left">
-            <span className="panel-title">スライド一覧</span>
-            {hasUnsavedChanges && <span className="unsaved-badge">未保存</span>}
+        {simpleMode ? (
+          <div className="panel-header simple-app-header">
+            <div className="panel-header-left">
+              <span className="simple-app-title">🎬 BeMyStyle Reel</span>
+              {hasUnsavedChanges && <span className="unsaved-badge">未保存</span>}
+            </div>
+            <div className="simple-app-header-actions">
+              {simpleStep > 1 && (
+                <button
+                  className="btn-simple-new-header"
+                  onClick={() => { setSimpleStep(1); setAiTheme(''); setFactoryWarning(''); setFactoryNotice(''); resetPostChecklist(); resetPostedRecords() }}
+                >
+                  ＋ 新規作成
+                </button>
+              )}
+              <button className="btn-save-simple" onClick={saveToServer} disabled={saveStatus === 'saving' || isRendering} title="保存">
+                {saveStatus === 'saving' ? '保存中...' : saveStatus === 'ok' ? '✓' : hasUnsavedChanges ? '⚠ 保存' : '💾 保存'}
+              </button>
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn-new-project" onClick={handleNewProject} title="14枚の空白スライドで新規作成">
-              ＋ 新規
-            </button>
-            <span className="panel-badge">{slides.length}枚</span>
+        ) : (
+          <div className="panel-header">
+            <div className="panel-header-left">
+              <span className="panel-title">スライド一覧</span>
+              {hasUnsavedChanges && <span className="unsaved-badge">未保存</span>}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button className="btn-new-project" onClick={handleNewProject} title="14枚の空白スライドで新規作成">
+                ＋ 新規
+              </button>
+              <span className="panel-badge">{slides.length}枚</span>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="panel-left-body">
 
+        {/* ── モード切替 (Phase17-G / Phase18-D) ── */}
+        {simpleMode ? (
+          <div className="mode-toggle mode-toggle--simple">
+            <button
+              className="btn-detail-mode"
+              onClick={() => setSimpleMode(false)}
+            >
+              ⚙️ 詳細編集
+            </button>
+          </div>
+        ) : (
+          <div className="mode-toggle">
+            <span className="mode-toggle-label">モード</span>
+            <div className="mode-toggle-buttons">
+              <button
+                className="mode-toggle-btn"
+                onClick={() => setSimpleMode(true)}
+              >
+                自動作成
+              </button>
+              <button
+                className="mode-toggle-btn mode-toggle-btn--active"
+              >
+                詳細編集
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!simpleMode && (<>
         {/* テンプレートセクション */}
         <div className="template-section">
           <TemplateGalleryPanel
@@ -4201,9 +4860,9 @@ export default function App() {
                     </div>
                     {(h.renderVariantName || h.renderedAt) && (
                       <div className="ai-gen-history-variant">
-                        <span>Variant: {h.renderVariantName ?? 'Default'}</span>
+                        <span>バリアント: {h.renderVariantName ?? 'Default'}</span>
                         {h.renderedAt && (
-                          <span>Rendered: {new Date(h.renderedAt).toLocaleString()}</span>
+                          <span>生成日時: {new Date(h.renderedAt).toLocaleString()}</span>
                         )}
                       </div>
                     )}
@@ -4289,7 +4948,9 @@ export default function App() {
             )}
           </div>
         </div>
+        </>)}
 
+        {!simpleMode && (
         <SlideList
           slides={slides}
           selectedId={selectedId}
@@ -4298,6 +4959,7 @@ export default function App() {
           onMove={moveSlide}
           disabled={isRendering}
         />
+        )}
         <div className="download-area">
           <button
             className={`btn-save ${saveStatus === 'ok' ? 'btn-save--ok' : saveStatus === 'error' ? 'btn-save--error' : hasUnsavedChanges && saveStatus === 'idle' ? 'btn-save--unsaved' : ''}`}
@@ -4319,8 +4981,298 @@ export default function App() {
           )}
 
           <div className="render-area">
+            {/* Phase18-B: かんたんモード 3ステップウィザード */}
+            {simpleMode && (
+              <div className="simple-wizard">
+                <div className="simple-step-indicator">
+                  {([1, 2, 3] as const).map((n) => (
+                    <span
+                      key={n}
+                      className={`simple-step-pill${simpleStep === n ? ' active' : simpleStep > n ? ' done' : ''}`}
+                    >
+                      {n === 1 ? 'テーマ' : n === 2 ? '確認' : '作成'}
+                    </span>
+                  ))}
+                </div>
+
+                {simpleStep === 1 && (
+                  <div className="simple-step-card">
+                    {/* テンプレート選択 (Phase18-E) */}
+                    {templates.length > 0 && (
+                      <div className="simple-template-select">
+                        <p className="simple-template-select-label">テンプレートを選ぶ（任意）</p>
+                        <div className="simple-template-chips">
+                          {templates.map((t) => (
+                            <button
+                              key={t.id}
+                              className={`simple-template-chip${simpleTemplateId === t.id ? ' simple-template-chip--active' : ''}`}
+                              onClick={() => {
+                                if (simpleTemplateId === t.id) {
+                                  setSimpleTemplateId('')
+                                  setSelectedTemplateId('')
+                                } else {
+                                  setSimpleTemplateId(t.id)
+                                  loadTemplate(t.id)
+                                }
+                              }}
+                            >
+                              {t.name}
+                            </button>
+                          ))}
+                        </div>
+                        {simpleTemplateId && (
+                          <button
+                            className="simple-template-clear"
+                            onClick={() => { setSimpleTemplateId(''); setSelectedTemplateId('') }}
+                          >
+                            ✕ テンプレートを外す
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <p className="simple-step-title">
+                      {simpleTemplateId
+                        ? 'このテンプレートで作りたい内容を入力してください'
+                        : '作りたい動画のテーマを入力してください'}
+                    </p>
+                    <p className="simple-step-hint">
+                      {simpleTemplateId
+                        ? `テンプレート「${templates.find((t) => t.id === simpleTemplateId)?.name ?? ''}」を使用`
+                        : '例：無料歌唱診断キャンペーンを紹介するショート動画'}
+                    </p>
+                    <input
+                      className="ai-generator-input simple-step-input"
+                      type="text"
+                      placeholder="テーマを入力..."
+                      value={aiTheme}
+                      onChange={(e) => setAiTheme(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && aiTheme.trim()) setSimpleStep(2) }}
+                    />
+                    <div className="user-image-upload">
+                      <div className="user-image-upload-header">
+                        <div>
+                          <p className="user-image-upload-title">自分の画像を使う（任意）</p>
+                          <p className="user-image-upload-hint">アップロード画像は次フェーズで動画素材として利用します。</p>
+                        </div>
+                        <label className="btn-user-image-upload">
+                          画像をアップロード
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handleUserImageUpload}
+                          />
+                        </label>
+                      </div>
+                      {userUploadedImages.length > 0 && (
+                        <div className="user-image-upload-preview">
+                          <p className="user-image-upload-count">アップロード済み画像：{userUploadedImages.length}枚</p>
+                          <div className="user-image-upload-grid">
+                            {userUploadedImages.map((image) => (
+                              <div className="user-image-upload-item" key={image.id}>
+                                <img src={image.url} alt={image.name} />
+                                <span title={image.name}>{image.name}</span>
+                                <button onClick={() => removeUserUploadedImage(image.id)}>削除</button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {/* Phase18-F: テーマサジェスト */}
+                    <div className="simple-suggestions">
+                      <p className="simple-suggestion-title">おすすめテーマ</p>
+                      <div className="simple-suggestion-chips">
+                        {(simpleTemplateId && SIMPLE_TEMPLATE_THEME_SUGGESTIONS[simpleTemplateId]
+                          ? SIMPLE_TEMPLATE_THEME_SUGGESTIONS[simpleTemplateId]
+                          : SIMPLE_THEME_SUGGESTIONS
+                        ).map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            className={`simple-suggestion-chip${aiTheme === suggestion ? ' active' : ''}`}
+                            onClick={() => setAiTheme(suggestion)}
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      className="btn-simple-next"
+                      onClick={() => setSimpleStep(2)}
+                      disabled={!aiTheme.trim()}
+                    >
+                      AI自動作成
+                    </button>
+                  </div>
+                )}
+
+                {simpleStep === 2 && (
+                  <div className="simple-step-card">
+                    <p className="simple-step-title">この内容で動画を作成します</p>
+                    <p className="simple-step-theme">
+                      テンプレート：{simpleTemplateId
+                        ? (templates.find((t) => t.id === simpleTemplateId)?.name ?? simpleTemplateId)
+                        : '指定なし'}
+                    </p>
+                    <p className="simple-step-theme">テーマ：{aiTheme}</p>
+                    <ul className="simple-step-content-list">
+                      <li>14枚の画像を自動生成</li>
+                      <li>テキストを自動作成</li>
+                      <li>ショート動画を自動生成</li>
+                      {userUploadedImages.length > 0 && (
+                        <li>アップロード画像：{userUploadedImages.length}枚（次フェーズで動画素材として利用）</li>
+                      )}
+                    </ul>
+                    <div className="simple-step-actions">
+                      <button className="btn-simple-back" onClick={() => setSimpleStep(1)}>戻る</button>
+                      <button
+                        className="btn-simple-start"
+                        onClick={() => { setSimpleStep(3); handleRunReelFactory() }}
+                        disabled={factoryRunning}
+                      >
+                        AI自動作成を開始
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {simpleStep === 3 && (
+                  <div className="simple-step-card simple-step-card--status">
+                    {factoryRunning ? (
+                      <p className="simple-step-status">AI自動作成中です</p>
+                    ) : renderStatus === 'completed' ? (
+                      <div className="render-complete-priority">
+                        <p className="render-complete-priority-title">🎬 完成動画ができました！</p>
+                        {renderPreviewUrl ? (
+                          <video
+                            className="render-complete-video render-complete-video--priority"
+                            src={renderPreviewUrl}
+                            controls
+                            playsInline
+                          />
+                        ) : (
+                          <p className="render-preview-missing">
+                            動画生成は完了しましたが、プレビューURLが見つかりません。
+                            「動画を開く」または「ダウンロード」から確認してください。
+                          </p>
+                        )}
+                        <div className="render-complete-actions render-complete-actions--priority">
+                          <button className="btn-download-mp4" onClick={downloadVideo}>
+                            動画をダウンロード
+                          </button>
+                          <button
+                            className="btn-sns-post btn-sns-post--instagram"
+                            onClick={() => window.open('https://www.instagram.com/', '_blank')}
+                          >
+                            Instagramに投稿
+                          </button>
+                          <button
+                            className="btn-sns-post btn-sns-post--tiktok"
+                            onClick={() => window.open('https://www.tiktok.com/upload', '_blank')}
+                          >
+                            TikTokに投稿
+                          </button>
+                          <button
+                            className="btn-sns-post btn-sns-post--youtube"
+                            onClick={() => window.open('https://studio.youtube.com', '_blank')}
+                          >
+                            YouTube Shortsに投稿
+                          </button>
+                        </div>
+                        <div className="render-next-actions">
+                          <p className="render-next-actions-title">次にやること</p>
+                          <ol>
+                            <li>動画を確認</li>
+                            <li>投稿文をコピー</li>
+                            <li>SNSへ投稿</li>
+                            <li>投稿記録を残す</li>
+                          </ol>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* テーマ入力 (Phase18-A: 最上部に配置) — 通常モードのみ */}
+            {!simpleMode && (
+            <div className="ai-generator" style={{ marginBottom: 12 }}>
+              <p className="ai-generator-label">テーマ入力</p>
+              <div className="ai-generator-row">
+                <input
+                  id="ai-theme-input"
+                  className="ai-generator-input"
+                  type="text"
+                  placeholder="テーマを入力..."
+                  value={aiTheme}
+                  onChange={(e) => setAiTheme(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
+                  disabled={isGenerating}
+                />
+                <button
+                  className={`ai-generator-btn${isGenerating ? ' ai-generator-btn--loading' : ''}`}
+                  onClick={handleAIGenerate}
+                  disabled={!aiTheme.trim() || isGenerating}
+                >
+                  {isGenerating ? '生成中...' : 'ストーリー生成'}
+                </button>
+              </div>
+              {generateError && (
+                <p className="ai-generator-error">{generateError}</p>
+              )}
+              {generateSuccess && !generateError && (
+                <p className="ai-generator-success">14枚のストーリーを生成しました</p>
+              )}
+            </div>
+            )}
+
+            {/* 🏭 AI Reel Factory (Phase16-L / Phase18-B) */}
+            {(!simpleMode || simpleStep === 3) && (
+            <FactoryPanel
+              hideHistory={simpleMode}
+              factoryRunning={factoryRunning}
+              factoryStep={factoryStep}
+              factoryStepNum={factoryStepNum}
+              factoryError={factoryError}
+              factoryLog={factoryLog}
+              factoryNotice={factoryNotice}
+              factoryWarning={factoryWarning}
+              isPipelineDisabled={isPipelineDisabled || !aiTheme.trim()}
+              hasTheme={aiTheme.trim().length > 0}
+              generatedSlides={slides
+                .filter((s): s is typeof s & { image: string } => !!s.image?.startsWith('generated/'))
+                .map((s) => ({ id: s.id, headline: s.headline, image: s.image }))}
+              onRunFactory={() => handleRunReelFactory()}
+              factorySummary={factorySummary}
+              findFactoryQueueItem={findFactoryQueueItem}
+              onClearSummary={() => {
+                setFactorySummary(null)
+                localStorage.removeItem(FACTORY_SUMMARY_CACHE_KEY)
+              }}
+              onJumpToQueueItem={handleJumpToQueueItem}
+              factoryHistory={factoryHistory}
+              maxThemeLength={MAX_HISTORY_THEME_LENGTH}
+              quickTags={FACTORY_QUICK_TAGS}
+              onHistoryUpdate={handleFactoryHistoryUpdate}
+              onToggleFavorite={toggleFactoryHistoryFavorite}
+              onReuseTheme={handleReuseFactoryTheme}
+              onDuplicateTheme={handleDuplicateFactoryTheme}
+              onRerunFactory={handleRerunFactoryTheme}
+              onDelete={handleDeleteFactoryHistoryItem}
+              onExportJson={handleExportFactoryHistory}
+              onExportCsv={handleExportFactoryHistoryCsv}
+              onImportFile={handleImportFactoryHistory}
+              onClearHistory={handleClearFactoryHistory}
+            />
+            )}
+
+            {!simpleMode && (
+            <>
             <div className="render-variant-row">
-              <label className="render-variant-label" htmlFor="render-variant-input">Variant Name</label>
+              <label className="render-variant-label" htmlFor="render-variant-input">バリアント名</label>
               <input
                 id="render-variant-input"
                 className="render-variant-input"
@@ -4357,6 +5309,11 @@ export default function App() {
                 </div>
               </div>
             )}
+            {isRendering && (
+              <p className="render-generating-hint">
+                画像・テキストをもとにショート動画を作成しています。完了すると、このエリアに動画が表示されます。
+              </p>
+            )}
             <button
               className={`btn-render ${isRendering ? 'btn-render--running' : renderStatus === 'completed' ? 'btn-render--ok' : renderStatus === 'failed' ? 'btn-render--error' : ''}`}
               onClick={startRender}
@@ -4367,21 +5324,53 @@ export default function App() {
             {renderStatus === 'failed' && !isRendering && (
               <>
                 {renderError && <p className="render-error">{renderError}</p>}
+                <p className="render-failed-hint">時間をおいて再実行するか、キューから再生成してください。</p>
                 <button className="btn-rerender" onClick={startRender}>
-                  再レンダリング
+                  再生成
                 </button>
               </>
             )}
-            {renderStatus === 'completed' && !isRendering && (
+            </>
+            )}
+            {!simpleMode && renderStatus === 'idle' && !isRendering && !isBatchRendering && completedVariants.length === 0 && (
+              <div className="render-output-empty">
+                <p className="render-output-empty-title">まだ完成動画はありません</p>
+                <p className="render-output-empty-hint">テーマを入力して「AI自動作成」を押すと、ここに完成動画が表示されます。</p>
+              </div>
+            )}
+            {(!simpleMode || simpleStep === 3) && renderStatus === 'completed' && !isRendering && (
               <div className="render-complete-card">
                 <div className="render-complete-card-header">
-                  動画生成完了！
+                  🎬 完成動画ができました！
                 </div>
+                {renderPreviewUrl ? (
+                  <video
+                    className="render-complete-video"
+                    src={renderPreviewUrl}
+                    controls
+                    muted
+                    playsInline
+                  />
+                ) : (
+                  <p className="render-preview-missing">
+                    動画生成は完了しましたが、プレビューURLが見つかりません。
+                    「動画を開く」または「ダウンロード」から確認してください。
+                  </p>
+                )}
                 <ul className="render-complete-specs">
                   <li>1080 × 1920 縦型動画</li>
                   <li>YouTube Shorts / Instagram Reels 対応</li>
                   <li>{slides.length} 枚スライド構成</li>
                 </ul>
+                <div className="render-next-actions">
+                  <p className="render-next-actions-title">次にやること</p>
+                  <ol>
+                    <li>動画を確認</li>
+                    <li>投稿文をコピー</li>
+                    <li>SNSへ投稿</li>
+                    <li>投稿記録を残す</li>
+                  </ol>
+                </div>
                 <div className="render-complete-actions">
                   <button className="btn-download-mp4" onClick={downloadVideo}>
                     ↓ 動画をダウンロード
@@ -4406,6 +5395,226 @@ export default function App() {
                     再レンダリング
                   </button>
                 </div>
+                {/* SNS投稿ボタン群 (Phase18-C) */}
+                <div className="sns-post-actions">
+                  <p className="sns-post-actions-title">SNSへ投稿</p>
+                  <button
+                    className="btn-sns-post btn-sns-post--instagram"
+                    onClick={() => window.open('https://www.instagram.com/', '_blank')}
+                  >
+                    <span className="btn-sns-post-icon">📱</span>
+                    <span className="btn-sns-post-body">
+                      <span className="btn-sns-post-label">Instagramに投稿</span>
+                      <span className="btn-sns-post-hint">動画を保存してInstagramアプリへ投稿してください</span>
+                    </span>
+                  </button>
+                  <button
+                    className="btn-sns-post btn-sns-post--tiktok"
+                    onClick={() => window.open('https://www.tiktok.com/upload', '_blank')}
+                  >
+                    <span className="btn-sns-post-icon">🎵</span>
+                    <span className="btn-sns-post-label">TikTokに投稿</span>
+                  </button>
+                  <button
+                    className="btn-sns-post btn-sns-post--youtube"
+                    onClick={() => window.open('https://studio.youtube.com', '_blank')}
+                  >
+                    <span className="btn-sns-post-icon">▶</span>
+                    <span className="btn-sns-post-label">YouTube Shortsに投稿</span>
+                  </button>
+                  <button
+                    className="btn-sns-post btn-sns-post--x"
+                    onClick={() => snsCaption && copyAllCaptions(snsCaption)}
+                    disabled={!snsCaption}
+                  >
+                    <span className="btn-sns-post-icon">𝕏</span>
+                    <span className="btn-sns-post-label">投稿文をコピー</span>
+                  </button>
+                  {copiedAllCaption && (
+                    <p className="sns-copy-toast">投稿文をコピーしました</p>
+                  )}
+                </div>
+
+                {/* 投稿前チェックリスト (Phase18-C) */}
+                <div className="sns-post-checklist">
+                  <p className="sns-post-checklist-title">投稿前チェック</p>
+                  <ul className="sns-post-checklist-list">
+                    {POST_CHECKLIST_ITEMS.map((item) => (
+                      <li key={item.key}>
+                        <label className="sns-post-checklist-item">
+                          <input
+                            type="checkbox"
+                            checked={postChecklist[item.key]}
+                            onChange={() => togglePostChecklist(item.key)}
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                  {isPostChecklistComplete && (
+                    <p className="sns-post-checklist-complete">投稿完了おつかれさまでした！</p>
+                  )}
+                </div>
+
+                <div className="posted-records-panel">
+                  <div className="posted-records-header">
+                    <p className="posted-records-title">投稿済み管理</p>
+                    <div className="posted-records-header-actions">
+                      <button
+                        className="btn-posted-records-export"
+                        onClick={exportPostedRecordsCsv}
+                        disabled={postedRecords.length === 0}
+                      >
+                        CSVエクスポート
+                      </button>
+                      <button
+                        className="btn-posted-records-export"
+                        onClick={exportPostedRecordsJson}
+                      >
+                        JSONバックアップ
+                      </button>
+                      <label className="btn-posted-records-export btn-posted-records-import">
+                        JSONインポート
+                        <input
+                          type="file"
+                          accept="application/json,.json"
+                          onChange={handleImportPostedRecordsJson}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  {postedRecordsImportMessage && (
+                    <p className="posted-records-import-message">{postedRecordsImportMessage}</p>
+                  )}
+                  {postedRecordsImportError && (
+                    <p className="posted-records-import-error">{postedRecordsImportError}</p>
+                  )}
+                  <div className="post-report">
+                    <p className="post-report-title">投稿レポート</p>
+                    {postedReport.total === 0 ? (
+                      <p className="post-report-empty">
+                        まだ投稿記録はありません。投稿したら、投稿日やURLを記録できます。
+                      </p>
+                    ) : (
+                      <>
+                        <div className="post-report-grid">
+                          <div className="post-report-card">
+                            <span className="post-report-label">総投稿数</span>
+                            <strong className="post-report-value">{postedReport.total}件</strong>
+                          </div>
+                          <div className="post-report-card">
+                            <span className="post-report-label">Instagram</span>
+                            <strong className="post-report-value">{postedReport.counts.instagram}件</strong>
+                          </div>
+                          <div className="post-report-card">
+                            <span className="post-report-label">TikTok</span>
+                            <strong className="post-report-value">{postedReport.counts.tiktok}件</strong>
+                          </div>
+                          <div className="post-report-card">
+                            <span className="post-report-label">YouTube</span>
+                            <strong className="post-report-value">{postedReport.counts.youtube}件</strong>
+                          </div>
+                          <div className="post-report-card">
+                            <span className="post-report-label">X</span>
+                            <strong className="post-report-value">{postedReport.counts.x}件</strong>
+                          </div>
+                          <div className="post-report-card">
+                            <span className="post-report-label">URL登録済み</span>
+                            <strong className="post-report-value">{postedReport.urlCount}件</strong>
+                          </div>
+                        </div>
+                        {postedReport.latest && (
+                          <p className="post-report-latest">
+                            最新投稿：{postedReport.latest.postedAt} / {POSTED_SNS_LABELS[postedReport.latest.sns]}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="posted-records-form">
+                    <label className="posted-records-field">
+                      <span>投稿先SNS</span>
+                      <select
+                        value={postedForm.sns}
+                        onChange={(e) => setPostedForm((prev) => ({ ...prev, sns: e.target.value as PostedSns }))}
+                      >
+                        <option value="instagram">Instagram</option>
+                        <option value="tiktok">TikTok</option>
+                        <option value="youtube">YouTube</option>
+                        <option value="x">X</option>
+                      </select>
+                    </label>
+                    <label className="posted-records-field">
+                      <span>投稿日</span>
+                      <input
+                        type="date"
+                        value={postedForm.postedAt}
+                        onChange={(e) => setPostedForm((prev) => ({ ...prev, postedAt: e.target.value }))}
+                      />
+                    </label>
+                    <label className="posted-records-field posted-records-field--wide">
+                      <span>投稿URL</span>
+                      <input
+                        type="text"
+                        value={postedForm.url}
+                        onChange={(e) => setPostedForm((prev) => ({ ...prev, url: e.target.value }))}
+                        placeholder="https://..."
+                      />
+                    </label>
+                    <label className="posted-records-field posted-records-field--wide">
+                      <span>メモ</span>
+                      <input
+                        type="text"
+                        value={postedForm.memo}
+                        onChange={(e) => setPostedForm((prev) => ({ ...prev, memo: e.target.value }))}
+                        placeholder="反応や投稿時のメモ"
+                      />
+                    </label>
+                    <button
+                      className="btn-posted-record-add"
+                      onClick={addPostedRecord}
+                      disabled={!postedForm.postedAt}
+                    >
+                      投稿記録を追加
+                    </button>
+                  </div>
+
+                  {postedRecords.length > 0 && (
+                    <ul className="posted-records-list">
+                      {postedRecords.map((record, index) => (
+                        <li className="posted-record-item" key={`${record.sns}-${record.postedAt}-${index}`}>
+                          <div className="posted-record-item-main">
+                            <p className="posted-record-item-title">
+                              {POSTED_SNS_LABELS[record.sns]} / {record.postedAt}
+                            </p>
+                            {record.url && (
+                              <a
+                                className="posted-record-item-url"
+                                href={record.url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {record.url}
+                              </a>
+                            )}
+                            {record.memo && (
+                              <p className="posted-record-item-memo">メモ：{record.memo}</p>
+                            )}
+                          </div>
+                          <button
+                            className="btn-posted-record-delete"
+                            onClick={() => deletePostedRecord(index)}
+                          >
+                            削除
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
                 <button
                   className="btn-sns-caption"
                   onClick={generateSnsCaption}
@@ -4418,142 +5627,423 @@ export default function App() {
                 )}
               </div>
             )}
-            {snsCaption && renderStatus === 'completed' && (
+            {(!simpleMode || simpleStep === 3) && snsCaption && renderStatus === 'completed' && (
               <div className="sns-caption-panel">
-                <p className="sns-caption-panel-title">SNS投稿文</p>
+                <div className="sns-caption-panel-header">
+                  <div className="sns-caption-panel-title-group">
+                    <p className="sns-caption-panel-title">SNS投稿文</p>
+                    <span className="sns-caption-template-type">
+                      投稿文タイプ：{
+                        (selectedTemplateId || simpleTemplateId)
+                          ? (templates.find((t) => t.id === (selectedTemplateId || simpleTemplateId))?.name ?? (selectedTemplateId || simpleTemplateId))
+                          : '汎用'
+                      }
+                    </span>
+                  </div>
+                  <button
+                    className="btn-sns-copy-all"
+                    onClick={() => copyAllCaptions(snsCaption)}
+                  >
+                    {copiedAllCaption ? '✓ コピー済み' : '📋 投稿文をコピー'}
+                  </button>
+                </div>
+                {copiedAllCaption && (
+                  <p className="sns-copy-toast">投稿文をコピーしました</p>
+                )}
+                <div className="sns-copy-actions">
+                  <button
+                    className="btn-sns-copy-platform"
+                    onClick={() => copyCaptionText('YouTube', formatYouTubeCaption(snsCaption))}
+                  >
+                    📋 YouTube用をコピー
+                  </button>
+                  <button
+                    className="btn-sns-copy-platform"
+                    onClick={() => copyCaptionText('Instagram', formatInstagramCaption(snsCaption))}
+                  >
+                    📋 Instagram用をコピー
+                  </button>
+                  <button
+                    className="btn-sns-copy-platform"
+                    onClick={() => copyCaptionText('TikTok', formatTikTokCaption(snsCaption))}
+                  >
+                    📋 TikTok用をコピー
+                  </button>
+                  <button
+                    className="btn-sns-copy-platform"
+                    onClick={() => copyCaptionText('X', formatXCaption(snsCaption))}
+                  >
+                    📋 X用をコピー
+                  </button>
+                </div>
+                {copiedCaptionLabel && (
+                  <p className="sns-copy-toast">{copiedCaptionLabel}用をコピーしました</p>
+                )}
+                {snsCaptionError && (
+                  <p className="sns-caption-error">{snsCaptionError}</p>
+                )}
 
                 <div className="sns-caption-field">
                   <div className="sns-caption-field-header">
                     <span className="sns-caption-field-label">YouTube Shorts タイトル</span>
-                    <button
-                      className="btn-sns-copy"
-                      onClick={() => copySnsText('ytTitle', snsCaption.youtubeTitle)}
-                    >
-                      {copiedSnsField === 'ytTitle' ? '✓ コピー済み' : 'コピー'}
-                    </button>
+                    <div className="sns-caption-field-actions">
+                      {editingCaptionKey === 'youtubeTitle' ? (
+                        <>
+                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
+                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('youtubeTitle')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'youtubeTitle' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => copySnsText('ytTitle', snsCaption.youtubeTitle)}
+                          >
+                            {copiedSnsField === 'ytTitle' ? '✓ コピー済み' : 'コピー'}
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => startCaptionEdit('youtubeTitle', snsCaption.youtubeTitle)}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('youtubeTitle')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'youtubeTitle' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <p className="sns-caption-text sns-caption-text--title">{snsCaption.youtubeTitle}</p>
+                  {editingCaptionKey === 'youtubeTitle' ? (
+                    <textarea
+                      className="sns-caption-edit-input sns-caption-edit-input--title"
+                      value={editingCaptionText}
+                      onChange={(e) => setEditingCaptionText(e.target.value)}
+                    />
+                  ) : (
+                    <p className="sns-caption-text sns-caption-text--title">{snsCaption.youtubeTitle}</p>
+                  )}
                 </div>
 
                 <div className="sns-caption-field">
                   <div className="sns-caption-field-header">
                     <span className="sns-caption-field-label">YouTube 説明文</span>
-                    <button
-                      className="btn-sns-copy"
-                      onClick={() => copySnsText('ytDesc', snsCaption.youtubeDescription)}
-                    >
-                      {copiedSnsField === 'ytDesc' ? '✓ コピー済み' : 'コピー'}
-                    </button>
+                    <div className="sns-caption-field-actions">
+                      {editingCaptionKey === 'youtubeDescription' ? (
+                        <>
+                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
+                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('youtubeDescription')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'youtubeDescription' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => copySnsText('ytDesc', snsCaption.youtubeDescription)}
+                          >
+                            {copiedSnsField === 'ytDesc' ? '✓ コピー済み' : 'コピー'}
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => startCaptionEdit('youtubeDescription', snsCaption.youtubeDescription)}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('youtubeDescription')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'youtubeDescription' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <p className="sns-caption-text">{snsCaption.youtubeDescription}</p>
+                  {editingCaptionKey === 'youtubeDescription' ? (
+                    <textarea
+                      className="sns-caption-edit-input"
+                      value={editingCaptionText}
+                      onChange={(e) => setEditingCaptionText(e.target.value)}
+                    />
+                  ) : (
+                    <p className="sns-caption-text">{snsCaption.youtubeDescription}</p>
+                  )}
                 </div>
 
                 <div className="sns-caption-field">
                   <div className="sns-caption-field-header">
                     <span className="sns-caption-field-label">Instagram 投稿文</span>
-                    <button
-                      className="btn-sns-copy"
-                      onClick={() => copySnsText('ig', snsCaption.instagramCaption)}
-                    >
-                      {copiedSnsField === 'ig' ? '✓ コピー済み' : 'コピー'}
-                    </button>
+                    <div className="sns-caption-field-actions">
+                      {editingCaptionKey === 'instagramCaption' ? (
+                        <>
+                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
+                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('instagramCaption')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'instagramCaption' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => copySnsText('ig', snsCaption.instagramCaption)}
+                          >
+                            {copiedSnsField === 'ig' ? '✓ コピー済み' : 'コピー'}
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => startCaptionEdit('instagramCaption', snsCaption.instagramCaption)}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('instagramCaption')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'instagramCaption' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <p className="sns-caption-text">{snsCaption.instagramCaption}</p>
+                  {editingCaptionKey === 'instagramCaption' ? (
+                    <textarea
+                      className="sns-caption-edit-input"
+                      value={editingCaptionText}
+                      onChange={(e) => setEditingCaptionText(e.target.value)}
+                    />
+                  ) : (
+                    <p className="sns-caption-text">{snsCaption.instagramCaption}</p>
+                  )}
+                </div>
+
+                <div className="sns-caption-field">
+                  <div className="sns-caption-field-header">
+                    <span className="sns-caption-field-label">TikTok 用</span>
+                    <div className="sns-caption-field-actions">
+                      {editingCaptionKey === 'tiktokCaption' ? (
+                        <>
+                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
+                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('tiktokCaption')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'tiktokCaption' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => copySnsText('tiktok', snsCaption.tiktokCaption || snsCaption.instagramCaption)}
+                          >
+                            {copiedSnsField === 'tiktok' ? '✓ コピー済み' : 'コピー'}
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => startCaptionEdit('tiktokCaption', snsCaption.tiktokCaption || snsCaption.instagramCaption)}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('tiktokCaption')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'tiktokCaption' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {editingCaptionKey === 'tiktokCaption' ? (
+                    <textarea
+                      className="sns-caption-edit-input"
+                      value={editingCaptionText}
+                      onChange={(e) => setEditingCaptionText(e.target.value)}
+                    />
+                  ) : (
+                    <p className="sns-caption-text">{snsCaption.tiktokCaption || snsCaption.instagramCaption}</p>
+                  )}
+                </div>
+
+                <div className="sns-caption-field">
+                  <div className="sns-caption-field-header">
+                    <span className="sns-caption-field-label">X 用</span>
+                    <div className="sns-caption-field-actions">
+                      {editingCaptionKey === 'xCaption' ? (
+                        <>
+                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
+                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('xCaption')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'xCaption' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => copySnsText('x', snsCaption.xCaption || snsCaption.instagramCaption)}
+                          >
+                            {copiedSnsField === 'x' ? '✓ コピー済み' : 'コピー'}
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => startCaptionEdit('xCaption', snsCaption.xCaption || snsCaption.instagramCaption)}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('xCaption')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'xCaption' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {editingCaptionKey === 'xCaption' ? (
+                    <textarea
+                      className="sns-caption-edit-input"
+                      value={editingCaptionText}
+                      onChange={(e) => setEditingCaptionText(e.target.value)}
+                    />
+                  ) : (
+                    <p className="sns-caption-text">{snsCaption.xCaption || snsCaption.instagramCaption}</p>
+                  )}
                 </div>
 
                 <div className="sns-caption-field">
                   <div className="sns-caption-field-header">
                     <span className="sns-caption-field-label">ハッシュタグ</span>
-                    <button
-                      className="btn-sns-copy"
-                      onClick={() => copySnsText('tags', snsCaption.hashtags.map((t) => `#${t}`).join(' '))}
-                    >
-                      {copiedSnsField === 'tags' ? '✓ コピー済み' : 'コピー'}
-                    </button>
+                    <div className="sns-caption-field-actions">
+                      {editingCaptionKey === 'hashtags' ? (
+                        <>
+                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
+                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('hashtags')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'hashtags' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => copySnsText('tags', formatCaptionHashtags(snsCaption))}
+                          >
+                            {copiedSnsField === 'tags' ? '✓ コピー済み' : 'コピー'}
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => startCaptionEdit('hashtags', formatCaptionHashtags(snsCaption))}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="btn-sns-copy"
+                            onClick={() => regenerateCaptionPart('hashtags')}
+                            disabled={!!regeneratingCaptionKey}
+                          >
+                            {regeneratingCaptionKey === 'hashtags' ? '再生成中...' : '再生成'}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <p className="sns-caption-text sns-caption-text--tags">
-                    {snsCaption.hashtags.map((t) => `#${t}`).join('　')}
-                  </p>
+                  {editingCaptionKey === 'hashtags' ? (
+                    <textarea
+                      className="sns-caption-edit-input sns-caption-edit-input--tags"
+                      value={editingCaptionText}
+                      onChange={(e) => setEditingCaptionText(e.target.value)}
+                    />
+                  ) : (
+                    <p className="sns-caption-text sns-caption-text--tags">
+                      {formatCaptionHashtags(snsCaption).split(' ').join('　')}
+                    </p>
+                  )}
                 </div>
 
                 <button
                   className="btn-sns-caption btn-sns-caption--regen"
                   onClick={generateSnsCaption}
-                  disabled={isGeneratingSnsCaption}
+                  disabled={isGeneratingSnsCaption || !!regeneratingCaptionKey}
                 >
-                  {isGeneratingSnsCaption ? '⏳ 生成中...' : '再生成'}
+                  {isGeneratingSnsCaption ? '⏳ 生成中...' : 'SNS投稿文を再生成'}
                 </button>
               </div>
             )}
 
-            {/* テーマ入力 */}
-            <div className="ai-generator" style={{ marginBottom: 12 }}>
-              <p className="ai-generator-label">テーマ入力</p>
-              <div className="ai-generator-row">
-                <input
-                  id="ai-theme-input"
-                  className="ai-generator-input"
-                  type="text"
-                  placeholder="テーマを入力..."
-                  value={aiTheme}
-                  onChange={(e) => setAiTheme(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
-                  disabled={isGenerating}
+            {/* 📚 AI自動作成履歴 (かんたんモード Step3 のみ・完成動画の後に表示) */}
+            {simpleMode && simpleStep === 3 && (
+              <div className="simple-history-section">
+                <FactoryHistoryPanel
+                  factoryHistory={factoryHistory}
+                  factoryRunning={factoryRunning}
+                  maxThemeLength={MAX_HISTORY_THEME_LENGTH}
+                  quickTags={FACTORY_QUICK_TAGS}
+                  onHistoryUpdate={handleFactoryHistoryUpdate}
+                  onToggleFavorite={toggleFactoryHistoryFavorite}
+                  onReuseTheme={handleReuseFactoryTheme}
+                  onDuplicateTheme={handleDuplicateFactoryTheme}
+                  onRerunFactory={handleRerunFactoryTheme}
+                  onDelete={handleDeleteFactoryHistoryItem}
+                  onExportJson={handleExportFactoryHistory}
+                  onExportCsv={handleExportFactoryHistoryCsv}
+                  onImportFile={handleImportFactoryHistory}
+                  onClearHistory={handleClearFactoryHistory}
                 />
-                <button
-                  className={`ai-generator-btn${isGenerating ? ' ai-generator-btn--loading' : ''}`}
-                  onClick={handleAIGenerate}
-                  disabled={!aiTheme.trim() || isGenerating}
-                >
-                  {isGenerating ? '生成中...' : 'ストーリー生成'}
-                </button>
               </div>
-              {generateError && (
-                <p className="ai-generator-error">{generateError}</p>
-              )}
-              {generateSuccess && !generateError && (
-                <p className="ai-generator-success">14枚のストーリーを生成しました</p>
-              )}
-            </div>
+            )}
+            {simpleMode && simpleStep === 3 && !factoryRunning && (
+              <button
+                className="btn-simple-new"
+                onClick={() => { setSimpleStep(1); setFactoryWarning(''); setFactoryNotice(''); resetPostChecklist(); resetPostedRecords() }}
+              >
+                新しく作る
+              </button>
+            )}
 
-            {/* 🏭 AI Reel Factory (Phase16-L) */}
-            <FactoryPanel
-              factoryRunning={factoryRunning}
-              factoryStep={factoryStep}
-              factoryStepNum={factoryStepNum}
-              factoryError={factoryError}
-              factoryLog={factoryLog}
-              factoryNotice={factoryNotice}
-              isPipelineDisabled={isPipelineDisabled || !aiTheme.trim()}
-              hasTheme={aiTheme.trim().length > 0}
-              generatedSlides={slides
-                .filter((s): s is typeof s & { image: string } => !!s.image?.startsWith('generated/'))
-                .map((s) => ({ id: s.id, headline: s.headline, image: s.image }))}
-              onRunFactory={() => handleRunReelFactory()}
-              factorySummary={factorySummary}
-              findFactoryQueueItem={findFactoryQueueItem}
-              onClearSummary={() => {
-                setFactorySummary(null)
-                localStorage.removeItem(FACTORY_SUMMARY_CACHE_KEY)
-              }}
-              onJumpToQueueItem={handleJumpToQueueItem}
-              factoryHistory={factoryHistory}
-              maxThemeLength={MAX_HISTORY_THEME_LENGTH}
-              quickTags={FACTORY_QUICK_TAGS}
-              onHistoryUpdate={handleFactoryHistoryUpdate}
-              onToggleFavorite={toggleFactoryHistoryFavorite}
-              onReuseTheme={handleReuseFactoryTheme}
-              onDuplicateTheme={handleDuplicateFactoryTheme}
-              onRerunFactory={handleRerunFactoryTheme}
-              onDelete={handleDeleteFactoryHistoryItem}
-              onExportJson={handleExportFactoryHistory}
-              onExportCsv={handleExportFactoryHistoryCsv}
-              onImportFile={handleImportFactoryHistory}
-              onClearHistory={handleClearFactoryHistory}
-            />
-
+            {!simpleMode && (<>
             {/* Render Queue (Phase13-H/K / Phase14-C) */}
             <div className="render-queue-section">
+              {/* ── 上級者向け機能パネル ── */}
+              <details className="advanced-panel">
+                <summary className="advanced-panel-summary">🔧 上級者向け機能</summary>
+                <div className="advanced-panel-body">
               {/* 🚀 Auto Render Pipeline (Phase14-C) */}
               <button
                 className="btn-auto-pipeline"
@@ -4585,7 +6075,7 @@ export default function App() {
                       { num: 5, label: '比較' },
                     ].map(({ num, label }) => (
                       <div key={num} className={`smart-pipeline-step${smartPipelineStep >= num ? ' smart-pipeline-step--active' : ''}`}>
-                        <span className="smart-pipeline-step-num">Step {num}/5</span>
+                        <span className="smart-pipeline-step-num">ステップ {num}/5</span>
                         <span className="smart-pipeline-step-label">{label}</span>
                         {smartPipelineStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
                         {smartPipelineStep > num && <span className="smart-pipeline-step-done">✅</span>}
@@ -4645,7 +6135,7 @@ export default function App() {
                       { num: 8, label: '比較' },
                     ].map(({ num, label }) => (
                       <div key={num} className={`smart-pipeline-step${smartRewritePipelineStep >= num ? ' smart-pipeline-step--active' : ''}`}>
-                        <span className="smart-pipeline-step-num">Step {num}/8</span>
+                        <span className="smart-pipeline-step-num">ステップ {num}/8</span>
                         <span className="smart-pipeline-step-label">{label}</span>
                         {smartRewritePipelineStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
                         {smartRewritePipelineStep > num && <span className="smart-pipeline-step-done">✅</span>}
@@ -4713,7 +6203,7 @@ export default function App() {
                       { num: 8, label: '比較' },
                     ].map(({ num, label }) => (
                       <div key={num} className={`smart-pipeline-step${multiRewriteQueueStep >= num ? ' smart-pipeline-step--active' : ''}`}>
-                        <span className="smart-pipeline-step-num">Step {num}/8</span>
+                        <span className="smart-pipeline-step-num">ステップ {num}/8</span>
                         <span className="smart-pipeline-step-label">{label}</span>
                         {multiRewriteQueueStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
                         {multiRewriteQueueStep > num && <span className="smart-pipeline-step-done">✅</span>}
@@ -4939,6 +6429,8 @@ export default function App() {
                   </div>
                 )}
               </div>
+                </div>{/* advanced-panel-body */}
+              </details>
 
               <div className="render-queue-top-actions">
                 <button
@@ -4981,9 +6473,10 @@ export default function App() {
                 renderDiffPanel={renderDiffPanel}
               />
             </div>
+            </>)}
           </div>
 
-          {/* Render Compare Dashboard (Phase13-I / Phase14-C) */}
+          {!simpleMode && (
           <div className="compare-dashboard" ref={compareDashboardRef}>
             <CompareDashboardPanel
               completedVariants={completedVariants}
@@ -5006,31 +6499,35 @@ export default function App() {
               renderDiffPanel={renderDiffPanel}
             />
           </div>
+          )}
 
-          {/* Variant Learning (Phase14-F) */}
+          {!simpleMode && (
+          <details className="advanced-panel">
+            <summary className="advanced-panel-summary">📚 バリアント学習</summary>
+            <div className="advanced-panel-body">
           <div className="variant-learning-section">
             <div className="variant-learning-header">
-              <p className="variant-learning-title">Variant Learning</p>
+              <p className="variant-learning-title">バリアント学習</p>
               {variantLearningSummary.totalEvents > 0 && (
                 <button className="btn-clear-learning" onClick={clearLearningData}>
-                  Clear Learning Data
+                  学習データをリセット
                 </button>
               )}
             </div>
             {variantLearningSummary.totalEvents === 0 ? (
               <p className="variant-learning-empty">
-                Apply To Slides または Select Best を行うと学習データが蓄積されます。
+                スライドに適用 または ベスト選択を行うと学習データが蓄積されます。
               </p>
             ) : (
               <>
                 <div className="vl-stats">
-                  <span className="vl-stat">Total Events: {variantLearningSummary.totalEvents}</span>
-                  <span className="vl-stat">Applied: {variantLearningSummary.appliedCount}</span>
-                  <span className="vl-stat">Selected Best: {variantLearningSummary.selectedBestCount}</span>
+                  <span className="vl-stat">合計: {variantLearningSummary.totalEvents}</span>
+                  <span className="vl-stat">適用: {variantLearningSummary.appliedCount}</span>
+                  <span className="vl-stat">ベスト選択: {variantLearningSummary.selectedBestCount}</span>
                 </div>
                 {variantLearningSummary.topAngles.length > 0 && (
                   <div className="vl-top-angles">
-                    <p className="vl-subsection-title">Top Angles</p>
+                    <p className="vl-subsection-title">よく選ばれたアングル</p>
                     <ol className="vl-rank-list">
                       {variantLearningSummary.topAngles.map((a, i) => (
                         <li key={a.angle} className="vl-rank-item">
@@ -5044,7 +6541,7 @@ export default function App() {
                 )}
                 {variantLearningSummary.recentEvents.length > 0 && (
                   <div className="vl-recent">
-                    <p className="vl-subsection-title">Recent Learning</p>
+                    <p className="vl-subsection-title">最近の学習</p>
                     <ul className="vl-recent-list">
                       {variantLearningSummary.recentEvents.map((e) => (
                         <li key={e.id} className="vl-recent-item">
@@ -5061,6 +6558,9 @@ export default function App() {
               </>
             )}
           </div>
+            </div>{/* advanced-panel-body */}
+          </details>
+          )}
 
           {/* 生成履歴 */}
           <div className="history-area" ref={historyAreaRef}>
@@ -5083,6 +6583,8 @@ export default function App() {
             )}
           </div>
 
+          {!simpleMode && (
+          <>
           <button
             className="btn-save-template"
             onClick={() => {
@@ -5103,6 +6605,8 @@ export default function App() {
           <p className="download-hint">
             ※ ダウンロードは保険用です
           </p>
+          </>
+          )}
         </div>
 
         </div>{/* panel-left-body */}

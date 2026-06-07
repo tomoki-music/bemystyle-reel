@@ -174,14 +174,14 @@ export function CompareVariantCard({
       <div className="compare-card-actions">
         {item.outputPath && (
           <a className="btn-compare-dl" href={item.outputPath} download>
-            Download
+            ダウンロード
           </a>
         )}
         <button
           className={`btn-select-best${isBest ? ' btn-select-best--active' : ''}`}
           onClick={onSelectBest}
         >
-          {isBest ? '🏆 Selected' : 'Select Best'}
+          {isBest ? '🏆 選択済み' : 'ベストに選ぶ'}
         </button>
       </div>
     </div>

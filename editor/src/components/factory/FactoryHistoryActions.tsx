@@ -32,38 +32,38 @@ export function FactoryHistoryActions({
         className={`btn-factory-favorite${favorite ? ' btn-factory-favorite--active' : ''}`}
         onClick={() => onToggleFavorite(itemId)}
       >
-        {favorite ? '★ Favorited' : '☆ Favorite'}
+        {favorite ? '★ お気に入り済み' : '☆ お気に入り'}
       </button>
       <button
         className="btn-factory-theme-edit"
         onClick={() => onEditTheme(itemId, theme)}
       >
-        Edit Theme
+        テーマ編集
       </button>
       <button
         className="btn-factory-reuse"
         onClick={() => onReuseTheme(theme)}
       >
-        Reuse Theme
+        テーマを再利用
       </button>
       <button
         className="btn-factory-duplicate"
         onClick={() => onDuplicateTheme(theme)}
       >
-        Duplicate
+        複製
       </button>
       <button
         className="btn-factory-rerun"
         onClick={() => onRerunFactory(theme)}
         disabled={factoryRunning}
       >
-        Rerun Factory
+        再実行
       </button>
       <button
         className="btn-factory-history-delete"
         onClick={() => onDelete(itemId)}
       >
-        Delete
+        削除
       </button>
     </div>
   )

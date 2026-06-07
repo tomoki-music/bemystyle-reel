@@ -40,43 +40,43 @@ export function FactorySummaryCard({
   return (
     <div className="factory-summary-card">
       <div className="factory-summary-header-row">
-        <p className="factory-summary-header">🏭 Factory Summary</p>
+        <p className="factory-summary-header">🏭 AI自動作成サマリー</p>
         <button className="btn-factory-clear" onClick={onClearSummary}>
-          Clear
+          クリア
         </button>
       </div>
       <p className="factory-summary-timestamp">
-        Last Factory Run: {new Date(factorySummary.generatedAt).toLocaleString()}
+        最終実行：{new Date(factorySummary.generatedAt).toLocaleString()}
       </p>
       <div className="factory-summary-grid">
         <div className="factory-summary-item">
-          <span className="factory-summary-label">Generated Variants</span>
+          <span className="factory-summary-label">生成バリアント数</span>
           <span className="factory-summary-value">{factorySummary.generatedCount}</span>
         </div>
         <div className="factory-summary-item">
-          <span className="factory-summary-label">Selected Variants</span>
+          <span className="factory-summary-label">選定バリアント数</span>
           <span className="factory-summary-value">{factorySummary.selectedCount}</span>
         </div>
         <div className="factory-summary-item">
-          <span className="factory-summary-label">Average Recommendation</span>
+          <span className="factory-summary-label">平均おすすめ度</span>
           <span className="factory-summary-value">{factorySummary.averageRecommendation}</span>
         </div>
         <div className="factory-summary-item">
-          <span className="factory-summary-label">Queue Added</span>
+          <span className="factory-summary-label">キュー追加数</span>
           <span className="factory-summary-value">{factorySummary.queueAddedCount}</span>
         </div>
       </div>
       <div className="factory-best-variant">
-        <p className="factory-best-label">Best Variant</p>
+        <p className="factory-best-label">ベストバリアント</p>
         <p className="factory-best-name">{factorySummary.bestVariantName}</p>
         <p className="factory-best-rec">
-          Recommendation {'★'.repeat(factorySummary.bestRecommendation)}
+          おすすめ度 {'★'.repeat(factorySummary.bestRecommendation)}
           {'☆'.repeat(Math.max(0, 5 - factorySummary.bestRecommendation))}
         </p>
       </div>
       {factorySummary.topVariants.length > 0 && (
         <div className="factory-top-variants">
-          <p className="factory-top-variants-title">Top Variants</p>
+          <p className="factory-top-variants-title">トップバリアント</p>
           {factorySummary.topVariants.map((v, i) => {
             const queueItem = findFactoryQueueItem(v.name)
             return (
@@ -84,9 +84,9 @@ export function FactorySummaryCard({
                 <span className="factory-top-rank">#{i + 1}</span>
                 <span className="factory-top-name">{v.name}</span>
                 <span className="factory-top-scores">
-                  Rec: {v.recommendation}
-                  {v.predictedViews !== undefined && ` · Views: ${v.predictedViews}`}
-                  {v.savePotential !== undefined && ` · Save: ${v.savePotential}`}
+                  おすすめ度: {v.recommendation}
+                  {v.predictedViews !== undefined && ` · 再生数: ${v.predictedViews}`}
+                  {v.savePotential !== undefined && ` · 保存率: ${v.savePotential}`}
                   {v.ctaStrength !== undefined && ` · CTA: ${v.ctaStrength}`}
                 </span>
                 <div className="factory-top-variant-actions">
@@ -96,11 +96,11 @@ export function FactorySummaryCard({
                     disabled={!queueItem}
                     title={
                       queueItem
-                        ? 'Queue内のSnapshotへジャンプ'
-                        : 'Queue内に該当Variantがありません'
+                        ? 'キュー内のスナップショットへジャンプ'
+                        : 'キュー内に該当バリアントがありません'
                     }
                   >
-                    View Snapshot
+                    スナップショットを見る
                   </button>
                 </div>
               </div>

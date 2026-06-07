@@ -23,19 +23,19 @@ export function FactoryHistoryStats({ items }: FactoryHistoryStatsProps) {
   return (
     <div className="factory-history-stats">
       <div className="factory-history-stat">
-        <span className="factory-history-stat-label">Runs</span>
+        <span className="factory-history-stat-label">実行回数</span>
         <span className="factory-history-stat-value">{totalRuns}</span>
       </div>
       <div className="factory-history-stat">
-        <span className="factory-history-stat-label">Favorites</span>
+        <span className="factory-history-stat-label">お気に入り</span>
         <span className="factory-history-stat-value">{favoriteCount}</span>
       </div>
       <div className="factory-history-stat">
-        <span className="factory-history-stat-label">High Score</span>
+        <span className="factory-history-stat-label">高スコア</span>
         <span className="factory-history-stat-value">{highScoreCount}</span>
       </div>
       <div className="factory-history-stat">
-        <span className="factory-history-stat-label">Avg Best</span>
+        <span className="factory-history-stat-label">平均ベスト</span>
         <span className="factory-history-stat-value">{averageBestRecommendation}</span>
       </div>
     </div>
