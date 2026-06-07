@@ -67,7 +67,12 @@ export function RenderQueuePanel({
   const canClearQueue = !isBatchRendering && !isAutoPipelineRunning && !renderQueue.every((q) => q.status === 'rendering')
 
   if (renderQueue.length === 0) {
-    return <p className="render-queue-empty">No queued renders</p>
+    return (
+      <div className="render-queue-empty">
+        <p className="render-queue-empty-title">生成待ちの動画はありません</p>
+        <p className="render-queue-empty-hint">「AI自動作成」を実行すると、バリアントが自動でキューに追加されます。</p>
+      </div>
+    )
   }
 
   return (

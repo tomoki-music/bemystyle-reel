@@ -60,8 +60,8 @@ export function FactoryHistoryTags({
                 }}
                 autoFocus
               />
-              <button className="btn-factory-tag-save" onClick={onSaveEditTag}>Save</button>
-              <button className="btn-factory-tag-cancel" onClick={onCancelEditTag}>Cancel</button>
+              <button className="btn-factory-tag-save" onClick={onSaveEditTag}>保存</button>
+              <button className="btn-factory-tag-cancel" onClick={onCancelEditTag}>キャンセル</button>
             </span>
           )
         }
@@ -71,7 +71,7 @@ export function FactoryHistoryTags({
             <button
               className="btn-factory-tag-edit"
               onClick={() => onStartEditTag(itemId, tag)}
-            >edit</button>
+            >編集</button>
             <button
               className="factory-history-tag-remove"
               onClick={() => onRemoveTag(itemId, tag)}
@@ -82,17 +82,17 @@ export function FactoryHistoryTags({
       <div className="factory-history-tag-form">
         <input
           className="factory-history-tag-input"
-          placeholder="Add tag..."
+          placeholder="タグを追加..."
           value={tagInputValue}
           onChange={(e) => onTagInputChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); onAddTag(itemId) }
           }}
         />
-        <button className="btn-factory-add-tag" onClick={() => onAddTag(itemId)}>Add</button>
+        <button className="btn-factory-add-tag" onClick={() => onAddTag(itemId)}>追加</button>
       </div>
       <div className="factory-history-quick-tags">
-        <span className="factory-history-quick-label">Quick:</span>
+        <span className="factory-history-quick-label">クイック：</span>
         {quickTags.map((qt) => (
           <button
             key={qt}

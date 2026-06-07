@@ -1,0 +1,171 @@
+{
+  "id": "custom-507413a4",
+  "name": "小川町ワーケーション",
+  "title": "小川町1DAYワーケーション",
+  "slides": [
+    {
+      "id": 1,
+      "durationSec": 4,
+      "visible": true,
+      "headline": "仕事も人生も\nリセットする\n1日間",
+      "subline": "小川町×ノート術WSで\n本当の自分と向き合った",
+      "emphasis": "リセット",
+      "image": "slide01.jpg",
+      "layout": "bottom",
+      "showParticles": true
+    },
+    {
+      "id": 2,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "あなたの\n「核になる言葉」は\n何ですか？",
+      "subline": "この一問から\n特別な旅が始まった",
+      "emphasis": "核になる言葉",
+      "image": "slide02.jpg",
+      "layout": "bottom",
+      "showParticles": true
+    },
+    {
+      "id": 3,
+      "durationSec": 4,
+      "visible": true,
+      "headline": "5年後の自分が\n今の私を見たら\n何て言う？",
+      "subline": "この問いひとつで\n心がぐっと動き出した",
+      "emphasis": "5年後の自分",
+      "image": "slide03.jpg",
+      "layout": "bottom",
+      "showParticles": false
+    },
+    {
+      "id": 4,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "1年後・3年後・\n5年後——\n何してる？",
+      "subline": "書いてみて初めて\n未来がリアルになった",
+      "emphasis": "未来をリアルに",
+      "image": "slide04.jpg",
+      "layout": "bottom",
+      "showParticles": false
+    },
+    {
+      "id": 5,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "「嫌なこと」こそが\n一番正直な\nコンパスだった",
+      "subline": "自分を知るヒントは\n日常のモヤモヤの中にある",
+      "emphasis": "正直なコンパス",
+      "image": "slide05.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 6,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "住む場所・仕事・\n一緒にいたい人——\nどう答える？",
+      "subline": "問いを重ねるほど\n言葉が溢れ出してきた",
+      "emphasis": "言葉が溢れる",
+      "image": "slide06.jpg",
+      "layout": "bottom",
+      "showParticles": false
+    },
+    {
+      "id": 7,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "理想の働き方を\nはっきりと\n言葉にした午後",
+      "subline": "コーヒー片手に\n夢を声に出してみた",
+      "emphasis": "言葉にする",
+      "image": "slide07.jpg",
+      "layout": "bottom",
+      "showParticles": false
+    },
+    {
+      "id": 8,
+      "durationSec": 4,
+      "visible": true,
+      "headline": "あなたの\n「使命」は\n何ですか？",
+      "subline": "一番深い問いが\n一番大切な答えを連れてくる",
+      "emphasis": "使命",
+      "image": "slide08.jpg",
+      "layout": "bottom",
+      "showParticles": true
+    },
+    {
+      "id": 9,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "たった4時間で\n人生が\n動き出した",
+      "subline": "笑いあり・涙あり\n熱すぎて戻れない午後",
+      "emphasis": "人生が動く",
+      "image": "slide09.jpg",
+      "layout": "bottom",
+      "showParticles": true
+    },
+    {
+      "id": 10,
+      "durationSec": 4,
+      "visible": true,
+      "headline": "「悩んでいるのは\n私だけじゃ\nなかった」",
+      "subline": "誰かの言葉が\n自分を救ってくれた瞬間",
+      "emphasis": "一人じゃない",
+      "image": "slide10.jpg",
+      "layout": "bottom",
+      "showParticles": false
+    },
+    {
+      "id": 11,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "WSが終わっても\n話が\n止まらない",
+      "subline": "みんなで歩いた\n小川町の夕暮れ",
+      "emphasis": "話が止まらない",
+      "image": "slide11.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 12,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "初めて会った\nはずなのに\nもう仲間だった",
+      "subline": "この繋がりが\n1日の一番の宝になった",
+      "emphasis": "もう仲間",
+      "image": "slide12.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 13,
+      "durationSec": 4,
+      "visible": true,
+      "headline": "小川町に\nまた来たい——\nそう思った",
+      "subline": "この場所で\n自分と出会い直した1日",
+      "emphasis": "また来たい",
+      "image": "slide13.jpg",
+      "layout": "bottom",
+      "showParticles": true
+    },
+    {
+      "id": 14,
+      "durationSec": 4,
+      "visible": true,
+      "headline": "第二回は\n9月開催！\nあなたも一緒に",
+      "subline": "あなたの「核となる言葉」を\n一緒に見つけましょう",
+      "emphasis": "第二回開催",
+      "image": "slide14.jpg",
+      "layout": "bottom",
+      "showParticles": true,
+      "showCTA": false
+    }
+  ],
+  "cta": {
+    "qrImage": "qr-singing.png"
+  },
+  "hints": null,
+  "favorite": false,
+  "category": "other",
+  "description": "",
+  "variables": [],
+  "thumbnail": "slide01.jpg"
+}

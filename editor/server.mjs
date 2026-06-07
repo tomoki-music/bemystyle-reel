@@ -626,29 +626,34 @@ app.post('/api/generate-image', async (req, res) => {
   }
 
   try {
+    const imageRequest = {
+      model: 'gpt-image-1',
+      prompt: prompt.trim(),
+      n: 1,
+      size: '1024x1792',
+    }
+    console.log('[IMAGE_GENERATION_DEBUG] request keys:', Object.keys(imageRequest))
+    console.log('[IMAGE_GENERATION_DEBUG] request body:', JSON.stringify(imageRequest, null, 2))
+
     const openaiRes = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: 'gpt-image-1',
-        prompt: prompt.trim(),
-        n: 1,
-        size: '1024x1792',
-        response_format: 'b64_json',
-      }),
+      body: JSON.stringify(imageRequest),
     })
 
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
+      console.error('[IMAGE_GENERATION_DEBUG] OpenAI error response:', JSON.stringify(errData, null, 2))
       return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
     }
 
     const openaiData = await openaiRes.json()
     const b64 = openaiData.data?.[0]?.b64_json
     if (!b64) {
+      console.error('[IMAGE_GENERATION_DEBUG] Response data keys:', Object.keys(openaiData.data?.[0] ?? {}))
       return res.status(502).json({ ok: false, message: '画像データが取得できませんでした' })
     }
 
@@ -657,9 +662,15 @@ app.post('/api/generate-image', async (req, res) => {
     const randomSuffix = randomUUID().slice(0, 8)
     const filename = `ai-${timestamp}-${randomSuffix}.png`
     const filePath = resolve(GENERATED_DIR, filename)
-    writeFileSync(filePath, Buffer.from(b64, 'base64'))
+    const buffer = Buffer.from(b64, 'base64')
+    writeFileSync(filePath, buffer)
 
-    res.json({ ok: true, image: `generated/${filename}` })
+    res.json({
+      ok: true,
+      image: `generated/${filename}`,
+      imageUrl: `/assets/generated/${filename}`,
+      path: `generated/${filename}`,
+    })
   } catch (err) {
     res.status(502).json({ ok: false, message: `画像生成エラー: ${err.message}` })
   }
@@ -706,10 +717,61 @@ app.delete('/api/assets/generated/:filename', (req, res) => {
   }
 })
 
+// Phase18-H: テンプレート別SNS投稿文プロンプト
+const SNS_TEMPLATE_PROMPTS = {
+  'free-diagnosis-campaign': '無料診断キャンペーン向け。限定感、安心感、申し込みやすさを重視した投稿文を生成すること。',
+  'music-community': '音楽コミュニティ紹介向け。初心者歓迎、仲間感、参加しやすさを重視した投稿文を生成すること。',
+  'event-announcement': 'イベント告知向け。日時・場所・参加メリット・楽しさを明確にした投稿文を生成すること。',
+  'note-article': 'Note記事紹介向け。記事を読みたくなる気づき、余白、共感を重視した投稿文を生成すること。',
+  'youtube-video': 'YouTube動画紹介向け。見どころ、学べるポイント、視聴誘導を重視した投稿文を生成すること。',
+  'singing-diagnosis': '歌唱診断紹介向け。体験価値、成長感、診断後の変化を重視した投稿文を生成すること。',
+}
+
+const SNS_CAPTION_REGENERATE_PROMPTS = {
+  youtubeTitle: 'youtubeTitleだけを生成する。短く強いタイトル。日本語・60文字以内・#を使わない。',
+  youtubeDescription: 'youtubeDescriptionだけを生成する。詳細説明・CTA入り・検索されやすい言葉を含める。日本語・3〜5行。',
+  instagramCaption: 'instagramCaptionだけを生成する。共感・雰囲気・読みやすい改行を重視。日本語・3〜5行。',
+  tiktokCaption: 'tiktokCaptionだけを生成する。冒頭インパクト・短くテンポよく・少しカジュアル。',
+  xCaption: 'xCaptionだけを生成する。120文字前後・余白と一言感・拡散されやすい短文。',
+  hashtags: 'hashtagsだけを生成する。SNS横断で使いやすいタグを10〜15個。#なしの文字列配列。',
+}
+
+const normalizeSnsCaption = (caption) => {
+  if (!caption || typeof caption !== 'object') return null
+  if (typeof caption.youtubeTitle !== 'string' || typeof caption.youtubeDescription !== 'string' ||
+      typeof caption.instagramCaption !== 'string' || !Array.isArray(caption.hashtags)) {
+    return null
+  }
+
+  return {
+    youtubeTitle: caption.youtubeTitle,
+    youtubeDescription: caption.youtubeDescription,
+    instagramCaption: caption.instagramCaption,
+    tiktokCaption: typeof caption.tiktokCaption === 'string' && caption.tiktokCaption.trim()
+      ? caption.tiktokCaption
+      : caption.instagramCaption,
+    xCaption: typeof caption.xCaption === 'string' && caption.xCaption.trim()
+      ? caption.xCaption
+      : caption.instagramCaption,
+    hashtags: caption.hashtags
+      .filter((tag) => typeof tag === 'string')
+      .map((tag) => tag.trim().replace(/^#+/, ''))
+      .filter(Boolean),
+  }
+}
+
 app.post('/api/sns-caption', async (req, res) => {
-  const { slides, title, selectedPresetKey, selectedCustomPreset } = req.body ?? {}
+  const { slides, title, selectedPresetKey, selectedCustomPreset, templateId, regenerateTarget, currentCaption } = req.body ?? {}
   if (!Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ ok: false, message: 'slides が空です' })
+  }
+  const isPartRegeneration = typeof regenerateTarget === 'string' && regenerateTarget.length > 0
+  if (isPartRegeneration && !SNS_CAPTION_REGENERATE_PROMPTS[regenerateTarget]) {
+    return res.status(400).json({ ok: false, message: 'regenerateTarget が不正です' })
+  }
+  const normalizedCurrentCaption = isPartRegeneration ? normalizeSnsCaption(currentCaption) : null
+  if (isPartRegeneration && !normalizedCurrentCaption) {
+    return res.status(400).json({ ok: false, message: 'currentCaption の形式が不正です' })
   }
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
@@ -735,20 +797,38 @@ app.post('/api/sns-caption', async (req, res) => {
     ? `プリセット: ${selectedPresetKey}`
     : 'プリセットなし'
 
-  const systemPrompt = `あなたはSNSマーケティングの専門家です。
-ショート動画（YouTube Shorts / Instagram Reels）のスライド内容を元に、投稿文をJSON形式で生成してください。
-必ずJSON形式のみで返してください。
+  const templatePrompt = SNS_TEMPLATE_PROMPTS[templateId] ?? ''
 
+  const systemPrompt = isPartRegeneration
+    ? `あなたはSNSマーケティングの専門家です。
+ショート動画のスライド内容と現在の投稿文を元に、指定された1項目だけを再生成してください。
+必ずJSON形式のみで返してください。
+${templatePrompt ? `\n【投稿スタイル指示】${templatePrompt}` : ''}
+再生成対象: ${regenerateTarget}
+生成方針: ${SNS_CAPTION_REGENERATE_PROMPTS[regenerateTarget]}
+返すJSONは次の1項目のみです。
 {
-  "youtubeTitle": "YouTube Shortsのタイトル（日本語・60文字以内・#を使わない）",
-  "youtubeDescription": "YouTube説明文（日本語・3〜5行・動画の内容を簡潔に・最後にハッシュタグを3〜5個）",
-  "instagramCaption": "Instagram投稿文（日本語・絵文字を適度に使用・3〜5行・最後にハッシュタグを5〜8個）",
+  "${regenerateTarget}": ${regenerateTarget === 'hashtags' ? '["タグ1", "タグ2", "...（#なしで10〜15個）"]' : '"再生成した本文"'}
+}
+hashtagsの値には#を含めないこと。`
+    : `あなたはSNSマーケティングの専門家です。
+ショート動画のスライド内容を元に、YouTube / Instagram / TikTok / X それぞれに最適化した投稿文をJSON形式で生成してください。
+必ずJSON形式のみで返してください。
+${templatePrompt ? `\n【投稿スタイル指示】${templatePrompt}` : ''}
+{
+  "youtubeTitle": "YouTube Shortsのタイトル（日本語・60文字以内・短く強め・検索されやすい言葉を含める・#を使わない）",
+  "youtubeDescription": "YouTube説明文（日本語・3〜5行・動画の内容を少し詳しく・CTAを入れる・検索されやすい言葉を含める）",
+  "instagramCaption": "Instagram投稿文（日本語・共感と雰囲気重視・読みやすく改行・3〜5行）",
+  "tiktokCaption": "TikTok投稿文（日本語・冒頭インパクト重視・短くテンポよく・少しカジュアル・見た人が反応しやすい文）",
+  "xCaption": "X投稿文（日本語・120文字前後・余白と一言感・拡散されやすい短文・ハッシュタグを本文に入れすぎない）",
   "hashtags": ["タグ1", "タグ2", "...（#なしで10〜15個）"]
 }
 hashtagsの値には#を含めないこと。`
 
   const userMessage = `動画タイトル: ${title || '（なし）'}
 ${presetInfo}
+${templateId ? `テンプレート: ${templateId}` : ''}
+${isPartRegeneration ? `\n現在の投稿文:\n${JSON.stringify(normalizedCurrentCaption, null, 2)}` : ''}
 
 スライド内容:
 ${slideSummary}`
@@ -765,7 +845,7 @@ ${slideSummary}`
         ],
         response_format: { type: 'json_object' },
         temperature: 0.8,
-        max_tokens: 1000,
+        max_tokens: 1400,
       }),
     })
 
@@ -783,12 +863,39 @@ ${slideSummary}`
       return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
     }
 
-    if (typeof caption.youtubeTitle !== 'string' || typeof caption.youtubeDescription !== 'string' ||
-        typeof caption.instagramCaption !== 'string' || !Array.isArray(caption.hashtags)) {
+    if (isPartRegeneration) {
+      if (regenerateTarget === 'hashtags') {
+        if (!Array.isArray(caption.hashtags)) {
+          return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+        }
+        const nextCaption = {
+          ...normalizedCurrentCaption,
+          hashtags: caption.hashtags
+            .filter((tag) => typeof tag === 'string')
+            .map((tag) => tag.trim().replace(/^#+/, ''))
+            .filter(Boolean),
+        }
+        return res.json({ ok: true, caption: nextCaption })
+      }
+
+      if (typeof caption[regenerateTarget] !== 'string') {
+        return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+      }
+      return res.json({
+        ok: true,
+        caption: {
+          ...normalizedCurrentCaption,
+          [regenerateTarget]: caption[regenerateTarget],
+        },
+      })
+    }
+
+    const normalizedCaption = normalizeSnsCaption(caption)
+    if (!normalizedCaption) {
       return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
     }
 
-    res.json({ ok: true, caption })
+    res.json({ ok: true, caption: normalizedCaption })
   } catch (err) {
     res.status(502).json({ ok: false, message: `OpenAI接続エラー: ${err.message}` })
   }

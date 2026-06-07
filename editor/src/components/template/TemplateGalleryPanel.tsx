@@ -316,7 +316,7 @@ export function TemplateGalleryPanel({
                 {t.thumbnail ? (
                   <img src={t.thumbnail} alt={t.name} className="template-card-img" />
                 ) : (
-                  <div className="template-card-no-img">No Image</div>
+                  <div className="template-card-no-img">画像なし</div>
                 )}
               </button>
               <div className="template-card-body">
