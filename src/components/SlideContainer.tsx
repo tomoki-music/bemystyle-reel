@@ -16,12 +16,14 @@ interface Props {
   slide: SlideData;
   frame: number;          // Sequence-local frame
   durationInFrames: number;
+  ctaQrImage?: string;
 }
 
 export const SlideContainer: React.FC<Props> = ({
   slide,
   frame,
   durationInFrames,
+  ctaQrImage,
 }) => {
   const { fps } = useVideoConfig();
 
@@ -146,7 +148,7 @@ export const SlideContainer: React.FC<Props> = ({
               }}
             >
               <Img
-                src={staticFile("/assets/qr-singing.png")}
+                src={staticFile(`/assets/${ctaQrImage ?? 'qr-singing.png'}`)}
                 style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
               />
             </div>

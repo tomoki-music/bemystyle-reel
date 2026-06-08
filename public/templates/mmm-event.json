@@ -1,0 +1,130 @@
+{
+  "id": "mmm-event",
+  "name": "MMMイベント告知",
+  "category": "event",
+  "hints": {
+    "imageCount": 10,
+    "durationSec": 30,
+    "ctaNote": "イベントページへ誘導"
+  },
+  "title": "MMMイベント告知",
+  "slides": [
+    {
+      "id": 1,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "お知らせがあります",
+      "subline": "最後まで見てください！",
+      "emphasis": "お知らせ",
+      "image": "slide01.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 2,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "イベント\n開催決定！",
+      "subline": "みなさんをお招きします。",
+      "emphasis": "開催決定",
+      "image": "slide02.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 3,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "どんなイベント？",
+      "subline": "音楽を楽しむ\n最高の時間です。",
+      "emphasis": "どんな",
+      "image": "slide03.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 4,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "初心者\n大歓迎",
+      "subline": "音楽が好きなら\nどなたでも参加できます。",
+      "emphasis": "初心者",
+      "image": "slide04.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 5,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "日時",
+      "subline": "◯月◯日（◯）\n◯◯:◯◯〜◯◯:◯◯",
+      "emphasis": "日時",
+      "image": "slide05.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 6,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "会場",
+      "subline": "アクセス詳細は\nイベントページへ。",
+      "emphasis": "会場",
+      "image": "slide06.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 7,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "参加費",
+      "subline": "演奏参加・\n聴くだけ参加OK",
+      "emphasis": "参加費",
+      "image": "slide07.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 8,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "こんな人に\nおすすめ",
+      "subline": "音楽仲間を作りたい方\n見学だけでもOK",
+      "emphasis": "おすすめ",
+      "image": "slide08.jpg",
+      "layout": "center",
+      "showParticles": true
+    },
+    {
+      "id": 9,
+      "durationSec": 3,
+      "visible": true,
+      "headline": "お申込みは\nこちらから",
+      "subline": "イベントページの\nリンクをタップ。",
+      "emphasis": "お申込み",
+      "image": "slide09.jpg",
+      "layout": "center",
+      "showParticles": false
+    },
+    {
+      "id": 10,
+      "durationSec": 4,
+      "visible": true,
+      "headline": " ",
+      "subline": "",
+      "emphasis": "",
+      "image": "slide10.jpg",
+      "layout": "cta",
+      "showParticles": true,
+      "showCTA": true,
+      "ctaLabel": "イベントページへ",
+      "ctaNote": "タップして詳細を確認",
+      "ctaUrl": "https://be-my-style.com"
+    }
+  ],
+  "cta": {
+    "qrImage": "qr-singing.png"
+  }
+}
