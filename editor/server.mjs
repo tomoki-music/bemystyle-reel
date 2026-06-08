@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import fetch from 'node-fetch'
 import express from 'express'
 import { writeFileSync, readFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from 'fs'
 import { resolve, dirname, extname, basename } from 'path'
@@ -12,14 +13,39 @@ const SLIDES_PATH = resolve(__dirname, '../public/data/slides.json')
 const TEMPLATES_DIR = resolve(__dirname, '../public/templates')
 const UPLOADS_DIR = resolve(__dirname, '../public/assets/uploads')
 const GENERATED_DIR = resolve(__dirname, '../public/assets/generated')
+const AUDIO_DIR = resolve(__dirname, '../public/assets/audio')
+const BGM_PATH = resolve(AUDIO_DIR, 'bgm.mp3')
 const OUT_DIR = resolve(__dirname, '../out')
 const REELS_DIR = resolve(OUT_DIR, 'reels')
 const LATEST_FILE = resolve(OUT_DIR, 'reel.mp4')
 const ROOT_DIR = resolve(__dirname, '..')
+const REEL_AI_MODE = process.env.REEL_AI_MODE || 'real'
+const isMockAiMode = REEL_AI_MODE === 'mock'
+const isDryRunMode = process.env.REEL_DRY_RUN === '1' || process.env.REEL_DRY_RUN === 'true'
+const REEL_TEST_IMAGE_LIMIT = Math.max(0, Number(process.env.REEL_TEST_IMAGE_LIMIT || 0) || 0)
+const MOCK_IMAGE_FILENAME = 'mock-slide-01.png'
+const MOCK_IMAGE_PATH = resolve(GENERATED_DIR, MOCK_IMAGE_FILENAME)
 
 function formatTimestamp(date) {
   const pad = (n) => String(n).padStart(2, '0')
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+function buildOpenAIErrorResponse(errData) {
+  const msg = errData?.error?.message ?? ''
+  const code = errData?.error?.code ?? ''
+  const isQuota =
+    msg.includes('exceeded your current quota') ||
+    msg.includes('insufficient_quota') ||
+    code === 'insufficient_quota'
+  if (isQuota) {
+    return {
+      ok: false,
+      errorType: 'quota',
+      message: 'OpenAI APIの利用枠またはクレジットが不足しています。Billing / Usage / Limits を確認してください。',
+    }
+  }
+  return { ok: false, message: `OpenAI APIエラー: ${msg || errData?.error?.type || 'unknown'}` }
 }
 
 let renderState = {
@@ -35,9 +61,154 @@ mkdirSync(UPLOADS_DIR, { recursive: true })
 mkdirSync(GENERATED_DIR, { recursive: true })
 mkdirSync(REELS_DIR, { recursive: true })
 mkdirSync(TEMPLATES_DIR, { recursive: true })
+mkdirSync(AUDIO_DIR, { recursive: true })
+
+function ensureMockImage() {
+  if (existsSync(MOCK_IMAGE_PATH)) return
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAABAAAAAYACAIAAADwf7zUAAAAA3NCSVQICAjb4U/gAAAgAElEQVR4nO3dwQnCMBAAQRdD/1t6F0EgWQoJsjDrzTww5s7uAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgIPz2c8AAAAAgGx7AgAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAABgAQAAAAAAAD4K/YAAQnnpB9UAAAAASUVORK5CYII=',
+    'base64'
+  )
+  writeFileSync(MOCK_IMAGE_PATH, png)
+}
+
+function buildMockStorySlides(theme) {
+  return Array.from({ length: 14 }).map((_, index) => ({
+    headline: `テスト見出し ${index + 1}`,
+    subline: `${theme} の確認用テキストです`,
+    emphasis: index === 13 ? '今すぐチェック' : 'TEST',
+    imagePrompt: `Mock image prompt ${index + 1}`,
+  }))
+}
+
+function buildFallbackStorySlides(theme) {
+  return Array.from({ length: 14 }).map((_, index) => ({
+    headline: index === 0 ? 'まずは確認' : `確認スライド ${index + 1}`,
+    subline: `${theme} の暫定ストーリーです`,
+    emphasis: index === 13 ? '詳しく見る' : 'CHECK',
+    imagePrompt: `Fallback vertical 9:16 key visual for ${theme}, slide ${index + 1}, cinematic lighting, dynamic composition, polished details, rich background, large subject focus, no text overlay`,
+  }))
+}
+
+function buildMockVariants() {
+  const angles = ['emotion', 'problem', 'story', 'education', 'action', 'youtube', 'instagram']
+  return angles.map((angle, index) => ({
+    id: `mock-variant-${index + 1}`,
+    name: `Mock Variant ${index + 1}`,
+    description: `Mockモード確認用 ${index + 1}`,
+    angle,
+  }))
+}
+
+function buildFallbackVariants(themeOrSlides) {
+  const angles = ['emotion', 'problem', 'story', 'education', 'action', 'youtube', 'instagram']
+  const firstHeadline = Array.isArray(themeOrSlides)
+    ? themeOrSlides.find((s) => typeof s?.headline === 'string' && s.headline.trim())?.headline
+    : ''
+  const base = firstHeadline || (typeof themeOrSlides === 'string' ? themeOrSlides : 'Factory')
+  return angles.map((angle, index) => ({
+    id: `fallback-variant-${index + 1}`,
+    name: `Fallback ${index + 1}`,
+    description: `${base}`.slice(0, 24) || `暫定バリアント ${index + 1}`,
+    angle,
+  }))
+}
+
+function buildMockScores(variants) {
+  return variants.map((variant, index) => ({
+    variantId: variant.id ?? `mock-variant-${index + 1}`,
+    variantName: variant.name ?? `Mock Variant ${index + 1}`,
+    angle: variant.angle ?? 'mock',
+    totalScore: 90 - index,
+    recommendation: index < 3 ? 5 : 3,
+    predictedViews: index < 3 ? 5 : 3,
+    savePotential: index < 3 ? 4 : 3,
+    ctaStrength: index < 3 ? 4 : 3,
+    reason: 'Mockモードのため固定スコアです',
+  }))
+}
+
+function buildFallbackScores(variants) {
+  return variants.map((variant, index) => ({
+    variantId: variant.id ?? `fallback-variant-${index + 1}`,
+    variantName: variant.name ?? `Variant ${index + 1}`,
+    angle: variant.angle ?? 'fallback',
+    totalScore: 70 - index,
+    recommendation: index < 3 ? 4 : 3,
+    predictedViews: index < 3 ? 4 : 3,
+    savePotential: index < 3 ? 4 : 3,
+    ctaStrength: index < 3 ? 4 : 3,
+    reason: 'AI応答の解析に失敗したため、暫定スコアを使用しました',
+  }))
+}
+
+function extractJsonBlock(text) {
+  if (!text) return null
+
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fenced?.[1]) return fenced[1].trim()
+
+  const firstArray = text.indexOf('[')
+  const lastArray = text.lastIndexOf(']')
+  if (firstArray !== -1 && lastArray !== -1 && lastArray > firstArray) {
+    return text.slice(firstArray, lastArray + 1)
+  }
+
+  const firstObject = text.indexOf('{')
+  const lastObject = text.lastIndexOf('}')
+  if (firstObject !== -1 && lastObject !== -1 && lastObject > firstObject) {
+    return text.slice(firstObject, lastObject + 1)
+  }
+
+  return null
+}
+
+function safeJsonParse(rawText, label) {
+  try {
+    return JSON.parse(rawText)
+  } catch (_error) {
+    console.error(`[${label}] JSON parse failed`)
+    console.error(`[${label}] raw response:`, rawText)
+
+    const extracted = extractJsonBlock(rawText)
+
+    if (extracted) {
+      try {
+        return JSON.parse(extracted)
+      } catch (_secondError) {
+        console.error(`[${label}] extracted JSON parse failed`)
+        console.error(`[${label}] extracted:`, extracted)
+      }
+    }
+
+    return null
+  }
+}
+
+function buildMockRewrite(slides) {
+  return slides.map((slide, index) => ({
+    ...slide,
+    headline: `${slide.headline || `テスト見出し ${index + 1}`}`,
+    subline: `${slide.subline || 'Mockリライト確認用テキストです'}`,
+    emphasis: slide.emphasis || (index === slides.length - 1 ? '今すぐチェック' : 'TEST'),
+  }))
+}
+
+function buildFallbackRewrite(slides) {
+  return slides.map((slide) => ({
+    ...slide,
+    headline: `${slide.headline || ''}`,
+    subline: typeof slide.subline === 'string' ? slide.subline : '',
+    emphasis: typeof slide.emphasis === 'string' ? slide.emphasis : '',
+  }))
+}
+
+ensureMockImage()
 
 const ALLOWED_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp'])
+const ALLOWED_AUDIO_EXTS = new Set(['.mp3', '.wav', '.m4a'])
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_AUDIO_SIZE = 50 * 1024 * 1024 // 50MB
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -60,11 +231,36 @@ const upload = multer({
   },
 })
 
+const audioStorage = multer.memoryStorage()
+const uploadAudio = multer({
+  storage: audioStorage,
+  limits: { fileSize: MAX_AUDIO_SIZE },
+  fileFilter: (_req, file, cb) => {
+    const ext = extname(file.originalname).toLowerCase()
+    if (ALLOWED_AUDIO_EXTS.has(ext)) {
+      cb(null, true)
+    } else {
+      cb(new Error(`音声ファイルはmp3/wav/m4aのみ対応しています: ${ext}`))
+    }
+  },
+})
+
 const app = express()
 app.use(express.json({ limit: '10mb' }))
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, message: 'editor api server is running' })
+})
+
+app.get('/api/reel-ai-config', (_req, res) => {
+  res.json({
+    ok: true,
+    aiMode: isMockAiMode ? 'mock' : 'real',
+    mode: isMockAiMode ? 'mock' : 'real',
+    dryRun: isDryRunMode,
+    testImageLimit: REEL_TEST_IMAGE_LIMIT > 0 ? REEL_TEST_IMAGE_LIMIT : null,
+    imageLimit: REEL_TEST_IMAGE_LIMIT,
+  })
 })
 
 app.get('/api/templates', (_req, res) => {
@@ -399,6 +595,14 @@ const STORY_PRESETS = {
     imageStyle: 'elegant anime style, stylish artist, dreamy lighting, refined color palette, vertical 9:16 composition, no text',
     ctaJa: '保存して見返そう',
   },
+  mmm_event: {
+    tone: 'welcoming, festive, exciting, beginner-friendly, inclusive',
+    targetAudience: 'music lovers of all skill levels — beginners welcome, solo listeners and performers alike',
+    cta: 'encourage the viewer to check the event page and register or attend',
+    platform: 'short vertical event announcement video for Instagram Reels / TikTok',
+    imageStyle: 'elegant anime style, lively concert or session venue, warm stage lighting, musicians enjoying together, energetic yet welcoming, vertical 9:16 composition, no text',
+    ctaJa: '詳しくはイベントページへ',
+  },
 }
 
 app.post('/api/custom-preset-insights', async (req, res) => {
@@ -455,7 +659,7 @@ recommendedCombinations は1〜2件。既存プリセットの勝ちパターン
 
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
 
     const openaiData = await openaiRes.json()
@@ -479,9 +683,23 @@ recommendedCombinations は1〜2件。既存プリセットの勝ちパターン
 })
 
 app.post('/api/generate-story', async (req, res) => {
-  const { theme, presetKey, customPreset } = req.body ?? {}
+  const { theme, presetKey, customPreset, visualStyleTags } = req.body ?? {}
   if (!theme || typeof theme !== 'string' || !theme.trim()) {
     return res.status(400).json({ ok: false, message: 'テーマが必要です' })
+  }
+
+  if (isMockAiMode) {
+    return res.json({
+      ok: true,
+      story: {
+        slides: buildMockStorySlides(theme.trim()),
+        variables: {
+          title: 'Mock Story',
+          subtitle: 'Mockモード確認用ストーリー',
+          cta: customPreset?.ctaText || '今すぐチェック',
+        },
+      },
+    })
   }
 
   const apiKey = process.env.OPENAI_API_KEY
@@ -500,6 +718,15 @@ app.post('/api/generate-story', async (req, res) => {
     ctaJa: customPreset?.ctaText || preset.ctaJa,
   }
 
+  const hasStyleTags = Array.isArray(visualStyleTags) && visualStyleTags.length > 0
+  const styleTagStr = hasStyleTags ? visualStyleTags.join('、') : ''
+  const styleTagSection = hasStyleTags ? `
+Visual style tags (apply to ALL imagePrompts):
+- 映像の世界観は以下で統一してください：${styleTagStr}
+- 実写風とアニメ調を混在させないでください
+- 全スライドで同じビジュアルトーンを維持してください
+` : ''
+
   const presetSection = `
 Preset instructions (apply strongly to all slides):
 - Tone: ${effectivePreset.tone}
@@ -507,19 +734,22 @@ Preset instructions (apply strongly to all slides):
 - CTA direction: ${effectivePreset.cta}
 - Platform: ${effectivePreset.platform}
 - Image style: ${effectivePreset.imageStyle}
-`
+${styleTagSection}`
 
   const systemPrompt = `あなたはショート動画（Instagram Reels / TikTok）のストーリーライター兼ビジュアルディレクターです。
 日本語でスライドコンテンツを生成してください。
 ${presetSection}
 必ずJSON形式のみで返してください。説明文は不要です。
+Return valid JSON only.
+Do not include markdown fences.
+Do not include explanation text.
 {
   "slides": [
     {
       "headline": "スライドのメインテキスト",
       "subline": "補足テキスト（任意）",
       "emphasis": "強調する単語（任意）",
-      "imagePrompt": "Elegant anime-style musician on a softly lit stage, cinematic lighting, vertical 9:16 composition, no text"
+      "imagePrompt": "Elegant anime-style musician on a softly lit stage, cinematic lighting, dynamic vertical 9:16 composition, rich background, large subject, polished details, no text overlay"
     }
   ],
   "variables": {
@@ -538,11 +768,23 @@ ${presetSection}
 - subtitle は15〜25文字のキャッチコピー
 - cta は必ず「${effectivePreset.ctaJa}」を使用する
 - imagePrompt は各スライドの内容に合った英語の画像生成プロンプト（必須・空文字NG）
-- imagePrompt には必ず以下のimage styleを反映すること: ${effectivePreset.imageStyle}
+- imagePrompt は必ず縦型 9:16 SNS動画向けのプロフェッショナルなキービジュアルを指示すること
+- imagePrompt には必ず以下のimage styleを反映すること: ${effectivePreset.imageStyle}${hasStyleTags ? `\n- imagePrompt には必ずビジュアルスタイルタグを反映すること（${styleTagStr}）` : ''}
 - imagePrompt はスライドの感情・場面を具体的に表現する（例: solitary figure gazing at distant horizon, warm sunset tones）
-- Preset の tone・target audience・platform を全スライドの文章に強く反映すること`
+- imagePrompt には必ず以下のクオリティ指示を含める: cinematic lighting, dynamic composition, polished details, rich background, large subject focus
+- アニメ調の場合は実写風と混在させないこと（例: "anime-style, no photorealistic elements"）
+- imagePrompt には画像内に文字を含めないこと（"no text", "no overlay text" を必ず含める）
+- 全スライドで同じビジュアルトーンを維持すること（スタイルの一貫性）
+- Preset の tone・target audience・platform を全スライドの文章に強く反映すること
+- Return valid JSON only.
+- Do not include markdown fences.
+- Do not include explanation text.`
 
-  const userPrompt = `テーマ: ${theme.trim()}`
+  const userPrompt = `テーマ: ${theme.trim()}
+
+Return valid JSON only.
+Do not include markdown fences.
+Do not include explanation text.`
 
   try {
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -565,38 +807,85 @@ ${presetSection}
 
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
 
     const openaiData = await openaiRes.json()
     const content = openaiData.choices?.[0]?.message?.content
+    const storyWarning = 'Story AI応答の解析に失敗したため、暫定ストーリーを使用しました'
     if (!content) {
-      return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
+      console.error('[Story Generate] raw response:', JSON.stringify(openaiData))
+      return res.json({
+        ok: true,
+        warning: storyWarning,
+        story: {
+          slides: buildFallbackStorySlides(theme.trim()),
+          variables: {
+            title: theme.trim(),
+            subtitle: '暫定ストーリーを使用しています',
+            cta: effectivePreset.ctaJa,
+          },
+        },
+      })
     }
 
-    let story
-    try {
-      story = JSON.parse(content)
-    } catch {
-      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
-    }
+    let story = safeJsonParse(content, 'Story Generate')
 
-    if (!Array.isArray(story.slides)) {
-      return res.status(502).json({ ok: false, message: 'OpenAI応答: slides が配列ではありません' })
+    if (!story || !Array.isArray(story.slides)) {
+      console.error('[Story Generate] invalid story response:', content)
+      story = null
+    }
+    if (!story) {
+      return res.json({
+        ok: true,
+        warning: storyWarning,
+        story: {
+          slides: buildFallbackStorySlides(theme.trim()),
+          variables: {
+            title: theme.trim(),
+            subtitle: '暫定ストーリーを使用しています',
+            cta: effectivePreset.ctaJa,
+          },
+        },
+      })
     }
     if (story.slides.length !== 14) {
       if (story.slides.length > 14) {
         story.slides = story.slides.slice(0, 14)
       } else {
-        return res.status(502).json({ ok: false, message: `OpenAI応答: slides は14枚必要です（実際: ${story.slides.length}枚）` })
+        console.error('[Story Generate] invalid slide count response:', content)
+        return res.json({
+          ok: true,
+          warning: storyWarning,
+          story: {
+            slides: buildFallbackStorySlides(theme.trim()),
+            variables: {
+              title: theme.trim(),
+              subtitle: '暫定ストーリーを使用しています',
+              cta: effectivePreset.ctaJa,
+            },
+          },
+        })
       }
     }
     for (let i = 0; i < story.slides.length; i++) {
       if (typeof story.slides[i].headline !== 'string') {
-        return res.status(502).json({ ok: false, message: `OpenAI応答: slides[${i}].headline が文字列ではありません` })
+        console.error('[Story Generate] invalid headline response:', content)
+        return res.json({
+          ok: true,
+          warning: storyWarning,
+          story: {
+            slides: buildFallbackStorySlides(theme.trim()),
+            variables: {
+              title: theme.trim(),
+              subtitle: '暫定ストーリーを使用しています',
+              cta: effectivePreset.ctaJa,
+            },
+          },
+        })
       }
       if (typeof story.slides[i].imagePrompt !== 'string' || !story.slides[i].imagePrompt.trim()) {
-        return res.status(502).json({ ok: false, message: `OpenAI応答: slides[${i}].imagePrompt が不正です（空文字またはstring以外）` })
+        story.slides[i].imagePrompt = `Fallback vertical 9:16 key visual for ${theme.trim()}, slide ${i + 1}, cinematic lighting, dynamic composition, polished details, rich background, large subject focus, no text overlay`
       }
     }
     if (
@@ -605,7 +894,11 @@ ${presetSection}
       typeof story.variables.subtitle !== 'string' ||
       typeof story.variables.cta !== 'string'
     ) {
-      return res.status(502).json({ ok: false, message: 'OpenAI応答: variables.title/subtitle/cta が不正です' })
+      story.variables = {
+        title: theme.trim(),
+        subtitle: '暫定変数を使用しています',
+        cta: effectivePreset.ctaJa,
+      }
     }
 
     res.json({ ok: true, story })
@@ -614,10 +907,24 @@ ${presetSection}
   }
 })
 
+const HIGH_QUALITY_IMAGE_PREFIX = 'Create a high-quality vertical 9:16 social media key visual. Professional cinematic lighting, dynamic composition, polished details, rich atmospheric background, premium artist visual quality. '
+const HIGH_QUALITY_IMAGE_SUFFIX = ' Avoid mixing photorealistic and anime styles. Do not include small unreadable text inside the image. Leave safe space at top and bottom for overlay text.'
+
 app.post('/api/generate-image', async (req, res) => {
-  const { prompt } = req.body ?? {}
+  const { prompt, quality } = req.body ?? {}
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ ok: false, message: 'prompt が必要です' })
+  }
+
+  if (isMockAiMode) {
+    ensureMockImage()
+    return res.json({
+      ok: true,
+      image: `generated/${MOCK_IMAGE_FILENAME}`,
+      imageUrl: `/assets/generated/${MOCK_IMAGE_FILENAME}`,
+      path: `generated/${MOCK_IMAGE_FILENAME}`,
+      mock: true,
+    })
   }
 
   const apiKey = process.env.OPENAI_API_KEY
@@ -625,12 +932,17 @@ app.post('/api/generate-image', async (req, res) => {
     return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
   }
 
+  const isHigh = quality === 'high'
+  const effectivePrompt = isHigh
+    ? `${HIGH_QUALITY_IMAGE_PREFIX}${prompt.trim()}${HIGH_QUALITY_IMAGE_SUFFIX}`
+    : prompt.trim()
+
   try {
     const imageRequest = {
       model: 'gpt-image-1',
-      prompt: prompt.trim(),
+      prompt: effectivePrompt,
       n: 1,
-      size: '1024x1792',
+      size: '1024x1536',
     }
     console.log('[IMAGE_GENERATION_DEBUG] request keys:', Object.keys(imageRequest))
     console.log('[IMAGE_GENERATION_DEBUG] request body:', JSON.stringify(imageRequest, null, 2))
@@ -647,7 +959,7 @@ app.post('/api/generate-image', async (req, res) => {
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
       console.error('[IMAGE_GENERATION_DEBUG] OpenAI error response:', JSON.stringify(errData, null, 2))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
 
     const openaiData = await openaiRes.json()
@@ -725,6 +1037,7 @@ const SNS_TEMPLATE_PROMPTS = {
   'note-article': 'Note記事紹介向け。記事を読みたくなる気づき、余白、共感を重視した投稿文を生成すること。',
   'youtube-video': 'YouTube動画紹介向け。見どころ、学べるポイント、視聴誘導を重視した投稿文を生成すること。',
   'singing-diagnosis': '歌唱診断紹介向け。体験価値、成長感、診断後の変化を重視した投稿文を生成すること。',
+  'mmm-event': 'MMMイベント告知向け。イベント名・日時・会場・参加費・初心者歓迎・見学OK・イベントURL（あれば）を含め、参加したくなる投稿文を生成すること。',
 }
 
 const SNS_CAPTION_REGENERATE_PROMPTS = {
@@ -851,7 +1164,7 @@ ${slideSummary}`
 
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
 
     const openaiData = await openaiRes.json()
@@ -902,9 +1215,12 @@ ${slideSummary}`
 })
 
 app.post('/api/variant-generator', async (req, res) => {
-  const { theme } = req.body ?? {}
+  const { theme, slides } = req.body ?? {}
   if (!theme || typeof theme !== 'string' || !theme.trim()) {
     return res.status(400).json({ ok: false, message: 'theme が空です' })
+  }
+  if (isMockAiMode) {
+    return res.json({ ok: true, variants: buildMockVariants() })
   }
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
@@ -914,14 +1230,20 @@ app.post('/api/variant-generator', async (req, res) => {
   const systemPrompt = `あなたはSNSショート動画マーケターです。
 テーマを元に、異なる切り口・異なる感情導線・異なる訴求方法を持つ7種類の動画企画を作成してください。
 出力形式はJSONのみ。コードブロックや説明文は一切含めず、以下の形式のJSONを返してください：
-{"variants":[{"name":"...","description":"...","angle":"..."},...]}`
+{"variants":[{"name":"...","description":"...","angle":"..."},...]}
+Return valid JSON only.
+Do not include markdown fences.
+Do not include explanation text.`
 
   const userPrompt = `テーマ: ${theme.trim()}
 
 7種類の動画バリアントをJSONで生成してください。
 - name: バリアント名（日本語、10文字以内）
 - description: このバリアントの訴求方針（日本語、30文字以内）
-- angle: 訴求タイプ（英語スネークケース例: emotion, problem, story, education, action, youtube, instagram）`
+- angle: 訴求タイプ（英語スネークケース例: emotion, problem, story, education, action, youtube, instagram）
+Return valid JSON only.
+Do not include markdown fences.
+Do not include explanation text.`
 
   try {
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -939,20 +1261,20 @@ app.post('/api/variant-generator', async (req, res) => {
     })
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
     const openaiData = await openaiRes.json()
     const content = openaiData.choices?.[0]?.message?.content
-    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
-
-    let parsed
-    try {
-      parsed = JSON.parse(content.trim())
-    } catch {
-      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    const warning = 'Variant AI応答の解析に失敗したため、暫定バリアントを使用しました'
+    if (!content) {
+      console.error('[Variant Generate] raw response:', JSON.stringify(openaiData))
+      return res.json({ ok: true, warning, variants: buildFallbackVariants(Array.isArray(slides) ? slides : theme.trim()) })
     }
+
+    const parsed = safeJsonParse(content, 'Variant Generate')
     if (!Array.isArray(parsed?.variants)) {
-      return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+      console.error('[Variant Generate] invalid variants response:', content)
+      return res.json({ ok: true, warning, variants: buildFallbackVariants(Array.isArray(slides) ? slides : theme.trim()) })
     }
 
     res.json({ ok: true, variants: parsed.variants })
@@ -968,6 +1290,9 @@ app.post('/api/rewrite-story', async (req, res) => {
   }
   if (!Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ ok: false, message: 'slides が空です' })
+  }
+  if (isMockAiMode) {
+    return res.json({ ok: true, slides: buildMockRewrite(slides) })
   }
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
@@ -990,10 +1315,14 @@ app.post('/api/rewrite-story', async (req, res) => {
 重要：
 ・スライド枚数は変更禁止
 ・JSONのみ出力（コードブロック禁止）
+・説明文は出力しない
 ・headlineは短く強く（20文字以内推奨）
 ・スマホ視認性を重視
 ・元テーマは維持
 ・改行は\\nを使用可
+Return valid JSON only.
+Do not include markdown fences.
+Do not include explanation text.
 
 訴求タイプ：${guide}
 
@@ -1011,7 +1340,10 @@ app.post('/api/rewrite-story', async (req, res) => {
     })
     .join('\n')
 
-  const userPrompt = `以下の${slides.length}枚のスライドを「${guide}」でリライトしてください。\n\n${slideSummary}\n\n必ず${slides.length}枚分のslides配列をJSONで返してください。`
+  const userPrompt = `以下の${slides.length}枚のスライドを「${guide}」でリライトしてください。\n\n${slideSummary}\n\n必ず${slides.length}枚分のslides配列をJSONで返してください。
+Return valid JSON only.
+Do not include markdown fences.
+Do not include explanation text.`
 
   try {
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1029,23 +1361,24 @@ app.post('/api/rewrite-story', async (req, res) => {
     })
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
     const openaiData = await openaiRes.json()
     const content = openaiData.choices?.[0]?.message?.content
-    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
-
-    let parsed
-    try {
-      parsed = JSON.parse(content.trim())
-    } catch {
-      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    const warning = 'Rewrite AI応答の解析に失敗したため、元スライドを使用しました'
+    if (!content) {
+      console.error('[Rewrite] raw response:', JSON.stringify(openaiData))
+      return res.json({ ok: true, warning, slides: buildFallbackRewrite(slides) })
     }
+
+    const parsed = safeJsonParse(content, 'Rewrite')
     if (!Array.isArray(parsed?.slides)) {
-      return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+      console.error('[Rewrite] invalid slides response:', content)
+      return res.json({ ok: true, warning, slides: buildFallbackRewrite(slides) })
     }
     if (parsed.slides.length !== slides.length) {
-      return res.status(502).json({ ok: false, message: `スライド枚数が一致しません（期待: ${slides.length}, 実際: ${parsed.slides.length}）` })
+      console.error('[Rewrite] invalid slide count response:', content)
+      return res.json({ ok: true, warning, slides: buildFallbackRewrite(slides) })
     }
 
     res.json({ ok: true, slides: parsed.slides })
@@ -1061,6 +1394,9 @@ app.post('/api/score-variants', async (req, res) => {
   }
   if (!Array.isArray(variants) || variants.length === 0) {
     return res.status(400).json({ ok: false, message: 'variants が空です' })
+  }
+  if (isMockAiMode) {
+    return res.json({ ok: true, scores: buildMockScores(variants), mock: true })
   }
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
@@ -1086,9 +1422,13 @@ app.post('/api/score-variants', async (req, res) => {
 
 重要：
 ・出力はJSONのみ（コードブロック禁止）
+・説明文は出力しない
 ・variantsと同数のscores配列を返す
 ・各スコアは1〜5の整数
 ・reasonは日本語で30文字以内
+Return valid JSON only.
+Do not include markdown fences.
+Do not include explanation text.
 
 出力形式：{"scores":[{"variantName":"...","angle":"...","recommendation":5,"predictedViews":4,"savePotential":3,"ctaStrength":2,"reason":"..."},...]}
 `
@@ -1100,7 +1440,10 @@ ${variantList}
 過去の学習データ（angle別選択回数）:
 ${learningSummary}
 
-${variants.length}件分のscores配列をJSONで返してください。`
+${variants.length}件分のscores配列をJSONで返してください。
+Return valid JSON only.
+Do not include markdown fences.
+Do not include explanation text.`
 
   try {
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1118,23 +1461,24 @@ ${variants.length}件分のscores配列をJSONで返してください。`
     })
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
     const openaiData = await openaiRes.json()
     const content = openaiData.choices?.[0]?.message?.content
-    if (!content) return res.status(502).json({ ok: false, message: 'OpenAIからの応答が空です' })
-
-    let parsed
-    try {
-      parsed = JSON.parse(content.trim())
-    } catch {
-      return res.status(502).json({ ok: false, message: 'OpenAIの応答をパースできませんでした' })
+    const warning = 'Score AI応答の解析に失敗したため、暫定スコアを使用しました'
+    if (!content) {
+      console.error('[Score Variants] raw response:', JSON.stringify(openaiData))
+      return res.json({ ok: true, warning, scores: buildFallbackScores(variants), fallback: true })
     }
+
+    const parsed = safeJsonParse(content, 'Score Variants')
     if (!Array.isArray(parsed?.scores)) {
-      return res.status(502).json({ ok: false, message: 'OpenAI応答の形式が不正です' })
+      console.error('[Score Variants] invalid scores response:', content)
+      return res.json({ ok: true, warning, scores: buildFallbackScores(variants), fallback: true })
     }
     if (parsed.scores.length !== variants.length) {
-      return res.status(502).json({ ok: false, message: `スコア件数が一致しません（期待: ${variants.length}, 実際: ${parsed.scores.length}）` })
+      console.error('[Score Variants] invalid score count response:', content)
+      return res.json({ ok: true, warning, scores: buildFallbackScores(variants), fallback: true })
     }
 
     const clamp = (n) => Math.min(5, Math.max(1, Math.round(Number(n) || 3)))
@@ -1214,7 +1558,7 @@ AIスコア: ${scoreText}
     })
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
     const openaiData = await openaiRes.json()
     const content = openaiData.choices?.[0]?.message?.content
@@ -1301,7 +1645,7 @@ ${fmtSlides(afterSlides)}
     })
     if (!openaiRes.ok) {
       const errData = await openaiRes.json().catch(() => ({}))
-      return res.status(502).json({ ok: false, message: `OpenAI APIエラー: ${errData.error?.message ?? openaiRes.status}` })
+      return res.status(502).json(buildOpenAIErrorResponse(errData))
     }
     const openaiData = await openaiRes.json()
     const content = openaiData.choices?.[0]?.message?.content
@@ -1336,6 +1680,18 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   res.json({ ok: true, filename, url })
 })
 
+app.post('/api/upload-audio', uploadAudio.single('audio'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ ok: false, message: '音声ファイルがありません' })
+  }
+  try {
+    writeFileSync(BGM_PATH, req.file.buffer)
+    res.json({ ok: true, message: 'BGMを更新しました', fileName: req.file.originalname })
+  } catch (err) {
+    res.status(500).json({ ok: false, message: `BGM保存エラー: ${err.message}` })
+  }
+})
+
 app.use((err, _req, res, _next) => {
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(400).json({ ok: false, message: 'ファイルサイズが10MBを超えています' })
@@ -1343,7 +1699,7 @@ app.use((err, _req, res, _next) => {
   res.status(400).json({ ok: false, message: err.message ?? 'アップロードエラー' })
 })
 
-const PORT = 3002
+const PORT = Number(process.env.PORT || 3002)
 app.listen(PORT, () => {
   console.log(`API server running at http://localhost:${PORT}`)
 })

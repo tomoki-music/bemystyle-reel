@@ -1887,6 +1887,98 @@
   text-align: center;
 }
 
+/* ── Phase19-I: イベント投稿前チェックリスト ── */
+.event-post-checklist {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: #0f172a;
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.event-post-checklist-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.event-post-checklist-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+.event-post-checklist-progress {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+.event-post-checklist-remaining {
+  font-size: 11px;
+  color: #6b7280;
+}
+.event-post-checklist-complete {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4ade80;
+}
+.event-post-checklist-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.event-post-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #d1d5db;
+  cursor: pointer;
+}
+.event-post-checklist-item input {
+  width: 15px;
+  height: 15px;
+  accent-color: #4ade80;
+  cursor: pointer;
+}
+.event-post-checklist-item input:checked + span {
+  color: #4ade80;
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.event-post-date-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.event-post-date-label {
+  font-size: 12px;
+  color: #9ca3af;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.event-post-date-input {
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  color: #e5e7eb;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.event-post-date-input:focus {
+  border-color: #4ade80;
+}
+
 /* ── Phase18-P: 投稿済み管理 ── */
 .posted-records-panel {
   margin-top: 10px;
@@ -1977,6 +2069,297 @@
   color: #fca5a5;
   background: rgba(248, 113, 113, 0.08);
   border: 1px solid rgba(248, 113, 113, 0.22);
+}
+
+/* Phase19-N: 全データバックアップ */
+.reel-backup-panel {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.reel-backup-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin: 0 0 10px;
+}
+
+.reel-backup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-reel-backup {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-reel-backup:hover {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.7);
+}
+
+.btn-reel-backup--import {
+  display: inline-block;
+  cursor: pointer;
+}
+
+.btn-reel-backup--import input {
+  display: none;
+}
+
+.reel-backup-message {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.08);
+  border: 1px solid rgba(134, 239, 172, 0.22);
+}
+
+.reel-backup-error {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.22);
+}
+
+/* Phase19-O: 運用ダッシュボード */
+.event-dashboard-panel {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 10px;
+}
+
+.event-dashboard-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #a5b4fc;
+  margin: 0 0 10px;
+  letter-spacing: 0.02em;
+}
+
+.event-dashboard-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.event-dashboard-stat {
+  flex: 1;
+  min-width: 80px;
+  padding: 8px 10px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.event-dashboard-stat-label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.event-dashboard-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.event-dashboard-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin: 0 0 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.event-dashboard-sns {
+  margin-bottom: 10px;
+}
+
+.event-dashboard-sns-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-dashboard-sns-badge {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+}
+
+.event-dashboard-recent {
+  margin-bottom: 10px;
+}
+
+.event-dashboard-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.event-dashboard-recent-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.event-dashboard-recent-date {
+  color: #64748b;
+  font-size: 11px;
+  min-width: 52px;
+}
+
+.event-dashboard-recent-sns {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.event-dashboard-recent-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-dashboard-unposted {
+  margin-bottom: 10px;
+}
+
+.event-dashboard-unposted-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.event-dashboard-unposted-item {
+  font-size: 12px;
+  color: #fbbf24;
+  padding: 4px 8px;
+  background: rgba(251, 191, 36, 0.06);
+  border-left: 2px solid rgba(251, 191, 36, 0.4);
+  border-radius: 0 4px 4px 0;
+}
+
+.event-dashboard-unposted-date {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.event-dashboard-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.btn-event-dashboard-action {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  background: rgba(99, 102, 241, 0.1);
+  color: #a5b4fc;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-event-dashboard-action:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+.btn-event-dashboard-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Phase19-P: タブナビゲーション */
+.simple-tab-nav {
+  display: flex;
+  gap: 4px;
+  padding: 10px 0 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 12px;
+}
+
+.simple-tab-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.simple-tab-btn {
+  flex-shrink: 0;
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.simple-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+}
+
+.simple-tab-btn--active {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #a5b4fc;
+  font-weight: 600;
+}
+
+/* Phase19-P: 編集タブパネル */
+.simple-edit-tab-panel {
+  margin-top: 4px;
+}
+
+/* Phase19-P: 未生成時ヒント */
+.simple-tab-empty {
+  margin: 32px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #64748b;
 }
 
 .post-report {
@@ -2157,6 +2540,324 @@
 }
 
 .btn-posted-record-delete:hover {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+/* ── Phase19-K: イベント投稿記録パネル ── */
+.event-post-record-panel {
+  margin-top: 16px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.event-post-record-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.event-post-record-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.btn-event-post-record-csv {
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.btn-event-post-record-csv:hover:not(:disabled) {
+  color: var(--text-secondary);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-event-post-record-csv:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Phase19-M: 絞り込みUI */
+.event-post-filter {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.event-post-filter-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.event-post-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.event-post-filter-field--grow {
+  flex: 1;
+}
+
+.event-post-filter-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.event-post-filter-input,
+.event-post-filter-select {
+  padding: 5px 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.event-post-filter-input:focus,
+.event-post-filter-select:focus {
+  border-color: rgba(147, 197, 253, 0.4);
+}
+
+.event-post-filter-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.event-post-filter-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.btn-event-post-filter-reset {
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.btn-event-post-filter-reset:hover {
+  color: var(--text-secondary);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.event-post-record-report {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: rgba(147, 197, 253, 0.06);
+  border: 1px solid rgba(147, 197, 253, 0.15);
+  border-radius: 8px;
+}
+
+.event-post-record-report-total {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.event-post-record-report-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-post-record-report-item {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.event-post-record-report-item--url {
+  color: #93c5fd;
+  border-color: rgba(147, 197, 253, 0.2);
+}
+
+.event-post-record-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.event-post-record-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.event-post-record-field--wide {
+  grid-column: 1 / -1;
+}
+
+.event-post-record-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.event-post-record-event-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 700;
+  padding: 4px 0;
+}
+
+.event-post-record-input,
+.event-post-record-select {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.event-post-record-input:focus,
+.event-post-record-select:focus {
+  border-color: rgba(147, 197, 253, 0.4);
+}
+
+.event-post-record-textarea {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.event-post-record-textarea:focus {
+  border-color: rgba(147, 197, 253, 0.4);
+}
+
+.btn-event-post-record-save {
+  grid-column: 1 / -1;
+  padding: 8px 16px;
+  background: rgba(147, 197, 253, 0.12);
+  border: 1px solid rgba(147, 197, 253, 0.25);
+  border-radius: 7px;
+  color: #93c5fd;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-event-post-record-save:hover:not(:disabled) {
+  background: rgba(147, 197, 253, 0.2);
+}
+
+.btn-event-post-record-save:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.event-post-record-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.event-post-record-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+.event-post-record-item-main {
+  min-width: 0;
+}
+
+.event-post-record-item-header {
+  margin: 0 0 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.event-post-record-item-url {
+  display: block;
+  color: #93c5fd;
+  font-size: 10px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.event-post-record-item-memo {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.btn-event-post-record-delete {
+  align-self: flex-start;
+  padding: 3px 8px;
+  background: none;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-event-post-record-delete:hover {
   color: #fecaca;
   border-color: rgba(248, 113, 113, 0.35);
 }
@@ -4876,6 +5577,49 @@
   font-weight: 700;
   color: #fb923c;
 }
+.dev-mode-panel {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: 8px;
+  background: rgba(96, 165, 250, 0.09);
+}
+.dev-mode-panel__title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #bfdbfe;
+}
+.dev-mode-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+.dev-mode-panel__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(147, 197, 253, 0.18);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.26);
+}
+.dev-mode-panel__item span {
+  font-size: 11px;
+  color: rgba(191, 219, 254, 0.72);
+}
+.dev-mode-panel__item strong {
+  font-size: 12px;
+  color: #dbeafe;
+  white-space: nowrap;
+}
+.dev-mode-panel__warning {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(191, 219, 254, 0.72);
+}
 .factory-panel-desc {
   margin: 0;
   font-size: 11px;
@@ -4983,6 +5727,127 @@
 .factory-status-text {
   margin: 0;
   font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Phase19-B: status hero + image progress */
+.factory-status-hero {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.factory-status-hero-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+.factory-status-hero-label {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.factory-image-progress {
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.factory-image-progress-count {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.factory-image-progress-count strong {
+  color: #a5b4fc;
+  font-size: 18px;
+}
+.factory-image-progress-remaining {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.factory-upload-mode-note {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #34d399;
+}
+.factory-progress-bar-wrap {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.factory-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #a78bfa);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+.factory-progress-pct {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.factory-complete-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Phase19-B: simpleMode factory progress */
+.simple-factory-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 10px;
+  gap: 6px;
+}
+.simple-factory-status-emoji {
+  font-size: 36px;
+  margin: 0 0 4px;
+}
+.simple-factory-status-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.simple-factory-status-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.simple-factory-image-count {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: #a5b4fc;
+}
+.simple-factory-remaining {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.simple-factory-bar-wrap {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+.simple-factory-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #a78bfa);
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+.simple-factory-bar-pct {
+  margin: 2px 0 0;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .factory-notice {
@@ -6256,7 +7121,45 @@
   box-sizing: border-box;
 }
 
+.image-source-selector {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+}
+
+.image-source-label {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.image-source-options {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+.image-source-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.image-source-option input[type="radio"] {
+  accent-color: #818cf8;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
 .user-image-upload {
+  margin-top: 12px;
   padding: 12px;
   background: rgba(255, 255, 255, 0.035);
   border: 1px dashed rgba(148, 163, 184, 0.28);
@@ -6565,6 +7468,186 @@
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+/* ── Phase19-S: テンプレートタイプ選択カード ── */
+.simple-type-selector {
+  margin-bottom: 16px;
+}
+
+.simple-type-selector-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0 0 10px;
+}
+
+.simple-type-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.simple-type-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 10px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  text-align: left;
+}
+
+.simple-type-card:hover {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.simple-type-card--active {
+  background: rgba(100, 160, 255, 0.18);
+  border-color: rgba(100, 160, 255, 0.7);
+}
+
+.simple-type-card-emoji {
+  font-size: 18px;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+
+.simple-type-card-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  line-height: 1.2;
+}
+
+.simple-type-card-desc {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.3;
+}
+
+.simple-type-hint {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  padding: 12px 0 4px;
+  margin: 0;
+}
+
+/* ── Phase19-T: テンプレート別おすすめ設定 ── */
+.simple-template-default-notice {
+  background: rgba(77, 190, 140, 0.1);
+  border: 1px solid rgba(77, 190, 140, 0.28);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+
+.simple-template-default-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(145, 235, 190, 0.95);
+  margin: 0 0 6px;
+}
+
+.simple-template-default-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0 0 6px;
+}
+
+.simple-template-default-list p,
+.simple-template-default-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(230, 255, 242, 0.78);
+  margin: 0;
+}
+
+.simple-template-default-note {
+  color: rgba(230, 255, 242, 0.56);
+}
+
+/* ── Phase19-S: テンプレート別フォーム ── */
+.simple-template-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.simple-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.simple-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.simple-form-required {
+  color: #ff7070;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.simple-form-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 7px;
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.simple-form-input:focus {
+  border-color: rgba(100, 160, 255, 0.6);
+}
+
+.simple-form-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Phase19-S: 未入力ガイド ── */
+.simple-missing-guide {
+  background: rgba(255, 180, 50, 0.1);
+  border: 1px solid rgba(255, 180, 50, 0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.simple-missing-guide-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 200, 80, 0.9);
+  margin: 0 0 4px;
+}
+
+.simple-missing-guide-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.simple-missing-guide-list li {
+  font-size: 12px;
+  color: rgba(255, 200, 80, 0.75);
+  line-height: 1.6;
+}
+
 /* ── Phase18-E: テンプレート選択 (かんたんモード Step1) ── */
 .simple-template-select {
   margin-bottom: 12px;
@@ -6699,6 +7782,359 @@
   margin-bottom: 12px;
 }
 
+/* ── 動画プレビュー: Loading / Error / Retry ── */
+.video-preview-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 16px;
+  margin: 0 auto 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  max-width: 480px;
+  width: 100%;
+}
+
+.video-preview-loading-icon {
+  font-size: 28px;
+  margin: 0;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.video-preview-loading-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #a3a3a3;
+}
+
+.video-preview-loading-sub {
+  margin: 0;
+  font-size: 12px;
+  color: #737373;
+}
+
+.video-preview-loading-bar {
+  width: 80%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.video-preview-loading-bar-fill {
+  width: 40%;
+  height: 100%;
+  background: #4ade80;
+  border-radius: 4px;
+  animation: progress-slide 1.6s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.video-preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  margin: 0 auto 16px;
+  background: rgba(251, 191, 36, 0.06);
+  border: 1px solid rgba(251, 191, 36, 0.24);
+  border-radius: 10px;
+  max-width: 480px;
+  width: 100%;
+}
+
+.video-preview-error-msg {
+  margin: 0;
+  font-size: 12px;
+  color: #fbbf24;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.btn-video-retry {
+  padding: 7px 18px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 6px;
+  color: #fbbf24;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-video-retry:hover {
+  background: rgba(251, 191, 36, 0.22);
+}
+
+/* ── 完成動画: CTA行（DL + 新タブで開く） ── */
+.render-complete-cta-row {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.btn-download-mp4--large,
+.btn-open-video--large {
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.btn-download-mp4--large {
+  background: #16a34a;
+  border: none;
+  color: #fff;
+}
+
+.btn-download-mp4--large:hover {
+  background: #15803d;
+}
+
+.btn-open-video--large {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #d4d4d4;
+}
+
+.btn-open-video--large:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── Phase19-D: MMMイベント告知フォーム ── */
+.mmm-event-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.mmm-event-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mmm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  grid-column: span 2;
+}
+
+.mmm-field--half {
+  grid-column: span 1;
+}
+
+.mmm-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a3a3a3;
+  letter-spacing: 0.04em;
+}
+
+.mmm-required {
+  color: #f87171;
+  font-size: 10px;
+  margin-left: 3px;
+}
+
+.mmm-field-input {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  color: #f5f5f5;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.mmm-field-input:focus {
+  border-color: rgba(74, 222, 128, 0.5);
+}
+
+.mmm-field-input::placeholder {
+  color: #525252;
+}
+
+.mmm-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mmm-hint-chip {
+  padding: 3px 10px;
+  background: rgba(74, 222, 128, 0.08);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-radius: 99px;
+  color: #4ade80;
+  font-size: 11px;
+}
+
+.mmm-error {
+  margin: 0;
+  padding: 8px 12px;
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 6px;
+  color: #f87171;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Phase19-H: MMMイベント情報プリセット */
+.mmm-event-preset-panel {
+  background: #1a1f2e;
+  border: 1px solid #2d3748;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mmm-event-preset-save {
+  background: #1a1f2e;
+  border: 1px solid #2d3748;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mmm-event-preset-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+.mmm-event-preset-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.mmm-event-preset-select {
+  flex: 1;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  color: #e5e7eb;
+  padding: 7px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.mmm-event-preset-select:focus {
+  border-color: #4ade80;
+}
+.btn-mmm-event-preset-apply {
+  background: #4ade80;
+  color: #111827;
+  border: none;
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.btn-mmm-event-preset-apply:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.btn-mmm-event-preset-apply:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-mmm-event-preset-delete {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-mmm-event-preset-delete:hover:not(:disabled) {
+  background: #ef4444;
+  color: #fff;
+}
+.btn-mmm-event-preset-delete:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.mmm-event-preset-notice {
+  margin: 0;
+  font-size: 12px;
+  color: #4ade80;
+  line-height: 1.5;
+}
+.mmm-event-preset-save-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.mmm-event-preset-name-input {
+  flex: 1;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  color: #e5e7eb;
+  padding: 7px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.mmm-event-preset-name-input:focus {
+  border-color: #4ade80;
+}
+.mmm-event-preset-name-input::placeholder {
+  color: #4b5563;
+}
+.btn-mmm-event-preset-save {
+  background: #1f2937;
+  color: #4ade80;
+  border: 1px solid #4ade80;
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-mmm-event-preset-save:hover {
+  background: #4ade80;
+  color: #111827;
+}
+
 /* ── 通常モード: モバイル対応ブレークポイント ── */
 
 /* 1440px: カラム幅を適度に縮小 */
@@ -6723,4 +8159,549 @@
   .app:not(.app--simple) .panel-right {
     display: none;
   }
+}
+
+/* ══════════════════════════════════════════════
+   Phase19-E: 世界観タグ / 生成後編集パネル
+   ══════════════════════════════════════════════ */
+
+/* ── 世界観タグ ── */
+.visual-style-tags {
+  margin: 14px 0 10px;
+}
+.visual-style-tags-label {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+.visual-style-tags-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.visual-style-tag-chip {
+  background: #1f2937;
+  border: 1.5px solid #374151;
+  color: #d1d5db;
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.visual-style-tag-chip:hover {
+  border-color: #6366f1;
+  color: #e0e7ff;
+}
+.visual-style-tag-chip--active {
+  background: #4f46e5;
+  border-color: #6366f1;
+  color: #fff;
+}
+
+/* ── 生成後編集パネル ── */
+.post-edit-panel {
+  margin-top: 20px;
+  border-top: 1px solid #1f2937;
+  padding-top: 14px;
+}
+.post-edit-panel-toggle {
+  width: 100%;
+  background: #1f2937;
+  border: 1.5px solid #374151;
+  color: #9ca3af;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.post-edit-panel-toggle:hover {
+  background: #273349;
+  border-color: #6366f1;
+  color: #e0e7ff;
+}
+.post-edit-panel-body {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.post-edit-section {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 14px;
+}
+.post-edit-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e5e7eb;
+  margin-bottom: 10px;
+}
+.post-edit-error {
+  font-size: 11px;
+  color: #f87171;
+  margin-top: 4px;
+}
+.post-edit-success {
+  font-size: 11px;
+  color: #34d399;
+  margin-top: 4px;
+}
+
+/* BGMアップロード */
+.bgm-upload-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #1f2937;
+  border: 1.5px dashed #374151;
+  color: #d1d5db;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.bgm-upload-label:hover {
+  border-color: #6366f1;
+  color: #e0e7ff;
+}
+.bgm-upload-label input[type="file"] {
+  display: none;
+}
+
+/* スライドテキスト編集 */
+.slide-text-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.slide-text-editor-item {
+  background: #1a2435;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.slide-text-editor-index {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.slide-text-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.slide-text-field span {
+  font-size: 11px;
+  color: #9ca3af;
+  width: 32px;
+  flex-shrink: 0;
+}
+.slide-text-field input {
+  flex: 1;
+  background: #0f172a;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  color: #e5e7eb;
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.slide-text-field input:focus {
+  border-color: #6366f1;
+}
+
+/* 画像差し替え */
+.slide-image-replace {
+  margin-top: 6px;
+}
+.slide-image-replace-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #1f2937;
+  border: 1px dashed #374151;
+  color: #9ca3af;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.slide-image-replace-label:hover {
+  border-color: #6366f1;
+  color: #e0e7ff;
+}
+.slide-image-replace-label input[type="file"] {
+  display: none;
+}
+
+/* 再生成ボタン */
+.btn-rerender-after-edit {
+  width: 100%;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: opacity 0.2s, transform 0.1s;
+}
+.btn-rerender-after-edit:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+.btn-rerender-after-edit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* =============================
+   Phase19-F: 編集プリセット
+   ============================= */
+.edit-preset-panel {
+  background: #1a1f2e;
+  border: 1px solid #2d3748;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.edit-preset-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 6px;
+}
+.edit-preset-apply-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.edit-preset-select {
+  flex: 1;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  color: #e5e7eb;
+  padding: 7px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.edit-preset-select:focus {
+  border-color: #6366f1;
+}
+.btn-edit-preset-apply {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.btn-edit-preset-apply:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.btn-edit-preset-apply:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-edit-preset-delete {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-edit-preset-delete:hover:not(:disabled) {
+  background: #ef4444;
+  color: #fff;
+}
+.btn-edit-preset-delete:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.edit-preset-preview {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+.edit-preset-save-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.edit-preset-name-input {
+  flex: 1;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 7px;
+  color: #e5e7eb;
+  padding: 7px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.edit-preset-name-input:focus {
+  border-color: #6366f1;
+}
+.edit-preset-name-input::placeholder {
+  color: #4b5563;
+}
+.btn-edit-preset-save {
+  background: #1f2937;
+  color: #a5b4fc;
+  border: 1px solid #6366f1;
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-edit-preset-save:hover:not(:disabled) {
+  background: #6366f1;
+  color: #fff;
+}
+.btn-edit-preset-save:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Phase19-G: PC 2カラムレイアウト / 画像品質 / QRアップロード
+   ═══════════════════════════════════════════════════════ */
+
+/* ── PC 2カラムレイアウト（simpleMode step3 のみ有効）── */
+@media (min-width: 1024px) {
+  .app--simple .panel-left-body {
+    max-width: 1400px;
+  }
+
+  .app--simple .render-area--step3 {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: 28px;
+    align-items: start;
+  }
+
+  .app--simple .render-area--step3 .simple-wizard {
+    grid-column: 1;
+    position: sticky;
+    top: 0;
+    max-height: 100vh;
+    overflow-y: auto;
+    padding-bottom: 24px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+
+  .app--simple .render-area--step3 .simple-pc-right {
+    grid-column: 2;
+    min-width: 0;
+  }
+}
+
+/* ── 画像品質セレクタ ── */
+.image-quality-selector {
+  margin: 10px 0 8px;
+}
+
+.image-quality-label {
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.image-quality-options {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.image-quality-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.75);
+  cursor: pointer;
+  user-select: none;
+}
+
+.image-quality-option input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.image-quality-option--high {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+@media (max-width: 520px) {
+  .image-quality-options {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* Phase19-J: 節約モード */
+.cost-mode-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cost-mode-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9ca3af;
+  margin: 0;
+}
+.cost-mode-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.cost-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #d1d5db;
+  cursor: pointer;
+}
+.cost-mode-option input[type="radio"] {
+  accent-color: #4ade80;
+  cursor: pointer;
+}
+.cost-mode-card {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.cost-mode-card--save {
+  background: #052e16;
+  border: 1px solid #166534;
+}
+.cost-mode-card--normal {
+  background: #431407;
+  border: 1px solid #c2410c;
+}
+.cost-mode-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.cost-mode-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #d1d5db;
+}
+.cost-mode-card-details {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 12px;
+  color: #9ca3af;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cost-mode-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+.cost-mode-badge--recommended {
+  background: #166534;
+  color: #4ade80;
+}
+.cost-mode-badge--warning {
+  background: #7c2d12;
+  color: #fb923c;
+}
+.cost-mode-description {
+  font-size: 11px;
+  color: #6b7280;
+  margin: 4px 0 0;
+}
+
+/* Phase19-J: quota エラーパネル */
+.quota-error-panel {
+  margin-top: 8px;
+  padding: 14px 16px;
+  background: rgba(248, 113, 113, 0.07);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.quota-error-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #f87171;
+}
+.quota-error-steps {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: #e5e7eb;
+  line-height: 1.8;
+}
+.quota-error-alt {
+  margin: 0;
+  font-size: 12px;
+  color: #9ca3af;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 6px;
+}
+.btn-quota-error-dismiss {
+  align-self: flex-end;
+  background: transparent;
+  color: #6b7280;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.btn-quota-error-dismiss:hover {
+  color: #d1d5db;
 }
