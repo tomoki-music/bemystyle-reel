@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { FactoryRunSection } from './FactoryRunSection'
 import { FactorySummaryCard } from './FactorySummaryCard'
 import { FactoryHistoryPanel } from './FactoryHistoryPanel'
+import type { ReelAiConfig } from '../../types'
 
 type GeneratedSlide = { id: number; headline: string; image: string }
 
@@ -42,12 +43,16 @@ type FactoryPanelProps = {
   factoryRunning: boolean
   factoryStep: string
   factoryStepNum: number
+  factoryProgress: number
+  factoryCurrentImageIndex: number | null
+  factoryTotalImageCount: number | null
   factoryError: string
   factoryLog: string[]
   factoryNotice: string
   factoryWarning: string
   isPipelineDisabled: boolean
   hasTheme: boolean
+  reelAiConfig: ReelAiConfig
   onRunFactory: () => void
 
   // FactorySummaryCard
@@ -108,12 +113,16 @@ export function FactoryPanel({
   factoryRunning,
   factoryStep,
   factoryStepNum,
+  factoryProgress,
+  factoryCurrentImageIndex,
+  factoryTotalImageCount,
   factoryError,
   factoryLog,
   factoryNotice,
   factoryWarning,
   isPipelineDisabled,
   hasTheme,
+  reelAiConfig,
   onRunFactory,
   generatedSlides,
   factorySummary,
@@ -135,13 +144,49 @@ export function FactoryPanel({
   onImportFile,
   onClearHistory,
 }: FactoryPanelProps) {
+  const showDevModePanel =
+    reelAiConfig.aiMode === 'mock' ||
+    reelAiConfig.dryRun ||
+    reelAiConfig.testImageLimit !== null
+
   return (
     <div className="factory-panel">
       <p className="factory-panel-title">🏭 AI自動作成</p>
+      {showDevModePanel && (
+        <div className="dev-mode-panel">
+          <p className="dev-mode-panel__title">開発モード中</p>
+          <div className="dev-mode-panel__grid">
+            {reelAiConfig.aiMode === 'mock' && (
+              <div className="dev-mode-panel__item">
+                <span>AI</span>
+                <strong>Mock</strong>
+              </div>
+            )}
+            {reelAiConfig.dryRun && (
+              <div className="dev-mode-panel__item">
+                <span>動画生成</span>
+                <strong>Dry Run</strong>
+              </div>
+            )}
+            {reelAiConfig.testImageLimit !== null && (
+              <div className="dev-mode-panel__item">
+                <span>画像生成上限</span>
+                <strong>{reelAiConfig.testImageLimit}枚</strong>
+              </div>
+            )}
+          </div>
+          <p className="dev-mode-panel__warning">
+            この設定では本番用動画は生成されません。動作確認用です。
+          </p>
+        </div>
+      )}
       <FactoryRunSection
         factoryRunning={factoryRunning}
         factoryStep={factoryStep}
         factoryStepNum={factoryStepNum}
+        factoryProgress={factoryProgress}
+        factoryCurrentImageIndex={factoryCurrentImageIndex}
+        factoryTotalImageCount={factoryTotalImageCount}
         factoryError={factoryError}
         factoryLog={factoryLog}
         factoryNotice={factoryNotice}

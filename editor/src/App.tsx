@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Slide, CTAConfig, SlidesData, TemplateInfo, Template } from './types'
+import { Slide, CTAConfig, SlidesData, TemplateInfo, Template, EditPreset, MmmEventPreset, EventPostRecord, ReelBackupData, ReelAiConfig, SimpleTemplateType, FreeDiagnosisForm, NoteArticleForm, YoutubeVideoForm, MusicCommunityForm } from './types'
+import { SimpleTemplateSelector } from './components/simple/SimpleTemplateSelector'
+import { SimpleTemplateForms } from './components/simple/SimpleTemplateForms'
+import { SIMPLE_TEMPLATE_DEFAULTS } from './constants/simpleTemplateDefaults'
 import { SlideList } from './components/SlideList'
 import { SlidePreview } from './components/SlidePreview'
 import { SlideForm } from './components/SlideForm'
@@ -68,6 +71,14 @@ type PostChecklistKey =
   | 'snsSelected'
   | 'posted'
 
+type EventPostChecklistKey =
+  | 'downloaded'
+  | 'captionChecked'
+  | 'qrChecked'
+  | 'urlChecked'
+  | 'bgmChecked'
+  | 'postDateEntered'
+
 type PostedSns = 'instagram' | 'tiktok' | 'youtube' | 'x'
 
 type PostedRecord = {
@@ -85,6 +96,24 @@ type UserUploadedImage = {
 
 const POST_CHECKLIST_STORAGE_KEY = 'reel-post-checklist'
 const POSTED_RECORDS_STORAGE_KEY = 'reel-posted-records'
+const EVENT_POST_CHECKLIST_KEY = 'bemystyle-reel-event-post-checklist'
+const EVENT_POST_DATE_KEY = 'bemystyle-reel-event-post-date'
+const EVENT_POST_RECORDS_KEY = 'bemystyle-reel-event-post-records'
+
+const EVENT_POST_RECORD_SNS_OPTIONS: { value: EventPostRecord['sns']; label: string }[] = [
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'x', label: 'X' },
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'youtube', label: 'YouTube' },
+  { value: 'other', label: 'その他' },
+]
+
+const DEFAULT_EVENT_POST_RECORD_FORM = {
+  sns: 'instagram' as EventPostRecord['sns'],
+  postDate: '',
+  postUrl: '',
+  memo: '',
+}
 
 const DEFAULT_POST_CHECKLIST: Record<PostChecklistKey, boolean> = {
   downloaded: false,
@@ -100,6 +129,24 @@ const POST_CHECKLIST_ITEMS: { key: PostChecklistKey; label: string }[] = [
   { key: 'hashtagsChecked', label: 'ハッシュタグを確認した' },
   { key: 'snsSelected', label: '投稿先SNSを決めた' },
   { key: 'posted', label: '実際に投稿した' },
+]
+
+const DEFAULT_EVENT_POST_CHECKLIST: Record<EventPostChecklistKey, boolean> = {
+  downloaded: false,
+  captionChecked: false,
+  qrChecked: false,
+  urlChecked: false,
+  bgmChecked: false,
+  postDateEntered: false,
+}
+
+const EVENT_POST_CHECKLIST_ITEMS: { key: EventPostChecklistKey; label: string }[] = [
+  { key: 'downloaded', label: '動画をダウンロードした' },
+  { key: 'captionChecked', label: 'SNS投稿文を確認した' },
+  { key: 'qrChecked', label: 'QRコードを確認した' },
+  { key: 'urlChecked', label: 'イベントURLを確認した' },
+  { key: 'bgmChecked', label: 'BGMを確認した' },
+  { key: 'postDateEntered', label: '投稿日を入力した' },
 ]
 
 const POSTED_SNS_LABELS: Record<PostedSns, string> = {
@@ -407,6 +454,12 @@ const AI_PRESETS: AIPreset[] = [
     description: '雰囲気と世界観重視のリール動画',
     themeTemplate: 'Instagram Reels向け。おしゃれで共感されやすく、保存したくなるリール動画にしてください。テーマ：',
   },
+  {
+    key: 'mmm_event',
+    label: 'MMMイベント告知',
+    description: 'MMMイベントの告知動画を30秒で作成',
+    themeTemplate: 'MMMイベント告知。初心者歓迎・演奏参加・聴くだけ参加OKの音楽イベント告知ショートにしてください。テーマ：',
+  },
 ]
 
 const PRESET_TEMPLATE_CATEGORY_MAP: Record<AIPresetKey, string[]> = {
@@ -415,11 +468,12 @@ const PRESET_TEMPLATE_CATEGORY_MAP: Record<AIPresetKey, string[]> = {
   session:          ['session', 'event', 'community'],
   youtube_shorts:   ['shorts', 'youtube'],
   instagram_reels:  ['reels', 'instagram', 'stylish'],
+  mmm_event:        ['mmm', 'event', 'announcement', 'community'],
 }
 
 const RECENT_KEY = 'bemystyle-reel:recent-templates'
 const CUSTOM_PRESETS_KEY = 'bemystyle-reel-custom-presets'
-const VALID_CUSTOM_PRESET_KEYS = new Set<string>(['note', 'singing_pr', 'session', 'youtube_shorts', 'instagram_reels', ''])
+const VALID_CUSTOM_PRESET_KEYS = new Set<string>(['note', 'singing_pr', 'session', 'youtube_shorts', 'instagram_reels', 'mmm_event', ''])
 const RECENT_MAX = 5
 
 const USAGE_KEY = 'bemystyle-reel:template-usage'
@@ -436,6 +490,50 @@ const LAST_SMART_REWRITE_PIPELINE_KEY = 'bemystyle-reel-last-smart-rewrite-pipel
 const LAST_MULTI_REWRITE_QUEUE_KEY = 'bemystyle-reel-last-multi-rewrite-queue'
 const BEST_VARIANT_ANALYSIS_KEY = 'bemystyle-reel-best-variant-analysis'
 const REWRITE_EXPLAIN_CACHE_KEY = 'bemystyle-reel-rewrite-explain-cache'
+const EDIT_PRESETS_KEY = 'bemystyle-reel-edit-presets'
+const MMM_EVENT_PRESETS_KEY = 'bemystyle-reel-mmm-event-presets'
+const SIMPLE_TEMPLATE_TYPE_KEY = 'bemystyle-reel-simple-template-type'
+const VALID_SIMPLE_TEMPLATE_TYPES: SimpleTemplateType[] = ['mmm-event', 'free-diagnosis', 'note-article', 'youtube-video', 'music-community', 'custom']
+
+const DEFAULT_EDIT_PRESETS: EditPreset[] = [
+  {
+    id: 'default-mmm-artist',
+    name: 'MMM 上品アーティスト',
+    visualStyleTags: ['アニメ調', '音楽', '演奏', '上品', 'アーティスト'],
+    ctaLabel: 'イベントページへ',
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'default-mmm-pop',
+    name: 'MMM かわいいポップ',
+    visualStyleTags: ['かわいい', 'ポップ', '音楽', '青春'],
+    ctaLabel: 'お申し込みはこちら',
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'default-mmm-live',
+    name: 'MMM ライブ感強め',
+    visualStyleTags: ['ライブ感', 'ダイナミック', 'かっこいい', '演奏'],
+    ctaLabel: '詳細はこちら',
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+]
+
+const DEFAULT_MMM_EVENT_PRESETS: MmmEventPreset[] = [
+  {
+    id: 'default-mmm-rhythm-neko',
+    name: 'Rhythm Neko 大演奏会',
+    title: 'MMM大演奏会',
+    date: '',
+    startTime: '17:30',
+    endTime: '22:30',
+    venue: 'レンタルスペース Rhythm Neko',
+    price: '演奏3,500円・聴くだけ1,000円',
+    url: '',
+    message: '飲食OK。初心者歓迎。演奏参加・聴くだけ参加OK。',
+    createdAt: 'default',
+  },
+]
 
 // ==============================
 // AI Reel Factory — Constants & Utilities
@@ -453,6 +551,24 @@ const SIMPLE_THEME_SUGGESTIONS = [
   'Note記事の内容を紹介するショート動画',
   'YouTube動画の見どころを紹介するショート動画',
 ]
+
+const buildMmmTheme = (form: {
+  title: string; date: string; startTime: string; endTime: string
+  venue: string; price: string; url: string; message: string
+}): string => {
+  const parts: string[] = []
+  if (form.title) parts.push(`イベント名「${form.title}」`)
+  if (form.date) {
+    const time = [form.startTime, form.endTime].filter(Boolean).join('〜')
+    parts.push(`開催日時：${form.date}${time ? ` ${time}` : ''}`)
+  }
+  if (form.venue) parts.push(`会場：${form.venue}`)
+  if (form.price) parts.push(`参加費：${form.price}`)
+  if (form.url) parts.push(`イベントURL：${form.url}`)
+  if (form.message) parts.push(form.message)
+  parts.push('初心者歓迎。演奏参加・聴くだけ参加OK。')
+  return `MMMイベント告知。${parts.join('。')}。参加したくなるショート動画にしてください。`
+}
 
 const SIMPLE_TEMPLATE_THEME_SUGGESTIONS: Record<string, string[]> = {
   'free-diagnosis-campaign': [
@@ -484,6 +600,11 @@ const SIMPLE_TEMPLATE_THEME_SUGGESTIONS: Record<string, string[]> = {
     '歌唱診断サービスの魅力を伝えるショート動画',
     '歌唱力診断の申し込みを促す動画',
     '無料歌唱診断を受けた体験を紹介する動画',
+  ],
+  'mmm-event': [
+    'MMMイベント告知動画（フォームに入力して自動生成）',
+    '音楽イベントの参加者を増やすショート動画',
+    '初心者も参加しやすいセッションイベントの告知動画',
   ],
 }
 
@@ -620,6 +741,32 @@ async function parseJsonResponse(res: Response): Promise<Record<string, unknown>
   return res.json()
 }
 
+const VISUAL_STYLE_TAG_OPTIONS = [
+  'アニメ調', '実写風', '音楽', '演奏', 'かっこいい', 'かわいい',
+  '上品', 'アーティスト', 'ダイナミック', 'ポップ', 'ミステリアス', '青春', 'ライブ感',
+]
+
+const shouldConfirmCostlyAiRun = ({
+  reelAiConfig,
+  imageCount,
+  useUploadedImages,
+}: {
+  reelAiConfig: ReelAiConfig
+  imageCount: number
+  useUploadedImages: boolean
+}) => {
+  return (
+    reelAiConfig.aiMode === 'real' &&
+    !reelAiConfig.dryRun &&
+    !reelAiConfig.testImageLimit &&
+    !useUploadedImages &&
+    imageCount >= 6
+  )
+}
+
+const buildCostConfirmMessage = (imageCount: number) =>
+  `OpenAI APIを使用してAI画像を${imageCount}枚生成します。\n利用枠を消費しますが、実行しますか？`
+
 export default function App() {
   const [slides, setSlides] = useState<Slide[]>([])
   const [ctaConfig, setCtaConfig] = useState<CTAConfig>({ qrImage: 'qr-singing.png' })
@@ -636,6 +783,10 @@ export default function App() {
   const [renderStartedAt, setRenderStartedAt] = useState<number | null>(null)
   const [elapsedSec, setElapsedSec] = useState(0)
   const [latestDownloadUrl, setLatestDownloadUrl] = useState<string | null>(null)
+  const [videoPreviewLoading, setVideoPreviewLoading] = useState(false)
+  const [videoPreviewError, setVideoPreviewError] = useState('')
+  const videoPreviewRetryCount = useRef(0)
+  const videoPreviewRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [historyError, setHistoryError] = useState(false)
   const [copiedUrl, setCopiedUrl] = useState(false)
@@ -694,7 +845,11 @@ export default function App() {
   const [postedForm, setPostedForm] = useState<PostedRecord>({ ...DEFAULT_POSTED_FORM })
   const [postedRecordsImportMessage, setPostedRecordsImportMessage] = useState('')
   const [postedRecordsImportError, setPostedRecordsImportError] = useState('')
+  // Phase19-N: 全データバックアップ
+  const [backupImportMessage, setBackupImportMessage] = useState('')
+  const [backupImportError, setBackupImportError] = useState('')
   const [userUploadedImages, setUserUploadedImages] = useState<UserUploadedImage[]>([])
+  const [imageSourceMode, setImageSourceMode] = useState<'ai' | 'upload'>('ai')
 
   // かんたんモード (Phase17-G)
   const [simpleMode, setSimpleMode] = useState<boolean>(() => {
@@ -702,8 +857,135 @@ export default function App() {
   })
   // かんたんモード ウィザードステップ (Phase18-B)
   const [simpleStep, setSimpleStep] = useState<1 | 2 | 3>(1)
+  // Phase19-P: タブ
+  const [activeSimpleTab, setActiveSimpleTab] = useState<'create' | 'edit' | 'post' | 'manage'>('create')
   // かんたんモード 選択テンプレート (Phase18-E)
   const [simpleTemplateId, setSimpleTemplateId] = useState('')
+  // Phase19-S: かんたんテンプレートタイプ
+  const [simpleTemplateType, setSimpleTemplateType] = useState<SimpleTemplateType | null>(() => {
+    try {
+      const saved = localStorage.getItem(SIMPLE_TEMPLATE_TYPE_KEY)
+      if (saved && VALID_SIMPLE_TEMPLATE_TYPES.includes(saved as SimpleTemplateType)) return saved as SimpleTemplateType
+      return null
+    } catch { return null }
+  })
+  // Phase19-S: テンプレート別フォーム
+  const [freeDiagnosisForm, setFreeDiagnosisForm] = useState<FreeDiagnosisForm>({ campaignName: '', targetAudience: '', diagnosisMethod: '', lineUrl: '', message: '' })
+  const [noteArticleForm, setNoteArticleForm] = useState<NoteArticleForm>({ articleTitle: '', articleTheme: '', targetReader: '', articleUrl: '', message: '' })
+  const [youtubeVideoForm, setYoutubeVideoForm] = useState<YoutubeVideoForm>({ videoTitle: '', videoTheme: '', highlights: '', youtubeUrl: '', message: '' })
+  const [musicCommunityForm, setMusicCommunityForm] = useState<MusicCommunityForm>({ communityName: '', activities: '', targetAudience: '', joinUrl: '', message: '' })
+  const [reelAiConfig, setReelAiConfig] = useState<ReelAiConfig>({ aiMode: 'real', dryRun: false, testImageLimit: null })
+  // Phase19-D: MMMイベント告知フォーム
+  const [mmmEventForm, setMmmEventForm] = useState({
+    title: '',
+    date: '',
+    startTime: '',
+    endTime: '',
+    venue: '',
+    price: '',
+    url: '',
+    message: '',
+  })
+  const [mmmError, setMmmError] = useState('')
+
+  // Phase19-H: MMMイベント情報プリセット
+  const [mmmEventPresets, setMmmEventPresets] = useState<MmmEventPreset[]>(() => {
+    try {
+      const raw = localStorage.getItem(MMM_EVENT_PRESETS_KEY)
+      if (!raw) return DEFAULT_MMM_EVENT_PRESETS
+      const parsed: unknown = JSON.parse(raw)
+      if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_MMM_EVENT_PRESETS
+      return parsed as MmmEventPreset[]
+    } catch {
+      return DEFAULT_MMM_EVENT_PRESETS
+    }
+  })
+  const [mmmEventPresetName, setMmmEventPresetName] = useState('')
+  const [selectedMmmEventPresetId, setSelectedMmmEventPresetId] = useState('')
+  const [mmmEventPresetNotice, setMmmEventPresetNotice] = useState('')
+
+  // Phase19-I: イベント投稿前チェックリスト
+  const [eventPostChecklist, setEventPostChecklist] = useState<Record<EventPostChecklistKey, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(EVENT_POST_CHECKLIST_KEY)
+      if (!raw) return { ...DEFAULT_EVENT_POST_CHECKLIST }
+      const parsed = JSON.parse(raw) as Partial<Record<EventPostChecklistKey, boolean>>
+      return {
+        ...DEFAULT_EVENT_POST_CHECKLIST,
+        downloaded: parsed.downloaded === true,
+        captionChecked: parsed.captionChecked === true,
+        qrChecked: parsed.qrChecked === true,
+        urlChecked: parsed.urlChecked === true,
+        bgmChecked: parsed.bgmChecked === true,
+        postDateEntered: parsed.postDateEntered === true,
+      }
+    } catch {
+      return { ...DEFAULT_EVENT_POST_CHECKLIST }
+    }
+  })
+  const [eventPostDate, setEventPostDate] = useState(() => {
+    try { return localStorage.getItem(EVENT_POST_DATE_KEY) ?? '' } catch { return '' }
+  })
+
+  // Phase19-K: イベント投稿記録
+  const [eventPostRecords, setEventPostRecords] = useState<EventPostRecord[]>(() => {
+    try {
+      const raw = localStorage.getItem(EVENT_POST_RECORDS_KEY)
+      if (!raw) return []
+      return JSON.parse(raw) as EventPostRecord[]
+    } catch { return [] }
+  })
+  const [eventPostRecordForm, setEventPostRecordForm] = useState({ ...DEFAULT_EVENT_POST_RECORD_FORM })
+  // Phase19-M: 投稿記録フィルター
+  const [eventPostFilter, setEventPostFilter] = useState({
+    sns: 'all',
+    keyword: '',
+    postDate: '',
+    urlStatus: 'all',
+  })
+
+  // Phase19-E: 世界観タグ
+  const [visualStyleTags, setVisualStyleTags] = useState<string[]>([
+    'アニメ調', '音楽', '演奏', '上品', 'アーティスト',
+  ])
+
+  // Phase19-E: BGM差し替え
+  const [bgmFileName, setBgmFileName] = useState('')
+  const [bgmUploading, setBgmUploading] = useState(false)
+  const [bgmUploadError, setBgmUploadError] = useState('')
+  const [recommendedCtaLabel, setRecommendedCtaLabel] = useState('')
+
+  // Phase19-G: 画像品質モード
+  const [imageQualityMode, setImageQualityMode] = useState<'standard' | 'high'>('high')
+  // Phase19-J: 節約モード
+  const [costMode, setCostMode] = useState<'normal' | 'save'>('save')
+  const [quotaError, setQuotaError] = useState(false)
+
+  // Phase19-G: QRコード差し替え
+  const [qrUploading, setQrUploading] = useState(false)
+  const [qrUploadError, setQrUploadError] = useState('')
+  const [qrFileName, setQrFileName] = useState('')
+
+  // Phase19-F: 編集プリセット
+  const [editPresets, setEditPresets] = useState<EditPreset[]>(() => {
+    try {
+      const raw = localStorage.getItem(EDIT_PRESETS_KEY)
+      if (!raw) return DEFAULT_EDIT_PRESETS
+      const parsed: unknown = JSON.parse(raw)
+      if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_EDIT_PRESETS
+      return parsed as EditPreset[]
+    } catch {
+      return DEFAULT_EDIT_PRESETS
+    }
+  })
+  const [editPresetName, setEditPresetName] = useState('')
+  const [selectedEditPresetId, setSelectedEditPresetId] = useState('')
+
+  // Phase19-E: スライドテキスト編集パネル開閉
+  const [slideEditorOpen, setSlideEditorOpen] = useState(false)
+  // Phase19-E: スライド画像差し替え中スライドID
+  const [slideImageReplacing, setSlideImageReplacing] = useState<number | null>(null)
+  const [slideImageReplaceError, setSlideImageReplaceError] = useState<Record<number, string>>({})
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const historyAreaRef = useRef<HTMLDivElement | null>(null)
@@ -807,6 +1089,8 @@ export default function App() {
   const [factoryStep, setFactoryStep] = useState('')
   const [factoryError, setFactoryError] = useState('')
   const [factoryLog, setFactoryLog] = useState<string[]>([])
+  const [factoryCurrentImageIndex, setFactoryCurrentImageIndex] = useState<number | null>(null)
+  const [factoryTotalImageCount, setFactoryTotalImageCount] = useState<number | null>(null)
   const [factorySummary, setFactorySummary] = useState<FactorySummary | null>(null)
   const [factoryHistory, setFactoryHistory] = useState<FactoryHistoryItem[]>([])
   const [factoryNotice, setFactoryNotice] = useState('')
@@ -916,6 +1200,20 @@ export default function App() {
       const res = await fetch('/api/templates')
       const data = await res.json()
       if (data.ok) setTemplates(data.templates as TemplateInfo[])
+    } catch (_) {}
+  }, [])
+
+  const fetchReelAiConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/reel-ai-config')
+      const data = await res.json()
+      if (!data.ok) return
+      const parsedImageLimit = Math.max(0, Number(data.testImageLimit ?? data.imageLimit ?? 0) || 0)
+      setReelAiConfig({
+        aiMode: data.aiMode === 'mock' || data.mode === 'mock' ? 'mock' : 'real',
+        dryRun: data.dryRun === true,
+        testImageLimit: parsedImageLimit > 0 ? parsedImageLimit : null,
+      })
     } catch (_) {}
   }, [])
 
@@ -1041,9 +1339,10 @@ export default function App() {
     setGenerateSuccess(false)
     try {
       const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId)
+      const effectivePresetKey = simpleTemplateId === 'mmm-event' ? 'mmm_event' : selectedPresetKey
       const story = await generateStory(
         aiTheme.trim(),
-        selectedPresetKey,
+        effectivePresetKey,
         selectedCustomPreset
           ? {
               tone: selectedCustomPreset.tone,
@@ -1052,7 +1351,8 @@ export default function App() {
               imageStyle: selectedCustomPreset.imageStyle,
               ctaText: selectedCustomPreset.ctaText,
             }
-          : null
+          : null,
+        visualStyleTags.length > 0 ? visualStyleTags : undefined
       )
 
       // 1. variables を更新
@@ -1061,6 +1361,10 @@ export default function App() {
         if (templateVariableKeys.includes(key)) {
           next[key] = value
         }
+      }
+      const shouldApplyRecommendedCta = simpleTemplateType !== 'custom' && recommendedCtaLabel
+      if (shouldApplyRecommendedCta && templateVariableKeys.includes('cta')) {
+        next.cta = recommendedCtaLabel
       }
       setVariableValues(next)
 
@@ -1079,6 +1383,7 @@ export default function App() {
           subline: generated.subline ?? slide.subline,
           emphasis: generated.emphasis ?? slide.emphasis,
           imagePrompt: generated.imagePrompt ?? slide.imagePrompt,
+          ctaLabel: slide.layout === 'cta' && shouldApplyRecommendedCta ? recommendedCtaLabel : slide.ctaLabel,
         }
       })
 
@@ -1119,12 +1424,15 @@ export default function App() {
       return true
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'AI生成に失敗しました'
+      if (err instanceof Error && (err as Error & { errorType?: string }).errorType === 'quota') {
+        setQuotaError(true)
+      }
       setGenerateError(msg)
       return false
     } finally {
       setIsGenerating(false)
     }
-  }, [aiTheme, selectedPresetKey, isGenerating, variableValues, templateVariableKeys, rawTemplateSlides, slides, selectedTemplateId, templates, customPresets, selectedCustomPresetId])
+  }, [aiTheme, selectedPresetKey, isGenerating, variableValues, templateVariableKeys, rawTemplateSlides, slides, selectedTemplateId, templates, customPresets, selectedCustomPresetId, visualStyleTags, recommendedCtaLabel, simpleTemplateType])
 
   const deleteAIGenerationHistoryItem = useCallback((id: string) => {
     setAiGenerationHistory((prev) => {
@@ -1855,6 +2163,10 @@ export default function App() {
   }, [simpleMode])
 
   useEffect(() => {
+    try { if (simpleTemplateType) localStorage.setItem(SIMPLE_TEMPLATE_TYPE_KEY, simpleTemplateType) } catch {}
+  }, [simpleTemplateType])
+
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(BEST_VARIANT_KEY)
       if (raw) setBestVariantId(raw)
@@ -2032,7 +2344,8 @@ export default function App() {
     fetchHistory()
     fetchTemplates()
     fetchGeneratedAssets()
-  }, [fetchHistory, fetchTemplates, fetchGeneratedAssets])
+    fetchReelAiConfig()
+  }, [fetchHistory, fetchTemplates, fetchGeneratedAssets, fetchReelAiConfig])
 
   useEffect(() => {
     userUploadedImagesRef.current = userUploadedImages
@@ -2051,6 +2364,80 @@ export default function App() {
   const selectedSlide = slides.find((s) => s.id === selectedId) ?? null
   const selectedIdx = slides.findIndex((s) => s.id === selectedId)
   const isPostChecklistComplete = POST_CHECKLIST_ITEMS.every((item) => postChecklist[item.key])
+  // Phase19-J: 節約モード計算
+  const imageGenerateCount = costMode === 'save' ? Math.min(5, slides.length) : slides.length
+  const effectiveQuality = costMode === 'save' ? 'standard' : imageQualityMode
+  const eventPostChecklistCount = EVENT_POST_CHECKLIST_ITEMS.filter((item) => eventPostChecklist[item.key]).length
+  const isEventPostChecklistComplete = eventPostChecklistCount === EVENT_POST_CHECKLIST_ITEMS.length
+
+  // Phase19-P: タブ表示ヘルパー（simpleMode step3以外は常時表示）
+  const showInTab = (tab: 'create' | 'edit' | 'post' | 'manage') =>
+    !simpleMode || simpleStep !== 3 || activeSimpleTab === tab
+
+  // Phase19-K: イベント投稿記録レポート
+  const eventPostReport = useMemo(() => {
+    const counts: Record<EventPostRecord['sns'], number> = {
+      instagram: 0, x: 0, tiktok: 0, youtube: 0, other: 0,
+    }
+    eventPostRecords.forEach((r) => { counts[r.sns] += 1 })
+    return {
+      total: eventPostRecords.length,
+      counts,
+      urlCount: eventPostRecords.filter((r) => r.postUrl.trim()).length,
+    }
+  }, [eventPostRecords])
+
+  // Phase19-O: 運用ダッシュボード
+  const eventDashboardStats = useMemo(() => {
+    const currentMonth = new Date().toISOString().slice(0, 7)
+    const thisMonthRecords = eventPostRecords.filter((r) => r.postDate.startsWith(currentMonth))
+
+    const snsCounts: Record<EventPostRecord['sns'], number> = {
+      instagram: 0, x: 0, tiktok: 0, youtube: 0, other: 0,
+    }
+    eventPostRecords.forEach((r) => { snsCounts[r.sns] += 1 })
+
+    const recentRecords = [...eventPostRecords]
+      .sort((a, b) => {
+        const da = a.postDate || a.createdAt
+        const db = b.postDate || b.createdAt
+        return db.localeCompare(da)
+      })
+      .slice(0, 3)
+
+    const postedTitles = new Set(eventPostRecords.map((r) => r.eventTitle.trim().toLowerCase()))
+    const unpostedPresets = mmmEventPresets.filter(
+      (p) => !p.id.startsWith('default-') && !postedTitles.has(p.title.trim().toLowerCase())
+    )
+
+    return {
+      thisMonthCount: thisMonthRecords.length,
+      urlCount: eventPostRecords.filter((r) => r.postUrl.trim()).length,
+      total: eventPostRecords.length,
+      snsCounts,
+      recentRecords,
+      unpostedPresets,
+    }
+  }, [eventPostRecords, mmmEventPresets])
+
+  // Phase19-M: フィルター済み投稿記録
+  const filteredEventPostRecords = useMemo(() => {
+    const kw = eventPostFilter.keyword.trim().toLowerCase()
+    return eventPostRecords.filter((r) => {
+      if (eventPostFilter.sns !== 'all' && r.sns !== eventPostFilter.sns) return false
+      if (kw && !r.eventTitle.toLowerCase().includes(kw) && !r.memo.toLowerCase().includes(kw)) return false
+      if (eventPostFilter.postDate && r.postDate !== eventPostFilter.postDate) return false
+      if (eventPostFilter.urlStatus === 'with' && !r.postUrl.trim()) return false
+      if (eventPostFilter.urlStatus === 'without' && r.postUrl.trim()) return false
+      return true
+    })
+  }, [eventPostRecords, eventPostFilter])
+
+  const isEventPostFilterActive = eventPostFilter.sns !== 'all'
+    || eventPostFilter.keyword !== ''
+    || eventPostFilter.postDate !== ''
+    || eventPostFilter.urlStatus !== 'all'
+
   const postedReport = useMemo(() => {
     const counts: Record<PostedSns, number> = {
       instagram: 0,
@@ -2108,6 +2495,59 @@ export default function App() {
   const resetPostChecklist = useCallback(() => {
     setPostChecklist({ ...DEFAULT_POST_CHECKLIST })
   }, [])
+
+  // Phase19-I: イベント投稿前チェックリスト 操作
+  const toggleEventPostChecklist = useCallback((key: EventPostChecklistKey) => {
+    setEventPostChecklist((prev) => ({ ...prev, [key]: !prev[key] }))
+  }, [])
+
+  // Phase19-K: イベント投稿記録 操作
+  const saveEventPostRecord = useCallback(() => {
+    if (!eventPostRecordForm.sns || !eventPostRecordForm.postDate) return
+    const record: EventPostRecord = {
+      id: `epr-${Date.now()}`,
+      eventPresetId: selectedMmmEventPresetId || undefined,
+      eventTitle: mmmEventForm.title || aiTheme || '未設定イベント',
+      sns: eventPostRecordForm.sns,
+      postDate: eventPostRecordForm.postDate,
+      postUrl: eventPostRecordForm.postUrl,
+      memo: eventPostRecordForm.memo,
+      createdAt: new Date().toISOString(),
+    }
+    setEventPostRecords((prev) => [record, ...prev])
+    setEventPostRecordForm({ ...DEFAULT_EVENT_POST_RECORD_FORM })
+  }, [eventPostRecordForm, selectedMmmEventPresetId, mmmEventForm.title, aiTheme])
+
+  const deleteEventPostRecord = useCallback((id: string) => {
+    setEventPostRecords((prev) => prev.filter((r) => r.id !== id))
+  }, [])
+
+  // Phase19-L: イベント投稿記録 CSV出力
+  const exportEventPostRecordsCsv = useCallback(() => {
+    if (filteredEventPostRecords.length === 0) return
+    const csvEscape = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`
+    const headers = ['イベント名', 'SNS', '投稿日', '投稿URL', 'メモ', '作成日']
+    const snsLabel = (sns: EventPostRecord['sns']) =>
+      EVENT_POST_RECORD_SNS_OPTIONS.find((o) => o.value === sns)?.label ?? sns
+    const rows = filteredEventPostRecords.map((r) => [
+      csvEscape(r.eventTitle),
+      csvEscape(snsLabel(r.sns)),
+      csvEscape(r.postDate),
+      csvEscape(r.postUrl),
+      csvEscape(r.memo),
+      csvEscape(r.createdAt.slice(0, 10)),
+    ].join(','))
+    const csv = [headers.map(csvEscape).join(','), ...rows].join('\n')
+    const bom = '﻿'
+    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' })
+    const today = new Date().toISOString().slice(0, 10)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `event-post-records-${today}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [filteredEventPostRecords])
 
   const resetPostedRecords = useCallback(() => {
     setPostedRecords([])
@@ -2255,6 +2695,89 @@ export default function App() {
     }
   }, [])
 
+  // Phase19-N: 全データバックアップ出力
+  const exportReelBackupJson = useCallback(() => {
+    const data: ReelBackupData = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      eventPostRecords,
+      eventPostChecklist,
+      eventPostDate,
+      mmmEventPresets,
+      editPresets,
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json;charset=utf-8;',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `bemystyle-reel-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [editPresets, eventPostChecklist, eventPostDate, eventPostRecords, mmmEventPresets])
+
+  // Phase19-N: 全データバックアップ復元
+  const handleImportReelBackupJson = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setBackupImportMessage('')
+    setBackupImportError('')
+
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text) as unknown
+
+      if (!data || typeof data !== 'object') throw new Error()
+      const d = data as Partial<ReelBackupData>
+
+      if (d.version !== 1) {
+        setBackupImportError('バックアップJSONの形式が正しくありません。')
+        return
+      }
+
+      if (!window.confirm('現在の保存データをバックアップ内容で上書きします。よろしいですか？')) return
+
+      try {
+        if (Array.isArray(d.eventPostRecords)) {
+          setEventPostRecords(d.eventPostRecords as EventPostRecord[])
+          localStorage.setItem(EVENT_POST_RECORDS_KEY, JSON.stringify(d.eventPostRecords))
+        }
+        if (d.eventPostChecklist && typeof d.eventPostChecklist === 'object') {
+          const cl = d.eventPostChecklist as Record<string, boolean>
+          setEventPostChecklist({
+            downloaded: cl.downloaded === true,
+            captionChecked: cl.captionChecked === true,
+            qrChecked: cl.qrChecked === true,
+            urlChecked: cl.urlChecked === true,
+            bgmChecked: cl.bgmChecked === true,
+            postDateEntered: cl.postDateEntered === true,
+          })
+          localStorage.setItem(EVENT_POST_CHECKLIST_KEY, JSON.stringify(d.eventPostChecklist))
+        }
+        if (typeof d.eventPostDate === 'string') {
+          setEventPostDate(d.eventPostDate)
+          localStorage.setItem(EVENT_POST_DATE_KEY, d.eventPostDate)
+        }
+        if (Array.isArray(d.mmmEventPresets)) {
+          setMmmEventPresets(d.mmmEventPresets as MmmEventPreset[])
+          localStorage.setItem(MMM_EVENT_PRESETS_KEY, JSON.stringify(d.mmmEventPresets))
+        }
+        if (Array.isArray(d.editPresets)) {
+          setEditPresets(d.editPresets as EditPreset[])
+          localStorage.setItem(EDIT_PRESETS_KEY, JSON.stringify(d.editPresets))
+        }
+        setBackupImportMessage('バックアップを復元しました。')
+      } catch {
+        setBackupImportError('復元に失敗しました。')
+      }
+    } catch {
+      setBackupImportError('バックアップJSONの形式が正しくありません。')
+    }
+  }, [])
+
   useEffect(() => {
     try {
       localStorage.setItem(POST_CHECKLIST_STORAGE_KEY, JSON.stringify(postChecklist))
@@ -2266,6 +2789,47 @@ export default function App() {
       localStorage.setItem(POSTED_RECORDS_STORAGE_KEY, JSON.stringify(postedRecords))
     } catch {}
   }, [postedRecords])
+
+  // Phase19-I: イベントチェックリスト 永続化
+  useEffect(() => {
+    try { localStorage.setItem(EVENT_POST_CHECKLIST_KEY, JSON.stringify(eventPostChecklist)) } catch {}
+  }, [eventPostChecklist])
+
+  useEffect(() => {
+    try { localStorage.setItem(EVENT_POST_DATE_KEY, eventPostDate) } catch {}
+    if (eventPostDate) {
+      setEventPostChecklist((prev) => prev.postDateEntered ? prev : { ...prev, postDateEntered: true })
+    }
+  }, [eventPostDate])
+
+  // Phase19-I: 自動チェック補助
+  useEffect(() => {
+    if (qrFileName) setEventPostChecklist((prev) => prev.qrChecked ? prev : { ...prev, qrChecked: true })
+  }, [qrFileName])
+
+  useEffect(() => {
+    if (bgmFileName) setEventPostChecklist((prev) => prev.bgmChecked ? prev : { ...prev, bgmChecked: true })
+  }, [bgmFileName])
+
+  useEffect(() => {
+    if (mmmEventForm.url.trim()) setEventPostChecklist((prev) => prev.urlChecked ? prev : { ...prev, urlChecked: true })
+  }, [mmmEventForm.url])
+
+  useEffect(() => {
+    if (snsCaption) setEventPostChecklist((prev) => prev.captionChecked ? prev : { ...prev, captionChecked: true })
+  }, [snsCaption])
+
+  // Phase19-K: イベント投稿記録 永続化
+  useEffect(() => {
+    try { localStorage.setItem(EVENT_POST_RECORDS_KEY, JSON.stringify(eventPostRecords)) } catch {}
+  }, [eventPostRecords])
+
+  // Phase19-P: 動画生成完了 → 作成タブへ自動遷移
+  useEffect(() => {
+    if (renderStatus === 'completed' && simpleMode && simpleStep === 3) {
+      setActiveSimpleTab('create')
+    }
+  }, [renderStatus, simpleMode, simpleStep])
 
   const handleNewProject = useCallback(() => {
     if (hasUnsavedChanges && !window.confirm('未保存の変更があります。新規作成すると現在の内容が失われます。続けますか？')) return
@@ -2293,6 +2857,230 @@ export default function App() {
     setHasUnsavedChanges(true)
   }, [])
 
+  // Phase19-E: BGMアップロード
+  const handleBgmUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setBgmUploading(true)
+    setBgmUploadError('')
+    try {
+      const formData = new FormData()
+      formData.append('audio', file)
+      const res = await fetch('/api/upload-audio', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.message ?? 'BGMアップロードに失敗しました')
+      setBgmFileName(file.name)
+    } catch (err) {
+      setBgmUploadError(err instanceof Error ? err.message : 'BGMアップロードに失敗しました')
+    } finally {
+      setBgmUploading(false)
+    }
+  }, [])
+
+  // Phase19-E: スライド画像差し替え
+  const handleSlideImageReplace = useCallback(async (slideId: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setSlideImageReplacing(slideId)
+    setSlideImageReplaceError((prev) => { const next = { ...prev }; delete next[slideId]; return next })
+    try {
+      const formData = new FormData()
+      formData.append('image', file)
+      const res = await fetch('/api/upload', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.message ?? '画像アップロードに失敗しました')
+      updateSlide(slideId, { image: data.filename })
+    } catch (err) {
+      setSlideImageReplaceError((prev) => ({ ...prev, [slideId]: err instanceof Error ? err.message : '画像差し替えに失敗しました' }))
+    } finally {
+      setSlideImageReplacing(null)
+    }
+  }, [updateSlide])
+
+  // Phase19-E: テキスト編集 (headline / subline / emphasis)
+  const handleSlideTextChange = useCallback((slideId: number, field: 'headline' | 'subline' | 'emphasis', value: string) => {
+    updateSlide(slideId, { [field]: value })
+  }, [updateSlide])
+
+  // Phase19-E: 世界観タグ トグル
+  const toggleVisualStyleTag = useCallback((tag: string) => {
+    setVisualStyleTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    )
+  }, [])
+
+  // Phase19-F: 編集プリセット 保存
+  const saveEditPreset = useCallback(() => {
+    const name = editPresetName.trim()
+    if (!name) return
+    const preset: EditPreset = {
+      id: `ep-${Date.now()}`,
+      name,
+      visualStyleTags: [...visualStyleTags],
+      bgmFileName: bgmFileName || undefined,
+      createdAt: new Date().toISOString(),
+    }
+    setEditPresets((prev) => {
+      const next = [...prev, preset]
+      localStorage.setItem(EDIT_PRESETS_KEY, JSON.stringify(next))
+      return next
+    })
+    setEditPresetName('')
+  }, [editPresetName, visualStyleTags, bgmFileName])
+
+  // Phase19-F: 編集プリセット 適用
+  const applyEditPreset = useCallback((presetId: string) => {
+    const preset = editPresets.find((p) => p.id === presetId)
+    if (!preset) return
+    setVisualStyleTags(preset.visualStyleTags)
+    if (preset.bgmFileName) setBgmFileName(preset.bgmFileName)
+    setSelectedEditPresetId(presetId)
+  }, [editPresets])
+
+  // Phase19-F: 編集プリセット 削除
+  const deleteEditPreset = useCallback((presetId: string) => {
+    setEditPresets((prev) => {
+      const next = prev.filter((p) => p.id !== presetId)
+      localStorage.setItem(EDIT_PRESETS_KEY, JSON.stringify(next))
+      return next
+    })
+    if (selectedEditPresetId === presetId) setSelectedEditPresetId('')
+  }, [selectedEditPresetId])
+
+  // Phase19-H: MMMイベントプリセット 保存
+  const saveMmmEventPreset = useCallback(() => {
+    const name = mmmEventPresetName.trim()
+    if (!name) {
+      setMmmEventPresetNotice('保存するプリセット名を入力してください。')
+      return
+    }
+    if (!mmmEventForm.title.trim() || !mmmEventForm.venue.trim()) {
+      setMmmEventPresetNotice('イベント名と会場を入力してから保存してください。')
+      return
+    }
+    const preset: MmmEventPreset = {
+      id: `mep-${Date.now()}`,
+      name,
+      ...mmmEventForm,
+      createdAt: new Date().toISOString(),
+    }
+    setMmmEventPresets((prev) => {
+      const next = [...prev, preset]
+      localStorage.setItem(MMM_EVENT_PRESETS_KEY, JSON.stringify(next))
+      return next
+    })
+    setMmmEventPresetName('')
+    setMmmEventPresetNotice('イベント情報を保存しました。')
+    setTimeout(() => setMmmEventPresetNotice(''), 3000)
+  }, [mmmEventPresetName, mmmEventForm])
+
+  // Phase19-H: MMMイベントプリセット 呼び出し
+  const applyMmmEventPreset = useCallback((presetId: string) => {
+    const preset = mmmEventPresets.find((p) => p.id === presetId)
+    if (!preset) return
+    setMmmEventForm({
+      title: preset.title,
+      date: preset.date,
+      startTime: preset.startTime,
+      endTime: preset.endTime,
+      venue: preset.venue,
+      price: preset.price,
+      url: preset.url,
+      message: preset.message,
+    })
+    setMmmEventPresetNotice(`「${preset.name}」を呼び出しました。`)
+    setTimeout(() => setMmmEventPresetNotice(''), 3000)
+  }, [mmmEventPresets])
+
+  // Phase19-H: MMMイベントプリセット 削除
+  const deleteMmmEventPreset = useCallback((presetId: string) => {
+    setMmmEventPresets((prev) => {
+      const next = prev.filter((p) => p.id !== presetId)
+      localStorage.setItem(MMM_EVENT_PRESETS_KEY, JSON.stringify(next))
+      return next
+    })
+    if (selectedMmmEventPresetId === presetId) setSelectedMmmEventPresetId('')
+  }, [selectedMmmEventPresetId])
+
+  // Phase19-S: テンプレートタイプ選択ハンドラー
+  const handleSimpleTemplateTypeSelect = useCallback((type: SimpleTemplateType) => {
+    setSimpleTemplateType(type)
+    if (type === 'mmm-event') {
+      setSimpleTemplateId('mmm-event')
+    } else {
+      setSimpleTemplateId('')
+      setSelectedTemplateId('')
+    }
+
+    if (type === 'custom') return
+
+    const defaults = SIMPLE_TEMPLATE_DEFAULTS[type]
+
+    if (defaults.visualStyleTags.length > 0) {
+      setVisualStyleTags(defaults.visualStyleTags)
+    }
+
+    if (defaults.bgmFileName) {
+      setBgmFileName(defaults.bgmFileName)
+      setBgmUploadError('')
+    }
+
+    if (defaults.ctaLabel) {
+      setRecommendedCtaLabel(defaults.ctaLabel)
+      setSlides((prev) =>
+        prev.map((slide) =>
+          slide.layout === 'cta' ? { ...slide, ctaLabel: defaults.ctaLabel } : slide
+        )
+      )
+      setHasUnsavedChanges(true)
+    }
+  }, [])
+
+  // Phase19-S: テンプレート別テーマ自動生成
+  const buildSimpleThemeFromTemplate = useCallback((): string => {
+    switch (simpleTemplateType) {
+      case 'mmm-event':
+        return buildMmmTheme(mmmEventForm)
+      case 'free-diagnosis': {
+        const parts: string[] = []
+        if (freeDiagnosisForm.campaignName) parts.push(`無料歌唱診断キャンペーン「${freeDiagnosisForm.campaignName}」`)
+        if (freeDiagnosisForm.targetAudience) parts.push(`対象：${freeDiagnosisForm.targetAudience}`)
+        if (freeDiagnosisForm.diagnosisMethod) parts.push(`診断方法：${freeDiagnosisForm.diagnosisMethod}`)
+        if (freeDiagnosisForm.lineUrl) parts.push(`申し込み：${freeDiagnosisForm.lineUrl}`)
+        if (freeDiagnosisForm.message) parts.push(freeDiagnosisForm.message)
+        return `${parts.join('。')}。申し込みを増やすためのSNSショート動画にしてください。`
+      }
+      case 'note-article': {
+        const parts: string[] = [`記事「${noteArticleForm.articleTitle}」`]
+        if (noteArticleForm.articleTheme) parts.push(`テーマ：${noteArticleForm.articleTheme}`)
+        if (noteArticleForm.targetReader) parts.push(`読者：${noteArticleForm.targetReader}`)
+        if (noteArticleForm.articleUrl) parts.push(`URL：${noteArticleForm.articleUrl}`)
+        if (noteArticleForm.message) parts.push(noteArticleForm.message)
+        return `${parts.join('。')}。記事への流入を増やすSNSショート動画にしてください。`
+      }
+      case 'youtube-video': {
+        const parts: string[] = [`YouTube動画「${youtubeVideoForm.videoTitle}」`]
+        if (youtubeVideoForm.videoTheme) parts.push(`テーマ：${youtubeVideoForm.videoTheme}`)
+        if (youtubeVideoForm.highlights) parts.push(`見どころ：${youtubeVideoForm.highlights}`)
+        if (youtubeVideoForm.youtubeUrl) parts.push(`URL：${youtubeVideoForm.youtubeUrl}`)
+        if (youtubeVideoForm.message) parts.push(youtubeVideoForm.message)
+        return `${parts.join('。')}。チャンネル登録を促すSNSショート動画にしてください。`
+      }
+      case 'music-community': {
+        const parts: string[] = [`音楽コミュニティ「${musicCommunityForm.communityName}」`]
+        if (musicCommunityForm.activities) parts.push(`活動内容：${musicCommunityForm.activities}`)
+        if (musicCommunityForm.targetAudience) parts.push(`対象：${musicCommunityForm.targetAudience}`)
+        if (musicCommunityForm.joinUrl) parts.push(`参加：${musicCommunityForm.joinUrl}`)
+        if (musicCommunityForm.message) parts.push(musicCommunityForm.message)
+        return `${parts.join('。')}。参加者募集のSNSショート動画にしてください。`
+      }
+      default:
+        return aiTheme
+    }
+  }, [simpleTemplateType, mmmEventForm, freeDiagnosisForm, noteArticleForm, youtubeVideoForm, musicCommunityForm, aiTheme])
+
   const handleGenerateImage = useCallback(async (slideId: number, imagePrompt: string) => {
     setImageGeneratingId(slideId)
     setImageGenerateErrors((prev) => { const next = { ...prev }; delete next[slideId]; return next })
@@ -2300,9 +3088,10 @@ export default function App() {
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: imagePrompt }),
+        body: JSON.stringify({ prompt: imagePrompt, quality: costMode === 'save' ? 'standard' : imageQualityMode }),
       })
-      const data = await res.json()
+      const data = await res.json() as { ok?: boolean; image?: string; errorType?: string; message?: string }
+      if (data.errorType === 'quota') { setQuotaError(true) }
       if (!data.ok) throw new Error(data.message ?? '画像生成に失敗しました')
       updateSlide(slideId, { image: data.image })
     } catch (err) {
@@ -2311,42 +3100,72 @@ export default function App() {
     } finally {
       setImageGeneratingId(null)
     }
-  }, [updateSlide])
+  }, [updateSlide, imageQualityMode, costMode])
 
   const handleGenerateAllImages = useCallback(async (): Promise<boolean> => {
-    const targets = slides.filter((slide) => slide.imagePrompt).slice(0, 14)
-    if (targets.length === 0) return false
+    const allTargets = slides.filter((slide) => slide.imagePrompt).slice(0, 14)
+    if (allTargets.length === 0) return false
 
+    // Phase19-J: 節約モードでは生成枚数を制限
+    const generateTargets = allTargets.slice(0, imageGenerateCount)
     setBulkImageGenerating(true)
-    setBulkImageProgress({ current: 0, total: targets.length })
+    setBulkImageProgress({ current: 0, total: generateTargets.length })
     setBulkImageMessage('')
 
     try {
       let nextSlides = [...slides]
+      const generatedImages: string[] = []
 
-      for (let i = 0; i < targets.length; i++) {
-        const target = targets[i]
-        setBulkImageProgress({ current: i + 1, total: targets.length })
+      for (let i = 0; i < generateTargets.length; i++) {
+        const target = generateTargets[i]
+        setBulkImageProgress({ current: i + 1, total: generateTargets.length })
 
         const response = await fetch('/api/generate-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: target.imagePrompt }),
+          body: JSON.stringify({ prompt: target.imagePrompt, quality: effectiveQuality }),
         })
 
-        if (!response.ok) throw new Error('画像生成に失敗しました')
+        const data = await response.json() as { ok?: boolean; image?: string; errorType?: string; message?: string }
+        if (!response.ok || !data.ok) {
+          if (data.errorType === 'quota') {
+            setQuotaError(true)
+            setBulkImageMessage('APIクレジット不足のため画像生成を停止しました。')
+            return false
+          }
+          throw new Error(data.message ?? '画像生成に失敗しました')
+        }
 
-        const data = await response.json()
-        nextSlides = nextSlides.map((slide) =>
-          slide.id === target.id ? { ...slide, image: data.image } : slide
-        )
+        if (data.image) {
+          generatedImages.push(data.image)
+          nextSlides = nextSlides.map((slide) =>
+            slide.id === target.id ? { ...slide, image: data.image! } : slide
+          )
+          setSlides(nextSlides)
+        }
+      }
+
+      // Phase19-J: 節約モードで残りスライドへループ割当
+      if (costMode === 'save' && generatedImages.length > 0) {
+        const remaining = allTargets.slice(generateTargets.length)
+        remaining.forEach((target, idx) => {
+          const loopImage = generatedImages[idx % generatedImages.length]
+          nextSlides = nextSlides.map((slide) =>
+            slide.id === target.id ? { ...slide, image: loopImage } : slide
+          )
+        })
         setSlides(nextSlides)
       }
 
       updateLatestHistory({
         imageCount: nextSlides.filter((s) => s.image?.startsWith('generated/')).length,
       })
-      setBulkImageMessage('14枚のAI画像生成が完了しました')
+      const generated = generateTargets.length
+      setBulkImageMessage(
+        costMode === 'save'
+          ? `${generated}枚生成・${allTargets.length}スライドへループ割当完了`
+          : `${generated}枚のAI画像生成が完了しました`
+      )
       return true
     } catch (_) {
       setBulkImageMessage('一部の画像生成に失敗しました。生成済み画像は保持されています。')
@@ -2354,7 +3173,7 @@ export default function App() {
     } finally {
       setBulkImageGenerating(false)
     }
-  }, [slides, updateLatestHistory])
+  }, [slides, updateLatestHistory, imageGenerateCount, effectiveQuality, costMode])
 
   const toggleVisible = useCallback((id: number) => {
     setSlides((prev) => prev.map((s) => (s.id === id ? { ...s, visible: !s.visible } : s)))
@@ -2374,6 +3193,29 @@ export default function App() {
   const handleCtaChange = useCallback((config: CTAConfig) => {
     setCtaConfig(config)
     setHasUnsavedChanges(true)
+  }, [])
+
+  const handleQrUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setQrUploading(true)
+    setQrUploadError('')
+    try {
+      const formData = new FormData()
+      formData.append('image', file)
+      const res = await fetch('/api/upload', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.message ?? 'アップロードに失敗しました')
+      const relativePath = (data.url as string).replace('/assets/', '')
+      setCtaConfig({ qrImage: relativePath })
+      setQrFileName(file.name)
+      setHasUnsavedChanges(true)
+    } catch (err) {
+      setQrUploadError(err instanceof Error ? err.message : 'アップロードに失敗しました')
+    } finally {
+      setQrUploading(false)
+    }
   }, [])
 
   const saveSnapshotToServer = useCallback(async (snapshotSlides: Slide[]): Promise<boolean> => {
@@ -2995,6 +3837,19 @@ export default function App() {
       if (!themeForRun) setFactoryError('テーマを入力してください')
       return
     }
+    if (imageSourceMode === 'upload' && userUploadedImagesRef.current.length === 0) {
+      setFactoryError('自分の画像を使う場合は、画像を1枚以上アップロードしてください。')
+      return
+    }
+    const useUploadedImages = imageSourceMode === 'upload'
+    const estimatedImageCount = costMode === 'save' ? Math.min(5, slides.length) : Math.min(14, slides.length)
+    if (shouldConfirmCostlyAiRun({ reelAiConfig, imageCount: estimatedImageCount, useUploadedImages })) {
+      const confirmed = window.confirm(buildCostConfirmMessage(estimatedImageCount))
+      if (!confirmed) {
+        setFactoryLog(['高コスト実行をキャンセルしました'])
+        return
+      }
+    }
     setFactoryRunning(true)
     setFactoryError('')
     setFactoryLog([])
@@ -3017,9 +3872,10 @@ export default function App() {
               platform: selectedCustomPreset.platform,
               imageStyle: selectedCustomPreset.imageStyle,
               ctaText: selectedCustomPreset.ctaText,
-            }
+          }
           : null
       )
+      if (story.warning) addLog(`⚠️ ${story.warning}`)
       const storySlides: Slide[] = slides.map((slide, index) => {
         const generated = story.slides[index]
         if (!generated) return slide
@@ -3041,40 +3897,112 @@ export default function App() {
         setFactoryWarning('⚠️ ストーリー枚数が不足しています。再生成をおすすめします。')
       }
 
-      // Step 2: AI Image Generate
-      setFactoryStep('Step 2/7: AI画像生成中...')
-      addLog('[2/7] AI画像生成 開始')
+      // Step 2: Image (AI or Upload)
       let slidesWithImages = [...storySlides]
-      const imageTargets = storySlides.filter((s) => s.imagePrompt).slice(0, 14)
-      let generatedImageCount = 0
-      addLog(`[2/7] 画像生成対象: ${imageTargets.length}枚`)
-      for (let ii = 0; ii < imageTargets.length; ii++) {
-        const target = imageTargets[ii]
-        addLog(`  画像 ${ii + 1}/${imageTargets.length}: ${target.imagePrompt?.slice(0, 40)}...`)
-        try {
-          const imgRes = await fetch('/api/generate-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: target.imagePrompt }),
-          })
-          const imgData = await imgRes.json()
-          if (imgData.ok && imgData.image) {
-            slidesWithImages = slidesWithImages.map((s) =>
-              s.id === target.id ? { ...s, image: imgData.image } : s
-            )
-            generatedImageCount += 1
-            setSlides([...slidesWithImages])
-            addLog(`  ✅ 画像生成成功 (ID ${target.id}): ${imgData.path ?? imgData.image}`)
-          } else {
-            addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${imgData.message ?? 'APIエラー'}`)
+      if (imageSourceMode === 'ai') {
+        setFactoryStep('Step 2/7: AI画像生成中...')
+        addLog('[2/7] AI画像生成 開始')
+        const allImageTargets = storySlides.filter((s) => s.imagePrompt).slice(0, 14)
+        const costLimitedCount = costMode === 'save' ? Math.min(5, allImageTargets.length) : allImageTargets.length
+        const factoryGenerateCount = reelAiConfig.testImageLimit
+          ? Math.min(reelAiConfig.testImageLimit, costLimitedCount)
+          : costLimitedCount
+        const imageTargets = allImageTargets.slice(0, factoryGenerateCount)
+        const factoryGeneratedImages: string[] = []
+        let generatedImageCount = 0
+        setFactoryTotalImageCount(imageTargets.length)
+        setFactoryCurrentImageIndex(0)
+        const imageLimitNotes = [
+          costMode === 'save' ? `節約モード: ${allImageTargets.length}枚→${costLimitedCount}枚` : '',
+          reelAiConfig.testImageLimit ? `REEL_TEST_IMAGE_LIMIT: ${costLimitedCount}枚→${factoryGenerateCount}枚` : '',
+        ].filter(Boolean)
+        addLog(`[2/7] 画像生成対象: ${imageTargets.length}枚${imageLimitNotes.length > 0 ? ` (${imageLimitNotes.join(' / ')})` : ''}`)
+        for (let ii = 0; ii < imageTargets.length; ii++) {
+          setFactoryCurrentImageIndex(ii + 1)
+          const target = imageTargets[ii]
+          addLog(`  画像 ${ii + 1}/${imageTargets.length}: ${target.imagePrompt?.slice(0, 40)}...`)
+          try {
+            const imgRes = await fetch('/api/generate-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ prompt: target.imagePrompt, quality: effectiveQuality }),
+            })
+            const imgData = await imgRes.json() as { ok?: boolean; image?: string; errorType?: string; message?: string; path?: string }
+            if (imgData.errorType === 'quota') {
+              setQuotaError(true)
+              throw new Error('APIクレジット不足のため画像生成を停止しました。Billing / Usage / Limits を確認してください。')
+            }
+            if (imgData.ok && imgData.image) {
+              const generatedImg = imgData.image
+              factoryGeneratedImages.push(generatedImg)
+              slidesWithImages = slidesWithImages.map((s) =>
+                s.id === target.id ? { ...s, image: generatedImg } : s
+              )
+              generatedImageCount += 1
+              setSlides([...slidesWithImages])
+              addLog(`  ✅ 画像生成成功 (ID ${target.id}): ${imgData.path ?? imgData.image}`)
+            } else {
+              addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${imgData.message ?? 'APIエラー'}`)
+            }
+          } catch (imgErr) {
+            const errMsg = imgErr instanceof Error ? imgErr.message : String(imgErr)
+            addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${errMsg}`)
+            if (errMsg.includes('APIクレジット不足')) throw imgErr
           }
-        } catch (imgErr) {
-          addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`)
         }
-      }
-      addLog(`[2/7] AI画像生成完了 (${generatedImageCount}/${imageTargets.length}枚)`)
-      if (generatedImageCount === 0) {
-        throw new Error('画像生成に失敗しました。\nサーバー側の画像生成API設定に問題がある可能性があります。\n開発者向けログで response_format の混入を確認してください。')
+        // Phase19-J: 節約モード ループ割当
+        if (imageTargets.length < allImageTargets.length && factoryGeneratedImages.length > 0) {
+          const remaining = allImageTargets.slice(factoryGenerateCount)
+          remaining.forEach((target, idx) => {
+            const loopImage = factoryGeneratedImages[idx % factoryGeneratedImages.length]
+            slidesWithImages = slidesWithImages.map((s) =>
+              s.id === target.id ? { ...s, image: loopImage } : s
+            )
+          })
+          setSlides([...slidesWithImages])
+          addLog(`[2/7] 残り${remaining.length}スライドへ生成済み画像をループ割当完了`)
+        }
+        addLog(`[2/7] AI画像生成完了 (${generatedImageCount}/${imageTargets.length}枚)`)
+        setFactoryCurrentImageIndex(null)
+        setFactoryTotalImageCount(null)
+        if (generatedImageCount === 0) {
+          throw new Error('画像生成に失敗しました。\nサーバー側の画像生成API設定に問題がある可能性があります。\n開発者向けログで response_format の混入を確認してください。')
+        }
+      } else {
+        // upload mode: transfer blob URLs to server then assign to slides
+        setFactoryStep('Step 2/7: アップロード画像反映中...')
+        addLog('[2/7] アップロード画像反映')
+        const uploadedImages = userUploadedImagesRef.current
+        addLog(`[2/7] アップロード画像: ${uploadedImages.length}枚`)
+        const serverUrls: string[] = []
+        for (let ui = 0; ui < uploadedImages.length; ui++) {
+          const img = uploadedImages[ui]
+          try {
+            const blobRes = await fetch(img.url)
+            const blob = await blobRes.blob()
+            const fd = new FormData()
+            fd.append('image', blob, img.name)
+            const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd })
+            const uploadData = await uploadRes.json()
+            if (uploadData.ok && uploadData.url) {
+              serverUrls.push(uploadData.url)
+              addLog(`  ✅ アップロード完了 (${ui + 1}/${uploadedImages.length}): ${img.name}`)
+            } else {
+              addLog(`  ⚠️ アップロードスキップ: ${img.name}`)
+            }
+          } catch (uploadErr) {
+            addLog(`  ⚠️ アップロードエラー: ${img.name}: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`)
+          }
+        }
+        if (serverUrls.length === 0) {
+          throw new Error('アップロード画像のサーバー転送に失敗しました。')
+        }
+        slidesWithImages = storySlides.map((slide, index) => ({
+          ...slide,
+          image: serverUrls[index % serverUrls.length],
+        }))
+        setSlides([...slidesWithImages])
+        addLog('[2/7] 画像適用完了')
       }
 
       // Step 3: Variant Generate
@@ -3083,10 +4011,11 @@ export default function App() {
       const genRes = await fetch('/api/variant-generator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: themeForRun }),
+        body: JSON.stringify({ theme: themeForRun, slides: storySlides }),
       })
       const genData = await genRes.json()
       if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
+      if (typeof genData.warning === 'string') addLog(`⚠️ ${genData.warning}`)
       const variants: GeneratedVariant[] = genData.variants
       setGeneratedVariants(variants)
       generatedVariantsRef.current = variants
@@ -3107,6 +4036,7 @@ export default function App() {
       })
       const scoreData = await scoreRes.json()
       if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
+      if (typeof scoreData.warning === 'string') addLog(`⚠️ ${scoreData.warning}`)
       const scores: VariantScore[] = scoreData.scores
       setVariantScores(scores)
       variantScoresRef.current = scores
@@ -3154,6 +4084,7 @@ export default function App() {
         })
         const rewriteData = await rewriteRes.json()
         if (!rewriteData.ok) throw new Error(rewriteData.message ?? `Failed to rewrite story for ${target.variant.name}`)
+        if (typeof rewriteData.warning === 'string') addLog(`  ⚠️ ${rewriteData.warning}`)
         const rewritten: RewrittenSlide[] = rewriteData.slides
         const rewrittenSlides: Slide[] = slidesWithImages.map((s, i) => ({
           ...s,
@@ -3240,6 +4171,14 @@ export default function App() {
       })
 
       // Phase17-C: Auto-render after factory
+      if (reelAiConfig.dryRun) {
+        setFactoryStep('Factory complete')
+        addLog('Dry Runモードのため、自動動画生成をスキップしました。キュー投入まで確認済みです。')
+        await new Promise<void>((resolve) => setTimeout(resolve, 300))
+        compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' })
+        return
+      }
+
       setFactoryStep('動画生成中...')
       addLog('AI自動作成が完了しました。続けて動画生成を開始しています。')
       // Wait for React to flush the setRenderQueue update so batchRenderRef picks up new items
@@ -3271,8 +4210,10 @@ export default function App() {
       addLog(`ERROR: ${msg}`)
     } finally {
       setFactoryRunning(false)
+      setFactoryCurrentImageIndex(null)
+      setFactoryTotalImageCount(null)
     }
-  }, [factoryRunning, aiTheme, customPresets, selectedCustomPresetId, selectedPresetKey, slides, variantLearningEvents])
+  }, [factoryRunning, aiTheme, customPresets, selectedCustomPresetId, selectedPresetKey, slides, variantLearningEvents, imageSourceMode, costMode, effectiveQuality, reelAiConfig])
 
   const showFactoryNotice = useCallback((message: string) => {
     setFactoryNotice(message)
@@ -3635,7 +4576,53 @@ export default function App() {
 
   const downloadVideo = useCallback(() => {
     window.location.href = latestDownloadUrl ?? '/api/render/download'
-  }, [latestDownloadUrl])
+    if (simpleTemplateId === 'mmm-event') {
+      setEventPostChecklist((prev) => ({ ...prev, downloaded: true }))
+    }
+  }, [latestDownloadUrl, simpleTemplateId])
+
+  const MAX_VIDEO_RETRY = 5
+  const VIDEO_RETRY_INTERVAL_MS = 3000
+
+  const checkVideoReady = useCallback((viewUrl: string) => {
+    if (videoPreviewRetryTimer.current) clearTimeout(videoPreviewRetryTimer.current)
+    videoPreviewRetryCount.current = 0
+    setVideoPreviewLoading(true)
+    setVideoPreviewError('')
+
+    const attempt = () => {
+      fetch(viewUrl, { method: 'HEAD' })
+        .then((res) => {
+          if (res.ok) {
+            setVideoPreviewLoading(false)
+          } else {
+            retry()
+          }
+        })
+        .catch(() => retry())
+    }
+
+    const retry = () => {
+      videoPreviewRetryCount.current += 1
+      if (videoPreviewRetryCount.current >= MAX_VIDEO_RETRY) {
+        setVideoPreviewLoading(false)
+        setVideoPreviewError('プレビューの準備に時間がかかっています。再取得ボタンをお試しください。')
+        return
+      }
+      videoPreviewRetryTimer.current = setTimeout(attempt, VIDEO_RETRY_INTERVAL_MS)
+    }
+
+    attempt()
+  }, [])
+
+  useEffect(() => {
+    if (!latestDownloadUrl) return
+    const viewUrl = latestDownloadUrl.replace('/api/render/download/', '/api/render/view/')
+    checkVideoReady(viewUrl)
+    return () => {
+      if (videoPreviewRetryTimer.current) clearTimeout(videoPreviewRetryTimer.current)
+    }
+  }, [latestDownloadUrl, checkVideoReady])
 
   const latestViewUrl = latestDownloadUrl
     ? latestDownloadUrl.replace('/api/render/download/', '/api/render/view/')
@@ -3972,6 +4959,37 @@ export default function App() {
     [renderQueue]
   )
 
+  const selectedSimpleTemplateDefaults = useMemo(() => {
+    if (!simpleTemplateType || simpleTemplateType === 'custom') return null
+    return SIMPLE_TEMPLATE_DEFAULTS[simpleTemplateType]
+  }, [simpleTemplateType])
+
+  // Phase19-S: 未入力チェック
+  const missingTemplateInputs = useMemo((): string[] => {
+    switch (simpleTemplateType) {
+      case 'mmm-event':
+        return [
+          !mmmEventForm.title.trim() && 'イベント名を入力してください',
+          !mmmEventForm.date.trim() && '開催日を入力してください',
+          !mmmEventForm.venue.trim() && '会場を入力してください',
+        ].filter(Boolean) as string[]
+      case 'free-diagnosis':
+        return [!freeDiagnosisForm.campaignName.trim() && 'キャンペーン名を入力してください'].filter(Boolean) as string[]
+      case 'note-article':
+        return [
+          !noteArticleForm.articleTitle.trim() && '記事タイトルを入力してください',
+          !noteArticleForm.articleTheme.trim() && '記事テーマを入力してください',
+        ].filter(Boolean) as string[]
+      case 'youtube-video':
+        return [!youtubeVideoForm.videoTitle.trim() && '動画タイトルを入力してください'].filter(Boolean) as string[]
+      case 'music-community':
+        return [!musicCommunityForm.communityName.trim() && 'コミュニティ名を入力してください'].filter(Boolean) as string[]
+      case 'custom':
+        return !aiTheme.trim() ? ['テーマを入力してください'] : []
+      default:
+        return ['テンプレートを選んでください']
+    }
+  }, [simpleTemplateType, mmmEventForm, freeDiagnosisForm, noteArticleForm, youtubeVideoForm, musicCommunityForm, aiTheme])
 
   const renderStepInfo = isPreparingRender
     ? { step: 1, total: 3, label: '保存中' }
@@ -4031,12 +5049,30 @@ export default function App() {
   const factoryStepNum =
     factoryStep === 'Step 1/7: ストーリー生成中...' ? 1 :
     factoryStep === 'Step 2/7: AI画像生成中...' ? 2 :
+    factoryStep === 'Step 2/7: アップロード画像反映中...' ? 2 :
     factoryStep === 'Step 3/7: バリアント生成中...' ? 3 :
     factoryStep === 'Step 4/7: バリアントスコアリング中...' ? 4 :
     factoryStep === 'Step 5/7: トップバリアントを選定中...' ? 5 :
     factoryStep === 'Step 6/7: バリアントをリライト中...' ? 6 :
     factoryStep === 'Step 7/7: キューに投入中...' ? 7 :
     factoryStep === 'Factory complete' ? 8 : 0
+
+  // Weighted progress: Story5% | AI/Upload65% | Variant10% | Score5% | Select5% | Rewrite5% | Queue5%
+  const factoryProgress: number = (() => {
+    if (factoryStepNum === 0) return 0
+    if (factoryStepNum === 1) return 3
+    if (factoryStepNum === 2) {
+      const idx = factoryCurrentImageIndex ?? 0
+      const tot = factoryTotalImageCount ?? 14
+      return 5 + Math.round((idx / tot) * 65)
+    }
+    if (factoryStepNum === 3) return 70
+    if (factoryStepNum === 4) return 80
+    if (factoryStepNum === 5) return 85
+    if (factoryStepNum === 6) return 90
+    if (factoryStepNum === 7) return 95
+    return 100
+  })()
 
   const multiRewriteQueueStep =
     multiRewriteQueueStatus === 'AIバリアント生成中...' ? 1 :
@@ -4980,7 +6016,7 @@ export default function App() {
             <p className="save-error">{saveError}</p>
           )}
 
-          <div className="render-area">
+          <div className={`render-area${simpleMode && simpleStep === 3 ? ' render-area--step3' : ''}`}>
             {/* Phase18-B: かんたんモード 3ステップウィザード */}
             {simpleMode && (
               <div className="simple-wizard">
@@ -4997,114 +6033,565 @@ export default function App() {
 
                 {simpleStep === 1 && (
                   <div className="simple-step-card">
-                    {/* テンプレート選択 (Phase18-E) */}
-                    {templates.length > 0 && (
-                      <div className="simple-template-select">
-                        <p className="simple-template-select-label">テンプレートを選ぶ（任意）</p>
-                        <div className="simple-template-chips">
-                          {templates.map((t) => (
-                            <button
-                              key={t.id}
-                              className={`simple-template-chip${simpleTemplateId === t.id ? ' simple-template-chip--active' : ''}`}
-                              onClick={() => {
-                                if (simpleTemplateId === t.id) {
-                                  setSimpleTemplateId('')
-                                  setSelectedTemplateId('')
-                                } else {
-                                  setSimpleTemplateId(t.id)
-                                  loadTemplate(t.id)
-                                }
-                              }}
-                            >
-                              {t.name}
-                            </button>
-                          ))}
+                    {/* Phase19-S: テンプレートタイプ選択カード */}
+                    <SimpleTemplateSelector
+                      selected={simpleTemplateType}
+                      onSelect={handleSimpleTemplateTypeSelect}
+                    />
+
+                    {!simpleTemplateType && (
+                      <p className="simple-type-hint">上から動画の種類を選んでください</p>
+                    )}
+
+                    {selectedSimpleTemplateDefaults && (
+                      <div className="simple-template-default-notice">
+                        <p className="simple-template-default-title">おすすめ設定を自動セットしました</p>
+                        <div className="simple-template-default-list">
+                          <p>世界観：{selectedSimpleTemplateDefaults.visualStyleTags.join(' / ')}</p>
+                          <p>BGM：{selectedSimpleTemplateDefaults.bgmFileName}</p>
+                          <p>CTA：{selectedSimpleTemplateDefaults.ctaLabel}</p>
                         </div>
-                        {simpleTemplateId && (
-                          <button
-                            className="simple-template-clear"
-                            onClick={() => { setSimpleTemplateId(''); setSelectedTemplateId('') }}
-                          >
-                            ✕ テンプレートを外す
-                          </button>
-                        )}
+                        <p className="simple-template-default-note">あとから編集タブで変更できます。</p>
                       </div>
                     )}
 
-                    <p className="simple-step-title">
-                      {simpleTemplateId
-                        ? 'このテンプレートで作りたい内容を入力してください'
-                        : '作りたい動画のテーマを入力してください'}
-                    </p>
-                    <p className="simple-step-hint">
-                      {simpleTemplateId
-                        ? `テンプレート「${templates.find((t) => t.id === simpleTemplateId)?.name ?? ''}」を使用`
-                        : '例：無料歌唱診断キャンペーンを紹介するショート動画'}
-                    </p>
-                    <input
-                      className="ai-generator-input simple-step-input"
-                      type="text"
-                      placeholder="テーマを入力..."
-                      value={aiTheme}
-                      onChange={(e) => setAiTheme(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && aiTheme.trim()) setSimpleStep(2) }}
-                    />
-                    <div className="user-image-upload">
-                      <div className="user-image-upload-header">
-                        <div>
-                          <p className="user-image-upload-title">自分の画像を使う（任意）</p>
-                          <p className="user-image-upload-hint">アップロード画像は次フェーズで動画素材として利用します。</p>
+                    {simpleTemplateType === 'mmm-event' ? (
+                      /* ── Phase19-D: MMMイベント告知専用フォーム ── */
+                      <div className="mmm-event-form">
+                        {/* Phase19-H: イベント情報プリセット 呼び出しUI */}
+                        <div className="mmm-event-preset-panel">
+                          <p className="mmm-event-preset-title">保存したイベント情報</p>
+                          <div className="mmm-event-preset-row">
+                            <select
+                              className="mmm-event-preset-select"
+                              value={selectedMmmEventPresetId}
+                              onChange={(e) => setSelectedMmmEventPresetId(e.target.value)}
+                            >
+                              <option value="">プリセットを選択...</option>
+                              {mmmEventPresets.map((p) => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              className="btn-mmm-event-preset-apply"
+                              onClick={() => applyMmmEventPreset(selectedMmmEventPresetId)}
+                              disabled={!selectedMmmEventPresetId}
+                              type="button"
+                            >
+                              呼び出す
+                            </button>
+                            <button
+                              className="btn-mmm-event-preset-delete"
+                              onClick={() => deleteMmmEventPreset(selectedMmmEventPresetId)}
+                              disabled={!selectedMmmEventPresetId || mmmEventPresets.find((p) => p.id === selectedMmmEventPresetId)?.id.startsWith('default-')}
+                              type="button"
+                            >
+                              削除
+                            </button>
+                          </div>
+                          {mmmEventPresetNotice && (
+                            <p className="mmm-event-preset-notice">{mmmEventPresetNotice}</p>
+                          )}
                         </div>
-                        <label className="btn-user-image-upload">
-                          画像をアップロード
-                          <input
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            onChange={handleUserImageUpload}
-                          />
-                        </label>
-                      </div>
-                      {userUploadedImages.length > 0 && (
-                        <div className="user-image-upload-preview">
-                          <p className="user-image-upload-count">アップロード済み画像：{userUploadedImages.length}枚</p>
-                          <div className="user-image-upload-grid">
-                            {userUploadedImages.map((image) => (
-                              <div className="user-image-upload-item" key={image.id}>
-                                <img src={image.url} alt={image.name} />
-                                <span title={image.name}>{image.name}</span>
-                                <button onClick={() => removeUserUploadedImage(image.id)}>削除</button>
-                              </div>
+                        <div className="mmm-event-form-grid">
+                          <label className="mmm-field">
+                            <span className="mmm-field-label">イベント名 <span className="mmm-required">必須</span></span>
+                            <input
+                              className="mmm-field-input"
+                              type="text"
+                              placeholder="例：MMM大演奏会"
+                              value={mmmEventForm.title}
+                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, title: e.target.value }))}
+                            />
+                          </label>
+                          <label className="mmm-field">
+                            <span className="mmm-field-label">開催日 <span className="mmm-required">必須</span></span>
+                            <input
+                              className="mmm-field-input"
+                              type="text"
+                              placeholder="例：6/27（土）"
+                              value={mmmEventForm.date}
+                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, date: e.target.value }))}
+                            />
+                          </label>
+                          <label className="mmm-field mmm-field--half">
+                            <span className="mmm-field-label">開始時間</span>
+                            <input
+                              className="mmm-field-input"
+                              type="text"
+                              placeholder="例：17:30"
+                              value={mmmEventForm.startTime}
+                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, startTime: e.target.value }))}
+                            />
+                          </label>
+                          <label className="mmm-field mmm-field--half">
+                            <span className="mmm-field-label">終了時間</span>
+                            <input
+                              className="mmm-field-input"
+                              type="text"
+                              placeholder="例：22:30"
+                              value={mmmEventForm.endTime}
+                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, endTime: e.target.value }))}
+                            />
+                          </label>
+                          <label className="mmm-field">
+                            <span className="mmm-field-label">会場 <span className="mmm-required">必須</span></span>
+                            <input
+                              className="mmm-field-input"
+                              type="text"
+                              placeholder="例：レンタルスペース Rhythm Neko"
+                              value={mmmEventForm.venue}
+                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, venue: e.target.value }))}
+                            />
+                          </label>
+                          <label className="mmm-field">
+                            <span className="mmm-field-label">参加費</span>
+                            <input
+                              className="mmm-field-input"
+                              type="text"
+                              placeholder="例：演奏3,500円・聴くだけ1,000円"
+                              value={mmmEventForm.price}
+                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, price: e.target.value }))}
+                            />
+                          </label>
+                          <label className="mmm-field">
+                            <span className="mmm-field-label">イベントURL（CTA用）</span>
+                            <input
+                              className="mmm-field-input"
+                              type="url"
+                              placeholder="例：https://..."
+                              value={mmmEventForm.url}
+                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, url: e.target.value }))}
+                            />
+                          </label>
+                          <label className="mmm-field">
+                            <span className="mmm-field-label">一言メッセージ（任意）</span>
+                            <input
+                              className="mmm-field-input"
+                              type="text"
+                              placeholder="例：飲食OK。音楽仲間を作りたい方大歓迎。"
+                              value={mmmEventForm.message}
+                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, message: e.target.value }))}
+                            />
+                          </label>
+                        </div>
+                        {/* Phase19-H: イベント情報プリセット 保存UI */}
+                        <div className="mmm-event-preset-save">
+                          <p className="mmm-event-preset-title">イベント情報を保存</p>
+                          <div className="mmm-event-preset-save-row">
+                            <input
+                              className="mmm-event-preset-name-input"
+                              type="text"
+                              placeholder="プリセット名（例：春の演奏会）"
+                              value={mmmEventPresetName}
+                              onChange={(e) => setMmmEventPresetName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveMmmEventPreset() }}
+                            />
+                            <button
+                              className="btn-mmm-event-preset-save"
+                              onClick={saveMmmEventPreset}
+                              type="button"
+                            >
+                              保存
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mmm-hints">
+                          <span className="mmm-hint-chip">初心者歓迎</span>
+                          <span className="mmm-hint-chip">見学だけでもOK</span>
+                          <span className="mmm-hint-chip">演奏参加・聴くだけ参加OK</span>
+                          <span className="mmm-hint-chip">音楽仲間を作りたい方に</span>
+                        </div>
+                        {mmmError && <p className="mmm-error">{mmmError}</p>}
+                        {/* Phase19-E: 世界観タグ */}
+                        <div className="visual-style-tags">
+                          <p className="visual-style-tags-label">動画の雰囲気</p>
+                          <div className="visual-style-tags-chips">
+                            {VISUAL_STYLE_TAG_OPTIONS.map((tag) => (
+                              <button
+                                key={tag}
+                                className={`visual-style-tag-chip${visualStyleTags.includes(tag) ? ' visual-style-tag-chip--active' : ''}`}
+                                onClick={() => toggleVisualStyleTag(tag)}
+                                type="button"
+                              >
+                                {tag}
+                              </button>
                             ))}
                           </div>
                         </div>
-                      )}
-                    </div>
-                    {/* Phase18-F: テーマサジェスト */}
-                    <div className="simple-suggestions">
-                      <p className="simple-suggestion-title">おすすめテーマ</p>
-                      <div className="simple-suggestion-chips">
-                        {(simpleTemplateId && SIMPLE_TEMPLATE_THEME_SUGGESTIONS[simpleTemplateId]
-                          ? SIMPLE_TEMPLATE_THEME_SUGGESTIONS[simpleTemplateId]
-                          : SIMPLE_THEME_SUGGESTIONS
-                        ).map((suggestion) => (
-                          <button
-                            key={suggestion}
-                            className={`simple-suggestion-chip${aiTheme === suggestion ? ' active' : ''}`}
-                            onClick={() => setAiTheme(suggestion)}
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
+                        {/* Phase19-F: 編集プリセット */}
+                        <div className="edit-preset-panel">
+                          <div className="edit-preset-apply">
+                            <p className="edit-preset-section-title">保存した設定</p>
+                            <div className="edit-preset-apply-row">
+                              <select
+                                className="edit-preset-select"
+                                value={selectedEditPresetId}
+                                onChange={(e) => setSelectedEditPresetId(e.target.value)}
+                              >
+                                <option value="">プリセットを選択...</option>
+                                {editPresets.map((p) => (
+                                  <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                              </select>
+                              <button
+                                className="btn-edit-preset-apply"
+                                onClick={() => applyEditPreset(selectedEditPresetId)}
+                                disabled={!selectedEditPresetId}
+                                type="button"
+                              >
+                                適用
+                              </button>
+                              <button
+                                className="btn-edit-preset-delete"
+                                onClick={() => deleteEditPreset(selectedEditPresetId)}
+                                disabled={!selectedEditPresetId || DEFAULT_EDIT_PRESETS.some((p) => p.id === selectedEditPresetId)}
+                                type="button"
+                              >
+                                削除
+                              </button>
+                            </div>
+                            {selectedEditPresetId && (() => {
+                              const p = editPresets.find((ep) => ep.id === selectedEditPresetId)
+                              return p ? (
+                                <p className="edit-preset-preview">
+                                  雰囲気：{p.visualStyleTags.join(' / ')}
+                                  {p.bgmFileName ? ` ／ BGM：${p.bgmFileName}` : ''}
+                                  {p.ctaLabel ? ` ／ CTA：${p.ctaLabel}` : ''}
+                                </p>
+                              ) : null
+                            })()}
+                          </div>
+                          <div className="edit-preset-save">
+                            <p className="edit-preset-section-title">よく使う設定として保存</p>
+                            <div className="edit-preset-save-row">
+                              <input
+                                className="edit-preset-name-input"
+                                type="text"
+                                placeholder="プリセット名"
+                                value={editPresetName}
+                                onChange={(e) => setEditPresetName(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') saveEditPreset() }}
+                              />
+                              <button
+                                className="btn-edit-preset-save"
+                                onClick={saveEditPreset}
+                                disabled={!editPresetName.trim()}
+                                type="button"
+                              >
+                                保存
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          className="btn-simple-next"
+                          onClick={() => {
+                            setMmmError('')
+                            if (!mmmEventForm.title.trim() || !mmmEventForm.date.trim() || !mmmEventForm.venue.trim()) {
+                              setMmmError('MMMイベント告知では、イベント名・開催日・会場を入力してください。')
+                              return
+                            }
+                            setAiTheme(buildMmmTheme(mmmEventForm))
+                            setSimpleStep(2)
+                          }}
+                        >
+                          AI自動作成
+                        </button>
                       </div>
-                    </div>
-                    <button
-                      className="btn-simple-next"
-                      onClick={() => setSimpleStep(2)}
-                      disabled={!aiTheme.trim()}
-                    >
-                      AI自動作成
-                    </button>
+                    ) : simpleTemplateType && simpleTemplateType !== 'custom' ? (
+                      /* Phase19-S: テンプレート別フォーム */
+                      <>
+                        <SimpleTemplateForms
+                          templateType={simpleTemplateType}
+                          freeDiagnosisForm={freeDiagnosisForm}
+                          setFreeDiagnosisForm={setFreeDiagnosisForm}
+                          noteArticleForm={noteArticleForm}
+                          setNoteArticleForm={setNoteArticleForm}
+                          youtubeVideoForm={youtubeVideoForm}
+                          setYoutubeVideoForm={setYoutubeVideoForm}
+                          musicCommunityForm={musicCommunityForm}
+                          setMusicCommunityForm={setMusicCommunityForm}
+                        />
+                        {missingTemplateInputs.length > 0 && (
+                          <div className="simple-missing-guide">
+                            <p className="simple-missing-guide-title">あと少しです：</p>
+                            <ul className="simple-missing-guide-list">
+                              {missingTemplateInputs.map((m) => <li key={m}>・{m}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        <button
+                          className="btn-simple-next"
+                          disabled={missingTemplateInputs.length > 0}
+                          onClick={() => {
+                            const theme = buildSimpleThemeFromTemplate()
+                            setAiTheme(theme)
+                            setSimpleStep(2)
+                          }}
+                        >
+                          AI自動作成
+                        </button>
+                      </>
+                    ) : simpleTemplateType === 'custom' ? (
+                      /* 自由入力：既存テーマ入力フロー */
+                      <>
+                        <input
+                          className="ai-generator-input simple-step-input"
+                          type="text"
+                          placeholder="テーマを入力..."
+                          value={aiTheme}
+                          onChange={(e) => setAiTheme(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && aiTheme.trim()) setSimpleStep(2) }}
+                        />
+                        <div className="image-source-selector">
+                          <p className="image-source-label">画像の作り方</p>
+                          <div className="image-source-options">
+                            <label className="image-source-option">
+                              <input
+                                type="radio"
+                                name="imageSourceMode"
+                                value="ai"
+                                checked={imageSourceMode === 'ai'}
+                                onChange={() => setImageSourceMode('ai')}
+                              />
+                              AI画像を生成
+                            </label>
+                            <label className="image-source-option">
+                              <input
+                                type="radio"
+                                name="imageSourceMode"
+                                value="upload"
+                                checked={imageSourceMode === 'upload'}
+                                onChange={() => setImageSourceMode('upload')}
+                              />
+                              自分の画像を使う
+                            </label>
+                          </div>
+                          {imageSourceMode === 'upload' && (
+                            <div className="user-image-upload">
+                              <p className="user-image-upload-hint">自分の画像を使うと、AI画像生成を待たずに動画化できます。</p>
+                              <div className="user-image-upload-header">
+                                <label className="btn-user-image-upload">
+                                  画像をアップロード
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    onChange={handleUserImageUpload}
+                                  />
+                                </label>
+                              </div>
+                              {userUploadedImages.length > 0 && (
+                                <div className="user-image-upload-preview">
+                                  <p className="user-image-upload-count">アップロード済み画像：{userUploadedImages.length}枚</p>
+                                  <div className="user-image-upload-grid">
+                                    {userUploadedImages.map((image) => (
+                                      <div className="user-image-upload-item" key={image.id}>
+                                        <img src={image.url} alt={image.name} />
+                                        <span title={image.name}>{image.name}</span>
+                                        <button onClick={() => removeUserUploadedImage(image.id)}>削除</button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {/* Phase19-G: 画像品質モード */}
+                        {imageSourceMode === 'ai' && (
+                          <div className="image-quality-selector">
+                            <p className="image-quality-label">画像品質</p>
+                            <div className="image-quality-options">
+                              <label className="image-quality-option">
+                                <input
+                                  type="radio"
+                                  name="imageQuality"
+                                  value="standard"
+                                  checked={imageQualityMode === 'standard'}
+                                  onChange={() => setImageQualityMode('standard')}
+                                  disabled={costMode === 'save'}
+                                />
+                                <span>標準</span>
+                              </label>
+                              <label className="image-quality-option image-quality-option--high">
+                                <input
+                                  type="radio"
+                                  name="imageQuality"
+                                  value="high"
+                                  checked={imageQualityMode === 'high'}
+                                  onChange={() => setImageQualityMode('high')}
+                                  disabled={costMode === 'save'}
+                                />
+                                <span>高品質（推奨）</span>
+                              </label>
+                            </div>
+                          </div>
+                        )}
+                        {/* Phase19-J: 節約モード / Phase19-Z: コストモードカード */}
+                        {imageSourceMode === 'ai' && (
+                          <div className="cost-mode-selector">
+                            <p className="cost-mode-label">生成コスト</p>
+                            <div className={`cost-mode-card cost-mode-card--${costMode}`}>
+                              <div className="cost-mode-card-header">
+                                <span className="cost-mode-card-title">
+                                  {costMode === 'save' ? '現在：おすすめ節約モード' : '現在：フル生成モード'}
+                                </span>
+                                {costMode === 'save' ? (
+                                  <span className="cost-mode-badge cost-mode-badge--recommended">おすすめ</span>
+                                ) : (
+                                  <span className="cost-mode-badge cost-mode-badge--warning">⚠ コスト注意</span>
+                                )}
+                              </div>
+                              <ul className="cost-mode-card-details">
+                                <li>AI画像：{costMode === 'save' ? '5枚生成' : '最大14枚生成'}</li>
+                                <li>利用枠：{costMode === 'save' ? '少なめ' : '多め'}</li>
+                                <li>{costMode === 'save' ? '通常はこちらがおすすめです' : '必要な場合のみ使用してください'}</li>
+                              </ul>
+                            </div>
+                            <div className="cost-mode-options">
+                              <label className="cost-mode-option">
+                                <input
+                                  type="radio"
+                                  name="costMode"
+                                  value="save"
+                                  checked={costMode === 'save'}
+                                  onChange={() => setCostMode('save')}
+                                />
+                                <span>おすすめ：節約モード</span>
+                              </label>
+                              <label className="cost-mode-option">
+                                <input
+                                  type="radio"
+                                  name="costMode"
+                                  value="normal"
+                                  checked={costMode === 'normal'}
+                                  onChange={() => setCostMode('normal')}
+                                />
+                                <span>フル生成モード</span>
+                              </label>
+                            </div>
+                            <p className="cost-mode-description">
+                              {costMode === 'save'
+                                ? '節約モードでは、AI画像を5枚生成して動画内で繰り返し利用します。'
+                                : 'フル生成モードでは、最大14枚のAI画像を生成します。'}
+                            </p>
+                          </div>
+                        )}
+                        {/* Phase18-F: テーマサジェスト */}
+                        <div className="simple-suggestions">
+                          <p className="simple-suggestion-title">おすすめテーマ</p>
+                          <div className="simple-suggestion-chips">
+                            {SIMPLE_THEME_SUGGESTIONS.map((suggestion) => (
+                              <button
+                                key={suggestion}
+                                className={`simple-suggestion-chip${aiTheme === suggestion ? ' active' : ''}`}
+                                onClick={() => setAiTheme(suggestion)}
+                              >
+                                {suggestion}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {/* Phase19-E: 世界観タグ */}
+                        <div className="visual-style-tags">
+                          <p className="visual-style-tags-label">動画の雰囲気</p>
+                          <div className="visual-style-tags-chips">
+                            {VISUAL_STYLE_TAG_OPTIONS.map((tag) => (
+                              <button
+                                key={tag}
+                                className={`visual-style-tag-chip${visualStyleTags.includes(tag) ? ' visual-style-tag-chip--active' : ''}`}
+                                onClick={() => toggleVisualStyleTag(tag)}
+                                type="button"
+                              >
+                                {tag}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {/* Phase19-F: 編集プリセット */}
+                        <div className="edit-preset-panel">
+                          <div className="edit-preset-apply">
+                            <p className="edit-preset-section-title">保存した設定</p>
+                            <div className="edit-preset-apply-row">
+                              <select
+                                className="edit-preset-select"
+                                value={selectedEditPresetId}
+                                onChange={(e) => setSelectedEditPresetId(e.target.value)}
+                              >
+                                <option value="">プリセットを選択...</option>
+                                {editPresets.map((p) => (
+                                  <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                              </select>
+                              <button
+                                className="btn-edit-preset-apply"
+                                onClick={() => applyEditPreset(selectedEditPresetId)}
+                                disabled={!selectedEditPresetId}
+                                type="button"
+                              >
+                                適用
+                              </button>
+                              <button
+                                className="btn-edit-preset-delete"
+                                onClick={() => deleteEditPreset(selectedEditPresetId)}
+                                disabled={!selectedEditPresetId || DEFAULT_EDIT_PRESETS.some((p) => p.id === selectedEditPresetId)}
+                                type="button"
+                              >
+                                削除
+                              </button>
+                            </div>
+                            {selectedEditPresetId && (() => {
+                              const p = editPresets.find((ep) => ep.id === selectedEditPresetId)
+                              return p ? (
+                                <p className="edit-preset-preview">
+                                  雰囲気：{p.visualStyleTags.join(' / ')}
+                                  {p.bgmFileName ? ` ／ BGM：${p.bgmFileName}` : ''}
+                                  {p.ctaLabel ? ` ／ CTA：${p.ctaLabel}` : ''}
+                                </p>
+                              ) : null
+                            })()}
+                          </div>
+                          <div className="edit-preset-save">
+                            <p className="edit-preset-section-title">よく使う設定として保存</p>
+                            <div className="edit-preset-save-row">
+                              <input
+                                className="edit-preset-name-input"
+                                type="text"
+                                placeholder="プリセット名"
+                                value={editPresetName}
+                                onChange={(e) => setEditPresetName(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') saveEditPreset() }}
+                              />
+                              <button
+                                className="btn-edit-preset-save"
+                                onClick={saveEditPreset}
+                                disabled={!editPresetName.trim()}
+                                type="button"
+                              >
+                                保存
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        {missingTemplateInputs.length > 0 && (
+                          <div className="simple-missing-guide">
+                            <p className="simple-missing-guide-title">あと少しです：</p>
+                            <ul className="simple-missing-guide-list">
+                              {missingTemplateInputs.map((m) => <li key={m}>・{m}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        <button
+                          className="btn-simple-next"
+                          onClick={() => setSimpleStep(2)}
+                          disabled={!aiTheme.trim()}
+                        >
+                          AI自動作成
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 )}
 
@@ -5118,12 +6605,13 @@ export default function App() {
                     </p>
                     <p className="simple-step-theme">テーマ：{aiTheme}</p>
                     <ul className="simple-step-content-list">
-                      <li>14枚の画像を自動生成</li>
+                      {imageSourceMode === 'ai' ? (
+                        <li>14枚のAI画像を自動生成</li>
+                      ) : (
+                        <li>アップロード画像 {userUploadedImages.length}枚を動画素材として使用</li>
+                      )}
                       <li>テキストを自動作成</li>
                       <li>ショート動画を自動生成</li>
-                      {userUploadedImages.length > 0 && (
-                        <li>アップロード画像：{userUploadedImages.length}枚（次フェーズで動画素材として利用）</li>
-                      )}
                     </ul>
                     <div className="simple-step-actions">
                       <button className="btn-simple-back" onClick={() => setSimpleStep(1)}>戻る</button>
@@ -5141,27 +6629,94 @@ export default function App() {
                 {simpleStep === 3 && (
                   <div className="simple-step-card simple-step-card--status">
                     {factoryRunning ? (
-                      <p className="simple-step-status">AI自動作成中です</p>
+                      <div className="simple-factory-progress">
+                        {factoryStepNum === 2 && !factoryStep.includes('アップロード') && factoryCurrentImageIndex != null && factoryTotalImageCount != null ? (
+                          <>
+                            <p className="simple-factory-status-emoji">🎨</p>
+                            <p className="simple-factory-status-title">AI画像生成中</p>
+                            <p className="simple-factory-image-count">
+                              {factoryCurrentImageIndex} / {factoryTotalImageCount} 枚目
+                            </p>
+                            {Math.ceil((factoryTotalImageCount - factoryCurrentImageIndex) * 50 / 60) > 0 && (
+                              <p className="simple-factory-remaining">
+                                残り約 {Math.ceil((factoryTotalImageCount - factoryCurrentImageIndex) * 50 / 60)} 分
+                              </p>
+                            )}
+                          </>
+                        ) : factoryStep.includes('アップロード') ? (
+                          <>
+                            <p className="simple-factory-status-emoji">⚡</p>
+                            <p className="simple-factory-status-title">アップロード画像を反映中</p>
+                            <p className="simple-factory-status-sub">AI画像生成をスキップしています</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="simple-factory-status-emoji">
+                              {factoryStepNum === 1 ? '📝' : factoryStepNum === 3 ? '🧠' : factoryStepNum === 4 ? '⭐' : factoryStepNum === 5 ? '🎯' : factoryStepNum === 6 ? '✍️' : factoryStepNum === 7 ? '🎬' : '🏭'}
+                            </p>
+                            <p className="simple-factory-status-title">AI自動作成中</p>
+                            <p className="simple-factory-status-sub">{factoryStep.replace(/^Step \d\/7: /, '')}</p>
+                          </>
+                        )}
+                        <div className="simple-factory-bar-wrap">
+                          <div className="simple-factory-bar-fill" style={{ width: `${factoryProgress}%` }} />
+                        </div>
+                        <p className="simple-factory-bar-pct">{factoryProgress}%</p>
+                      </div>
                     ) : renderStatus === 'completed' ? (
                       <div className="render-complete-priority">
                         <p className="render-complete-priority-title">🎬 完成動画ができました！</p>
                         {renderPreviewUrl ? (
-                          <video
-                            className="render-complete-video render-complete-video--priority"
-                            src={renderPreviewUrl}
-                            controls
-                            playsInline
-                          />
+                          videoPreviewLoading ? (
+                            <div className="video-preview-loading">
+                              <p className="video-preview-loading-icon">🎬</p>
+                              <p className="video-preview-loading-title">動画を準備しています</p>
+                              <p className="video-preview-loading-sub">プレビュー生成中...</p>
+                              <div className="video-preview-loading-bar">
+                                <div className="video-preview-loading-bar-fill" />
+                              </div>
+                            </div>
+                          ) : videoPreviewError ? (
+                            <div className="video-preview-error">
+                              <p className="video-preview-error-msg">⚠ {videoPreviewError}</p>
+                              <button
+                                className="btn-video-retry"
+                                onClick={() => checkVideoReady(renderPreviewUrl)}
+                              >
+                                ↻ プレビュー再取得
+                              </button>
+                            </div>
+                          ) : (
+                            <video
+                              className="render-complete-video render-complete-video--priority"
+                              src={renderPreviewUrl}
+                              controls
+                              playsInline
+                              onLoadedData={() => setVideoPreviewLoading(false)}
+                              onCanPlay={() => setVideoPreviewLoading(false)}
+                              onError={() => setVideoPreviewError('動画の読み込みに失敗しました。再取得をお試しください。')}
+                            />
+                          )
                         ) : (
                           <p className="render-preview-missing">
                             動画生成は完了しましたが、プレビューURLが見つかりません。
                             「動画を開く」または「ダウンロード」から確認してください。
                           </p>
                         )}
-                        <div className="render-complete-actions render-complete-actions--priority">
-                          <button className="btn-download-mp4" onClick={downloadVideo}>
-                            動画をダウンロード
+                        <div className="render-complete-cta-row">
+                          <button className="btn-download-mp4 btn-download-mp4--large" onClick={downloadVideo}>
+                            ⬇ MP4ダウンロード
                           </button>
+                          <a
+                            className="btn-open-video btn-open-video--large"
+                            href={latestViewUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            🔗 新しいタブで開く
+                          </a>
+                        </div>
+                        <div className="render-complete-actions render-complete-actions--priority">
                           <button
                             className="btn-sns-post btn-sns-post--instagram"
                             onClick={() => window.open('https://www.instagram.com/', '_blank')}
@@ -5190,11 +6745,149 @@ export default function App() {
                             <li>投稿記録を残す</li>
                           </ol>
                         </div>
+
+                        {/* Phase19-E: 生成後編集パネル */}
+                        <div className="post-edit-panel">
+                          <button
+                            className="post-edit-panel-toggle"
+                            onClick={() => setSlideEditorOpen((v) => !v)}
+                          >
+                            {slideEditorOpen ? '▲ 編集パネルを閉じる' : '✏ 文字・画像・BGMを修正する'}
+                          </button>
+
+                          {slideEditorOpen && (
+                            <div className="post-edit-panel-body">
+                              {/* BGM差し替え */}
+                              <div className="post-edit-section">
+                                <p className="post-edit-section-title">BGM差し替え</p>
+                                <label className="bgm-upload-label">
+                                  {bgmUploading ? 'アップロード中...' : bgmFileName ? `現在：${bgmFileName}` : 'mp3 / wav / m4a を選択'}
+                                  <input
+                                    type="file"
+                                    accept=".mp3,.wav,.m4a,audio/*"
+                                    disabled={bgmUploading}
+                                    onChange={handleBgmUpload}
+                                  />
+                                </label>
+                                {bgmUploadError && <p className="post-edit-error">{bgmUploadError}</p>}
+                                {bgmFileName && !bgmUploadError && (
+                                  <p className="post-edit-success">BGMを「{bgmFileName}」に設定しました</p>
+                                )}
+                              </div>
+
+                              {/* Phase19-G: QRコード差し替え */}
+                              <div className="post-edit-section">
+                                <p className="post-edit-section-title">QRコード差し替え（14枚目）</p>
+                                <label className="bgm-upload-label">
+                                  {qrUploading ? 'アップロード中...' : qrFileName ? `現在：${qrFileName}` : 'QR画像を選択（PNG / JPG）'}
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    disabled={qrUploading}
+                                    onChange={handleQrUpload}
+                                  />
+                                </label>
+                                {qrUploadError && <p className="post-edit-error">{qrUploadError}</p>}
+                                {qrFileName && !qrUploadError && (
+                                  <p className="post-edit-success">QRコードを「{qrFileName}」に変更しました。再生成で反映されます。</p>
+                                )}
+                              </div>
+
+                              {/* スライドテキスト編集 + 画像差し替え */}
+                              <div className="post-edit-section">
+                                <p className="post-edit-section-title">スライド文字を修正</p>
+                                <div className="slide-text-editor">
+                                  {slides.map((slide, idx) => (
+                                    <div key={slide.id} className="slide-text-editor-item">
+                                      <p className="slide-text-editor-index">Slide {idx + 1}</p>
+                                      <label className="slide-text-field">
+                                        <span>見出し</span>
+                                        <input
+                                          type="text"
+                                          value={slide.headline}
+                                          onChange={(e) => handleSlideTextChange(slide.id, 'headline', e.target.value)}
+                                        />
+                                      </label>
+                                      <label className="slide-text-field">
+                                        <span>サブ</span>
+                                        <input
+                                          type="text"
+                                          value={slide.subline ?? ''}
+                                          onChange={(e) => handleSlideTextChange(slide.id, 'subline', e.target.value)}
+                                        />
+                                      </label>
+                                      <label className="slide-text-field">
+                                        <span>強調</span>
+                                        <input
+                                          type="text"
+                                          value={slide.emphasis ?? ''}
+                                          onChange={(e) => handleSlideTextChange(slide.id, 'emphasis', e.target.value)}
+                                        />
+                                      </label>
+                                      <div className="slide-image-replace">
+                                        <label className="slide-image-replace-label">
+                                          {slideImageReplacing === slide.id ? '差し替え中...' : '画像を差し替え'}
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            disabled={slideImageReplacing === slide.id}
+                                            onChange={(e) => handleSlideImageReplace(slide.id, e)}
+                                          />
+                                        </label>
+                                        {slideImageReplaceError[slide.id] && (
+                                          <p className="post-edit-error">{slideImageReplaceError[slide.id]}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* 再生成ボタン */}
+                              <button
+                                className="btn-rerender-after-edit"
+                                onClick={async () => {
+                                  setSlideEditorOpen(false)
+                                  await saveToServer()
+                                  startRender()
+                                }}
+                                disabled={isRendering || isPreparingRender}
+                              >
+                                修正内容で動画を再生成
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ) : null}
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Phase19-G: PCレイアウト右カラムラッパー (simpleMode step3) */}
+            <div className={simpleMode && simpleStep === 3 ? 'simple-pc-right' : undefined}>
+
+            {/* Phase19-P: タブナビゲーション */}
+            {simpleMode && simpleStep === 3 && (
+              <nav className="simple-tab-nav">
+                {(
+                  [
+                    { key: 'create', label: '作成' },
+                    { key: 'edit',   label: '編集' },
+                    { key: 'post',   label: '投稿' },
+                    { key: 'manage', label: '管理' },
+                  ] as const
+                ).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    className={`simple-tab-btn${activeSimpleTab === key ? ' simple-tab-btn--active' : ''}`}
+                    onClick={() => setActiveSimpleTab(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
             )}
 
             {/* テーマ入力 (Phase18-A: 最上部に配置) — 通常モードのみ */}
@@ -5220,8 +6913,21 @@ export default function App() {
                   {isGenerating ? '生成中...' : 'ストーリー生成'}
                 </button>
               </div>
-              {generateError && (
+              {generateError && !quotaError && (
                 <p className="ai-generator-error">{generateError}</p>
+              )}
+              {quotaError && (
+                <div className="quota-error-panel">
+                  <p className="quota-error-title">OpenAI APIの利用枠が不足しています</p>
+                  <ol className="quota-error-steps">
+                    <li>Billing のクレジット残高を確認</li>
+                    <li>Usage の利用状況を確認</li>
+                    <li>Limits の月間上限を確認</li>
+                    <li>Project / Organization の予算設定を確認</li>
+                  </ol>
+                  <p className="quota-error-alt">「自分の画像を使う」を選ぶとAI画像生成なしで動画化できます。</p>
+                  <button className="btn-quota-error-dismiss" onClick={() => setQuotaError(false)} type="button">閉じる</button>
+                </div>
               )}
               {generateSuccess && !generateError && (
                 <p className="ai-generator-success">14枚のストーリーを生成しました</p>
@@ -5230,18 +6936,22 @@ export default function App() {
             )}
 
             {/* 🏭 AI Reel Factory (Phase16-L / Phase18-B) */}
-            {(!simpleMode || simpleStep === 3) && (
+            {(!simpleMode || simpleStep === 3) && showInTab('create') && (
             <FactoryPanel
               hideHistory={simpleMode}
               factoryRunning={factoryRunning}
               factoryStep={factoryStep}
               factoryStepNum={factoryStepNum}
+              factoryProgress={factoryProgress}
+              factoryCurrentImageIndex={factoryCurrentImageIndex}
+              factoryTotalImageCount={factoryTotalImageCount}
               factoryError={factoryError}
               factoryLog={factoryLog}
               factoryNotice={factoryNotice}
               factoryWarning={factoryWarning}
               isPipelineDisabled={isPipelineDisabled || !aiTheme.trim()}
               hasTheme={aiTheme.trim().length > 0}
+              reelAiConfig={reelAiConfig}
               generatedSlides={slides
                 .filter((s): s is typeof s & { image: string } => !!s.image?.startsWith('generated/'))
                 .map((s) => ({ id: s.id, headline: s.headline, image: s.image }))}
@@ -5338,25 +7048,64 @@ export default function App() {
                 <p className="render-output-empty-hint">テーマを入力して「AI自動作成」を押すと、ここに完成動画が表示されます。</p>
               </div>
             )}
-            {(!simpleMode || simpleStep === 3) && renderStatus === 'completed' && !isRendering && (
+            {(!simpleMode || (simpleStep === 3 && activeSimpleTab !== 'edit')) && renderStatus === 'completed' && !isRendering && (
               <div className="render-complete-card">
+                {/* Phase19-P: 作成タブ — 動画プレビュー・DL */}
+                {showInTab('create') && (<>
                 <div className="render-complete-card-header">
                   🎬 完成動画ができました！
                 </div>
                 {renderPreviewUrl ? (
-                  <video
-                    className="render-complete-video"
-                    src={renderPreviewUrl}
-                    controls
-                    muted
-                    playsInline
-                  />
+                  videoPreviewLoading ? (
+                    <div className="video-preview-loading">
+                      <p className="video-preview-loading-icon">🎬</p>
+                      <p className="video-preview-loading-title">動画を準備しています</p>
+                      <p className="video-preview-loading-sub">プレビュー生成中...</p>
+                      <div className="video-preview-loading-bar">
+                        <div className="video-preview-loading-bar-fill" />
+                      </div>
+                    </div>
+                  ) : videoPreviewError ? (
+                    <div className="video-preview-error">
+                      <p className="video-preview-error-msg">⚠ {videoPreviewError}</p>
+                      <button
+                        className="btn-video-retry"
+                        onClick={() => checkVideoReady(renderPreviewUrl)}
+                      >
+                        ↻ プレビュー再取得
+                      </button>
+                    </div>
+                  ) : (
+                    <video
+                      className="render-complete-video"
+                      src={renderPreviewUrl}
+                      controls
+                      muted
+                      playsInline
+                      onLoadedData={() => setVideoPreviewLoading(false)}
+                      onCanPlay={() => setVideoPreviewLoading(false)}
+                      onError={() => setVideoPreviewError('動画の読み込みに失敗しました。再取得をお試しください。')}
+                    />
+                  )
                 ) : (
                   <p className="render-preview-missing">
                     動画生成は完了しましたが、プレビューURLが見つかりません。
                     「動画を開く」または「ダウンロード」から確認してください。
                   </p>
                 )}
+                <div className="render-complete-cta-row">
+                  <button className="btn-download-mp4 btn-download-mp4--large" onClick={downloadVideo}>
+                    ⬇ MP4ダウンロード
+                  </button>
+                  <a
+                    className="btn-open-video btn-open-video--large"
+                    href={latestViewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    🔗 新しいタブで開く
+                  </a>
+                </div>
                 <ul className="render-complete-specs">
                   <li>1080 × 1920 縦型動画</li>
                   <li>YouTube Shorts / Instagram Reels 対応</li>
@@ -5395,6 +7144,9 @@ export default function App() {
                     再レンダリング
                   </button>
                 </div>
+                </>)}
+                {/* Phase19-P: 投稿タブ — SNS・チェックリスト */}
+                {showInTab('post') && (<>
                 {/* SNS投稿ボタン群 (Phase18-C) */}
                 <div className="sns-post-actions">
                   <p className="sns-post-actions-title">SNSへ投稿</p>
@@ -5456,6 +7208,339 @@ export default function App() {
                     <p className="sns-post-checklist-complete">投稿完了おつかれさまでした！</p>
                   )}
                 </div>
+
+                {/* Phase19-I: MMMイベント投稿前チェックリスト */}
+                {simpleTemplateId === 'mmm-event' && (<>
+                  <div className="event-post-checklist">
+                    <div className="event-post-checklist-header">
+                      <p className="event-post-checklist-title">投稿前チェック</p>
+                      {isEventPostChecklistComplete ? (
+                        <p className="event-post-checklist-complete">投稿準備完了</p>
+                      ) : (
+                        <p className="event-post-checklist-progress">
+                          {eventPostChecklistCount} / {EVENT_POST_CHECKLIST_ITEMS.length} 完了
+                          {EVENT_POST_CHECKLIST_ITEMS.length - eventPostChecklistCount > 0 && (
+                            <span className="event-post-checklist-remaining">
+                              　あと{EVENT_POST_CHECKLIST_ITEMS.length - eventPostChecklistCount}つ確認すると投稿準備完了です
+                            </span>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                    <ul className="event-post-checklist-list">
+                      {EVENT_POST_CHECKLIST_ITEMS.map((item) => (
+                        <li key={item.key}>
+                          <label className="event-post-checklist-item">
+                            <input
+                              type="checkbox"
+                              checked={eventPostChecklist[item.key]}
+                              onChange={() => toggleEventPostChecklist(item.key)}
+                            />
+                            <span>{item.label}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="event-post-date-row">
+                      <label className="event-post-date-label">投稿日</label>
+                      <input
+                        type="date"
+                        className="event-post-date-input"
+                        value={eventPostDate}
+                        onChange={(e) => setEventPostDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </>)}
+                </>)}
+                {/* Phase19-P: 管理タブ — ダッシュボード・記録・バックアップ */}
+                {showInTab('manage') && (<>
+                {/* Phase19-O: 運用ダッシュボード */}
+                {simpleTemplateId === 'mmm-event' && (
+                  <div className="event-dashboard-panel">
+                    <p className="event-dashboard-title">運用ダッシュボード</p>
+                    <div className="event-dashboard-stats">
+                      <div className="event-dashboard-stat">
+                        <span className="event-dashboard-stat-label">今月の投稿数</span>
+                        <strong className="event-dashboard-stat-value">{eventDashboardStats.thisMonthCount}件</strong>
+                      </div>
+                      <div className="event-dashboard-stat">
+                        <span className="event-dashboard-stat-label">URL付き投稿</span>
+                        <strong className="event-dashboard-stat-value">{eventDashboardStats.urlCount}件</strong>
+                      </div>
+                      <div className="event-dashboard-stat">
+                        <span className="event-dashboard-stat-label">総投稿数</span>
+                        <strong className="event-dashboard-stat-value">{eventDashboardStats.total}件</strong>
+                      </div>
+                    </div>
+
+                    {eventDashboardStats.total > 0 && (
+                      <div className="event-dashboard-sns">
+                        <p className="event-dashboard-section-label">SNS別</p>
+                        <div className="event-dashboard-sns-row">
+                          {(
+                            [
+                              { key: 'instagram', label: 'Instagram' },
+                              { key: 'x', label: 'X' },
+                              { key: 'tiktok', label: 'TikTok' },
+                              { key: 'youtube', label: 'YouTube' },
+                              { key: 'other', label: 'その他' },
+                            ] as const
+                          ).map(({ key, label }) =>
+                            eventDashboardStats.snsCounts[key] > 0 ? (
+                              <span key={key} className="event-dashboard-sns-badge">
+                                {label} {eventDashboardStats.snsCounts[key]}
+                              </span>
+                            ) : null
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {eventDashboardStats.recentRecords.length > 0 && (
+                      <div className="event-dashboard-recent">
+                        <p className="event-dashboard-section-label">直近投稿</p>
+                        <ul className="event-dashboard-recent-list">
+                          {eventDashboardStats.recentRecords.map((r) => (
+                            <li key={r.id} className="event-dashboard-recent-item">
+                              <span className="event-dashboard-recent-date">{r.postDate || r.createdAt.slice(0, 10)}</span>
+                              <span className="event-dashboard-recent-sns">
+                                {EVENT_POST_RECORD_SNS_OPTIONS.find((o) => o.value === r.sns)?.label ?? r.sns}
+                              </span>
+                              <span className="event-dashboard-recent-title">{r.eventTitle || '（タイトルなし）'}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {eventDashboardStats.unpostedPresets.length > 0 && (
+                      <div className="event-dashboard-unposted">
+                        <p className="event-dashboard-section-label">未投稿イベント</p>
+                        <ul className="event-dashboard-unposted-list">
+                          {eventDashboardStats.unpostedPresets.map((p) => (
+                            <li key={p.id} className="event-dashboard-unposted-item">
+                              {p.name}
+                              {p.date && <span className="event-dashboard-unposted-date"> — {p.date}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="event-dashboard-actions">
+                      <button
+                        className="btn-event-dashboard-action"
+                        onClick={exportEventPostRecordsCsv}
+                        disabled={filteredEventPostRecords.length === 0}
+                      >
+                        表示中のCSV出力
+                      </button>
+                      <button
+                        className="btn-event-dashboard-action"
+                        onClick={exportReelBackupJson}
+                      >
+                        JSONバックアップ
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Phase19-K: MMMイベント投稿記録 */}
+                {simpleTemplateId === 'mmm-event' && (
+                  <div className="event-post-record-panel">
+                    <div className="event-post-record-header">
+                      <p className="event-post-record-title">投稿記録を残す</p>
+                      <button
+                        className="btn-event-post-record-csv"
+                        onClick={exportEventPostRecordsCsv}
+                        disabled={filteredEventPostRecords.length === 0}
+                      >
+                        表示中のCSV出力
+                      </button>
+                    </div>
+
+                    {/* Phase19-M: 絞り込みUI */}
+                    {eventPostRecords.length > 0 && (
+                      <div className="event-post-filter">
+                        <div className="event-post-filter-row">
+                          <label className="event-post-filter-field">
+                            <span className="event-post-filter-label">SNS</span>
+                            <select
+                              className="event-post-filter-select"
+                              value={eventPostFilter.sns}
+                              onChange={(e) => setEventPostFilter((prev) => ({ ...prev, sns: e.target.value }))}
+                            >
+                              <option value="all">すべて</option>
+                              {EVENT_POST_RECORD_SNS_OPTIONS.map(({ value, label }) => (
+                                <option key={value} value={value}>{label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="event-post-filter-field">
+                            <span className="event-post-filter-label">URL</span>
+                            <select
+                              className="event-post-filter-select"
+                              value={eventPostFilter.urlStatus}
+                              onChange={(e) => setEventPostFilter((prev) => ({ ...prev, urlStatus: e.target.value }))}
+                            >
+                              <option value="all">すべて</option>
+                              <option value="with">URLあり</option>
+                              <option value="without">URLなし</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div className="event-post-filter-row">
+                          <label className="event-post-filter-field event-post-filter-field--grow">
+                            <span className="event-post-filter-label">イベント名・メモ検索</span>
+                            <input
+                              type="text"
+                              className="event-post-filter-input"
+                              value={eventPostFilter.keyword}
+                              onChange={(e) => setEventPostFilter((prev) => ({ ...prev, keyword: e.target.value }))}
+                              placeholder="キーワード"
+                            />
+                          </label>
+                          <label className="event-post-filter-field">
+                            <span className="event-post-filter-label">投稿日</span>
+                            <input
+                              type="date"
+                              className="event-post-filter-input"
+                              value={eventPostFilter.postDate}
+                              onChange={(e) => setEventPostFilter((prev) => ({ ...prev, postDate: e.target.value }))}
+                            />
+                          </label>
+                        </div>
+                        <div className="event-post-filter-footer">
+                          <span className="event-post-filter-count">
+                            表示中：{filteredEventPostRecords.length} / {eventPostRecords.length} 件
+                          </span>
+                          {isEventPostFilterActive && (
+                            <button
+                              className="btn-event-post-filter-reset"
+                              onClick={() => setEventPostFilter({ sns: 'all', keyword: '', postDate: '', urlStatus: 'all' })}
+                            >
+                              絞り込み解除
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* レポート */}
+                    {eventPostReport.total > 0 && (
+                      <div className="event-post-record-report">
+                        <p className="event-post-record-report-total">イベント告知投稿数：{eventPostReport.total}件</p>
+                        <div className="event-post-record-report-grid">
+                          {EVENT_POST_RECORD_SNS_OPTIONS.map(({ value, label }) =>
+                            eventPostReport.counts[value] > 0 ? (
+                              <span key={value} className="event-post-record-report-item">
+                                {label}：{eventPostReport.counts[value]}件
+                              </span>
+                            ) : null
+                          )}
+                          {eventPostReport.urlCount > 0 && (
+                            <span className="event-post-record-report-item event-post-record-report-item--url">
+                              URL付き：{eventPostReport.urlCount}件
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* フォーム */}
+                    <div className="event-post-record-form">
+                      <div className="event-post-record-field">
+                        <span className="event-post-record-label">イベント名</span>
+                        <span className="event-post-record-event-name">
+                          {mmmEventForm.title || aiTheme || '未設定イベント'}
+                        </span>
+                      </div>
+                      <label className="event-post-record-field">
+                        <span className="event-post-record-label">SNS</span>
+                        <select
+                          className="event-post-record-select"
+                          value={eventPostRecordForm.sns}
+                          onChange={(e) => setEventPostRecordForm((prev) => ({ ...prev, sns: e.target.value as EventPostRecord['sns'] }))}
+                        >
+                          {EVENT_POST_RECORD_SNS_OPTIONS.map(({ value, label }) => (
+                            <option key={value} value={value}>{label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="event-post-record-field">
+                        <span className="event-post-record-label">投稿日</span>
+                        <input
+                          type="date"
+                          className="event-post-record-input"
+                          value={eventPostRecordForm.postDate}
+                          onChange={(e) => setEventPostRecordForm((prev) => ({ ...prev, postDate: e.target.value }))}
+                        />
+                      </label>
+                      <label className="event-post-record-field event-post-record-field--wide">
+                        <span className="event-post-record-label">投稿URL</span>
+                        <input
+                          type="text"
+                          className="event-post-record-input"
+                          value={eventPostRecordForm.postUrl}
+                          onChange={(e) => setEventPostRecordForm((prev) => ({ ...prev, postUrl: e.target.value }))}
+                          placeholder="https://..."
+                        />
+                      </label>
+                      <label className="event-post-record-field event-post-record-field--wide">
+                        <span className="event-post-record-label">メモ</span>
+                        <textarea
+                          className="event-post-record-textarea"
+                          value={eventPostRecordForm.memo}
+                          onChange={(e) => setEventPostRecordForm((prev) => ({ ...prev, memo: e.target.value }))}
+                          placeholder="反応や投稿時のメモ"
+                          rows={2}
+                        />
+                      </label>
+                      <button
+                        className="btn-event-post-record-save"
+                        onClick={saveEventPostRecord}
+                        disabled={!eventPostRecordForm.sns || !eventPostRecordForm.postDate}
+                      >
+                        投稿記録を保存
+                      </button>
+                    </div>
+
+                    {/* 一覧（最大5件・フィルター済み） */}
+                    {filteredEventPostRecords.length > 0 && (
+                      <ul className="event-post-record-list">
+                        {filteredEventPostRecords.slice(0, 5).map((record) => (
+                          <li key={record.id} className="event-post-record-item">
+                            <div className="event-post-record-item-main">
+                              <p className="event-post-record-item-header">
+                                {record.postDate} / {EVENT_POST_RECORD_SNS_OPTIONS.find((o) => o.value === record.sns)?.label ?? record.sns} / {record.eventTitle}
+                              </p>
+                              {record.postUrl && (
+                                <a
+                                  className="event-post-record-item-url"
+                                  href={record.postUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {record.postUrl}
+                                </a>
+                              )}
+                              {record.memo && (
+                                <p className="event-post-record-item-memo">メモ：{record.memo}</p>
+                              )}
+                            </div>
+                            <button
+                              className="btn-event-post-record-delete"
+                              onClick={() => deleteEventPostRecord(record.id)}
+                            >
+                              削除
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
 
                 <div className="posted-records-panel">
                   <div className="posted-records-header">
@@ -5615,6 +7700,35 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Phase19-N: 全データバックアップ */}
+                <div className="reel-backup-panel">
+                  <p className="reel-backup-title">JSONバックアップ</p>
+                  <div className="reel-backup-actions">
+                    <button
+                      className="btn-reel-backup"
+                      onClick={exportReelBackupJson}
+                    >
+                      バックアップ出力
+                    </button>
+                    <label className="btn-reel-backup btn-reel-backup--import">
+                      ファイルを選択して復元
+                      <input
+                        type="file"
+                        accept="application/json,.json"
+                        onChange={handleImportReelBackupJson}
+                      />
+                    </label>
+                  </div>
+                  {backupImportMessage && (
+                    <p className="reel-backup-message">{backupImportMessage}</p>
+                  )}
+                  {backupImportError && (
+                    <p className="reel-backup-error">{backupImportError}</p>
+                  )}
+                </div>
+                </>)}
+                {/* Phase19-P: 投稿タブ — SNS投稿文生成ボタン */}
+                {showInTab('post') && (<>
                 <button
                   className="btn-sns-caption"
                   onClick={generateSnsCaption}
@@ -5625,9 +7739,95 @@ export default function App() {
                 {snsCaptionError && (
                   <p className="sns-caption-error">{snsCaptionError}</p>
                 )}
+                </>)}
               </div>
             )}
-            {(!simpleMode || simpleStep === 3) && snsCaption && renderStatus === 'completed' && (
+            {/* Phase19-P: 編集タブパネル */}
+            {simpleMode && simpleStep === 3 && activeSimpleTab === 'edit' && (
+              renderStatus === 'completed' ? (
+                <div className="simple-edit-tab-panel">
+                  <div className="post-edit-panel">
+                    <button
+                      className="post-edit-panel-toggle"
+                      onClick={() => setSlideEditorOpen((v) => !v)}
+                    >
+                      {slideEditorOpen ? '▲ 編集パネルを閉じる' : '✏ 文字・画像・BGMを修正する'}
+                    </button>
+
+                    {slideEditorOpen && (
+                      <div className="post-edit-panel-body">
+                        <div className="post-edit-section">
+                          <p className="post-edit-section-title">BGM差し替え</p>
+                          <label className="bgm-upload-label">
+                            {bgmUploading ? 'アップロード中...' : bgmFileName ? `現在：${bgmFileName}` : 'mp3 / wav / m4a を選択'}
+                            <input type="file" accept=".mp3,.wav,.m4a,audio/*" disabled={bgmUploading} onChange={handleBgmUpload} />
+                          </label>
+                          {bgmUploadError && <p className="post-edit-error">{bgmUploadError}</p>}
+                          {bgmFileName && !bgmUploadError && <p className="post-edit-success">BGMを「{bgmFileName}」に設定しました</p>}
+                        </div>
+
+                        <div className="post-edit-section">
+                          <p className="post-edit-section-title">QRコード差し替え（14枚目）</p>
+                          <label className="bgm-upload-label">
+                            {qrUploading ? 'アップロード中...' : qrFileName ? `現在：${qrFileName}` : 'QR画像を選択（PNG / JPG）'}
+                            <input type="file" accept="image/*" disabled={qrUploading} onChange={handleQrUpload} />
+                          </label>
+                          {qrUploadError && <p className="post-edit-error">{qrUploadError}</p>}
+                          {qrFileName && !qrUploadError && <p className="post-edit-success">QRコードを「{qrFileName}」に変更しました。再生成で反映されます。</p>}
+                        </div>
+
+                        <div className="post-edit-section">
+                          <p className="post-edit-section-title">スライド文字を修正</p>
+                          <div className="slide-text-editor">
+                            {slides.map((slide, idx) => (
+                              <div key={slide.id} className="slide-text-editor-item">
+                                <p className="slide-text-editor-index">Slide {idx + 1}</p>
+                                <label className="slide-text-field">
+                                  <span>見出し</span>
+                                  <input type="text" value={slide.headline} onChange={(e) => handleSlideTextChange(slide.id, 'headline', e.target.value)} />
+                                </label>
+                                <label className="slide-text-field">
+                                  <span>サブ</span>
+                                  <input type="text" value={slide.subline ?? ''} onChange={(e) => handleSlideTextChange(slide.id, 'subline', e.target.value)} />
+                                </label>
+                                <label className="slide-text-field">
+                                  <span>強調</span>
+                                  <input type="text" value={slide.emphasis ?? ''} onChange={(e) => handleSlideTextChange(slide.id, 'emphasis', e.target.value)} />
+                                </label>
+                                <div className="slide-image-replace">
+                                  <label className="slide-image-replace-label">
+                                    {slideImageReplacing === slide.id ? '差し替え中...' : '画像を差し替え'}
+                                    <input type="file" accept="image/*" disabled={slideImageReplacing === slide.id} onChange={(e) => handleSlideImageReplace(slide.id, e)} />
+                                  </label>
+                                  {slideImageReplaceError[slide.id] && <p className="post-edit-error">{slideImageReplaceError[slide.id]}</p>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button
+                          className="btn-rerender-after-edit"
+                          onClick={async () => { setSlideEditorOpen(false); await saveToServer(); startRender() }}
+                          disabled={isRendering || isPreparingRender}
+                        >
+                          修正内容で動画を再生成
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="simple-tab-empty">まず動画を作成すると、この機能が使えます。</p>
+              )
+            )}
+
+            {/* Phase19-P: 投稿・管理タブ 未生成時ヒント */}
+            {simpleMode && simpleStep === 3 && (activeSimpleTab === 'post' || activeSimpleTab === 'manage') && renderStatus !== 'completed' && (
+              <p className="simple-tab-empty">まず動画を作成すると、この機能が使えます。</p>
+            )}
+
+            {(!simpleMode || simpleStep === 3) && snsCaption && renderStatus === 'completed' && showInTab('post') && (
               <div className="sns-caption-panel">
                 <div className="sns-caption-panel-header">
                   <div className="sns-caption-panel-title-group">
@@ -6008,7 +8208,7 @@ export default function App() {
             )}
 
             {/* 📚 AI自動作成履歴 (かんたんモード Step3 のみ・完成動画の後に表示) */}
-            {simpleMode && simpleStep === 3 && (
+            {simpleMode && simpleStep === 3 && activeSimpleTab === 'manage' && (
               <div className="simple-history-section">
                 <FactoryHistoryPanel
                   factoryHistory={factoryHistory}
@@ -6028,7 +8228,7 @@ export default function App() {
                 />
               </div>
             )}
-            {simpleMode && simpleStep === 3 && !factoryRunning && (
+            {simpleMode && simpleStep === 3 && !factoryRunning && activeSimpleTab === 'create' && (
               <button
                 className="btn-simple-new"
                 onClick={() => { setSimpleStep(1); setFactoryWarning(''); setFactoryNotice(''); resetPostChecklist(); resetPostedRecords() }}
@@ -6607,6 +8807,8 @@ export default function App() {
           </p>
           </>
           )}
+
+            </div>{/* simple-pc-right wrapper */}
         </div>
 
         </div>{/* panel-left-body */}

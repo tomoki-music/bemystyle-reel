@@ -4,6 +4,7 @@ export type AIPresetKey =
   | 'session'
   | 'youtube_shorts'
   | 'instagram_reels'
+  | 'mmm_event'
 
 export interface GeneratedSlideContent {
   headline: string
@@ -19,6 +20,7 @@ export interface GeneratedStory {
     subtitle: string
     cta: string
   }
+  warning?: string
 }
 
 export type CustomPresetPayload = {
@@ -49,7 +51,8 @@ export type CustomPreset = {
 export async function generateStory(
   theme: string,
   presetKey?: AIPresetKey | '',
-  customPreset?: CustomPresetPayload | null
+  customPreset?: CustomPresetPayload | null,
+  visualStyleTags?: string[]
 ): Promise<GeneratedStory> {
   const res = await fetch('/api/generate-story', {
     method: 'POST',
@@ -58,12 +61,15 @@ export async function generateStory(
       theme,
       presetKey: presetKey || undefined,
       customPreset: customPreset || undefined,
+      visualStyleTags: visualStyleTags && visualStyleTags.length > 0 ? visualStyleTags : undefined,
     }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error((data as { message?: string }).message ?? `HTTP ${res.status}`)
+    const data = await res.json().catch(() => ({})) as { message?: string; errorType?: string }
+    const err = new Error(data.message ?? `HTTP ${res.status}`)
+    if (data.errorType === 'quota') (err as Error & { errorType: string }).errorType = 'quota'
+    throw err
   }
-  const data = (await res.json()) as { story: GeneratedStory }
-  return data.story
+  const data = (await res.json()) as { story: GeneratedStory; warning?: string }
+  return { ...data.story, warning: data.warning }
 }
