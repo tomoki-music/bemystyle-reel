@@ -6,7 +6,7 @@ import {
   staticFile,
   useCurrentFrame,
 } from "remotion";
-import { SLIDES } from "../data/slides";
+import { SLIDES, CTA_CONFIG } from "../data/slides";
 import { SLIDE_FRAMES, SLIDE_STARTS } from "../utils/timing";
 import { SlideContainer } from "../components/SlideContainer";
 
@@ -40,6 +40,7 @@ export const Reel: React.FC = () => {
               slide={slide}
               frame={frame - start}
               durationInFrames={duration}
+              ctaQrImage={slide.layout === 'cta' ? CTA_CONFIG.qrImage : undefined}
             />
           </Sequence>
         );

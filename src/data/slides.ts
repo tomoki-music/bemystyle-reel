@@ -21,3 +21,5 @@ export interface SlideData {
 }
 
 export const SLIDES: SlideData[] = slidesJson.slides as SlideData[];
+
+export const CTA_CONFIG: { qrImage: string } = (slidesJson as { cta?: { qrImage?: string } }).cta as { qrImage: string } ?? { qrImage: 'qr-singing.png' };
