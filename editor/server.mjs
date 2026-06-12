@@ -464,6 +464,10 @@ app.post('/api/render', (req, res) => {
     { cwd: ROOT_DIR, shell: false }
   )
 
+  child.stderr.on('data', (data) => {
+    console.error('[Remotion stderr]', data.toString().trimEnd())
+  })
+
   child.on('close', (code) => {
     if (code === 0) {
       try { copyFileSync(outputPath, LATEST_FILE) } catch (_) {}
@@ -476,11 +480,14 @@ app.post('/api/render', (req, res) => {
         downloadUrl: `/api/render/download/${filename}`,
       }
     } else {
-      renderState = { status: 'failed', startedAt: renderState.startedAt, finishedAt: new Date().toISOString(), error: `renderプロセスが終了コード ${code} で失敗しました`, outputFile: null, downloadUrl: null }
+      const errMsg = `renderプロセスが終了コード ${code} で失敗しました`
+      console.error('[Render] failed:', errMsg)
+      renderState = { status: 'failed', startedAt: renderState.startedAt, finishedAt: new Date().toISOString(), error: errMsg, outputFile: null, downloadUrl: null }
     }
   })
 
   child.on('error', (err) => {
+    console.error('[Render] spawn error:', err.message)
     renderState = { status: 'failed', startedAt: renderState.startedAt, finishedAt: new Date().toISOString(), error: err.message, outputFile: null, downloadUrl: null }
   })
 })

@@ -1,4 +1,4 @@
-export type SlideLayout = "center" | "bottom" | "cta";
+export type SlideLayout = "top" | "center" | "bottom" | "cta";
 
 export interface Slide {
   id: number;

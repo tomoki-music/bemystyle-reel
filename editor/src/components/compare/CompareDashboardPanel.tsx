@@ -39,46 +39,47 @@ type RewriteExplainResult = {
 }
 
 type CompareDashboardPanelProps = {
-  completedVariants: RenderQueueItem[]
-  lastPipeline: LastPipeline | null
-  bestVariantId: string
-  bestVariantAnalysis: BestVariantAnalysis | null
-  bestVariantAnalysisLoading: boolean
-  bestVariantAnalysisError: string
-  expandedSnapshotIds: string[]
-  expandedDiffIds: string[]
-  rewriteExplainResults: Record<string, RewriteExplainResult>
-  rewriteExplainLoadingIds: string[]
-  rewriteExplainErrors: Record<string, string>
-  slides: Slide[]
-  onSelectBestVariant: (id: string) => void
-  onAnalyzeBestVariant: () => void
-  onToggleSnapshotPreview: (id: string) => void
-  onToggleDiffView: (id: string) => void
-  onExplainRewrite: (item: RenderQueueItem) => void
-  renderDiffPanel: (currentSlides: Slide[], snapshotSlides: Slide[]) => ReactNode
+  data: {
+    completedVariants: RenderQueueItem[]
+    lastPipeline: LastPipeline | null
+    bestVariantId: string
+  }
+  analysis: {
+    result: BestVariantAnalysis | null
+    loading: boolean
+    error: string
+  }
+  rewrite: {
+    results: Record<string, RewriteExplainResult>
+    loadingIds: string[]
+    errors: Record<string, string>
+  }
+  viewState: {
+    expandedSnapshotIds: string[]
+    expandedDiffIds: string[]
+  }
+  actions: {
+    selectBestVariant: (id: string) => void
+    analyzeBestVariant: () => void
+    toggleSnapshotPreview: (id: string) => void
+    toggleDiffView: (id: string) => void
+    explainRewrite: (item: RenderQueueItem) => void
+  }
+  context: {
+    slides: Slide[]
+    renderDiffPanel: (currentSlides: Slide[], snapshotSlides: Slide[]) => ReactNode
+  }
 }
 
 export function CompareDashboardPanel({
-  completedVariants,
-  lastPipeline,
-  bestVariantId,
-  bestVariantAnalysis,
-  bestVariantAnalysisLoading,
-  bestVariantAnalysisError,
-  expandedSnapshotIds,
-  expandedDiffIds,
-  rewriteExplainResults,
-  rewriteExplainLoadingIds,
-  rewriteExplainErrors,
-  slides,
-  onSelectBestVariant,
-  onAnalyzeBestVariant,
-  onToggleSnapshotPreview,
-  onToggleDiffView,
-  onExplainRewrite,
-  renderDiffPanel,
+  data,
+  analysis,
+  rewrite,
+  viewState,
+  actions,
+  context,
 }: CompareDashboardPanelProps) {
+  const { completedVariants, lastPipeline, bestVariantId } = data
   const selectedBestVariantName =
     bestVariantId && completedVariants.some((q) => q.id === bestVariantId)
       ? completedVariants.find((q) => q.id === bestVariantId)?.variantName ?? null
@@ -100,10 +101,10 @@ export function CompareDashboardPanel({
 
       {selectedBestVariantName !== null && (
         <BestVariantAnalysisPanel
-          analysis={bestVariantAnalysis}
-          loading={bestVariantAnalysisLoading}
-          error={bestVariantAnalysisError}
-          onAnalyze={onAnalyzeBestVariant}
+          analysis={analysis.result}
+          loading={analysis.loading}
+          error={analysis.error}
+          onAnalyze={actions.analyzeBestVariant}
         />
       )}
 
@@ -118,17 +119,17 @@ export function CompareDashboardPanel({
               key={q.id}
               item={q}
               isBest={q.id === bestVariantId}
-              snapshotExpanded={expandedSnapshotIds.includes(q.id)}
-              diffExpanded={expandedDiffIds.includes(q.id)}
-              rewriteExplainResult={rewriteExplainResults[q.id]}
-              rewriteExplainLoading={rewriteExplainLoadingIds.includes(q.id)}
-              rewriteExplainError={rewriteExplainErrors[q.id]}
-              slides={slides}
-              onSelectBest={() => onSelectBestVariant(q.id)}
-              onToggleSnapshot={() => onToggleSnapshotPreview(q.id)}
-              onToggleDiff={() => onToggleDiffView(q.id)}
-              onExplainRewrite={() => onExplainRewrite(q)}
-              renderDiffPanel={renderDiffPanel}
+              snapshotExpanded={viewState.expandedSnapshotIds.includes(q.id)}
+              diffExpanded={viewState.expandedDiffIds.includes(q.id)}
+              rewriteExplainResult={rewrite.results[q.id]}
+              rewriteExplainLoading={rewrite.loadingIds.includes(q.id)}
+              rewriteExplainError={rewrite.errors[q.id]}
+              slides={context.slides}
+              onSelectBest={() => actions.selectBestVariant(q.id)}
+              onToggleSnapshot={() => actions.toggleSnapshotPreview(q.id)}
+              onToggleDiff={() => actions.toggleDiffView(q.id)}
+              onExplainRewrite={() => actions.explainRewrite(q)}
+              renderDiffPanel={context.renderDiffPanel}
             />
           ))}
         </div>

@@ -99,6 +99,21 @@ npx tsc --noEmit # 型チェックのみ
 
 詳細: `editor/docs/factory-history-component-plan.md`
 
+## Phase21 進捗サマリー（UX Speed Improvement）
+
+| フェーズ | 内容 | 状態 |
+|---|---|---|
+| Phase21-C | 完成ファースト UX（完成後に詳細機能を非表示・DLボタン優先表示） | 完了 |
+| Phase21-D | テンプレート別画像キャッシュ保存（AI生成後に自動保存） | 完了 |
+| Phase21-F | 前回画像再利用トグル（キャッシュ削除・テンプレート表示名マップ） | 完了 |
+| Phase21-H | 動画作成時間 再計測レポート（3パターン×2条件・改善前後比較） | 完了 |
+| Phase21-I | AI画像生成3並列化（直列→Promise.allSettled バッチ・60%短縮） | 完了 |
+| Phase21-J | 1枚完了ごとの進捗リアルタイム更新＋バッチ番号表示 | 完了 |
+| Phase21-K | 失敗画像のみ個別再試行（失敗ID記録・再試行ボタン・成功分保持） | 完了 |
+| Phase21-L | 再計測レポート（Phase21-I〜K 後の時間計測・Phase21全体まとめ） | 完了 |
+
+詳細: `docs/phase21-h-benchmark.md` / `docs/phase21-l-benchmark.md`
+
 ## カスタムプリセット仕様メモ（Phase12-P/Q/S）
 
 - localStorage key: `bemystyle-reel-custom-presets`

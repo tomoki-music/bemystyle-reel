@@ -1,25 +1,58 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Slide, CTAConfig, SlidesData, TemplateInfo, Template, EditPreset, MmmEventPreset, EventPostRecord, ReelBackupData, ReelAiConfig, SimpleTemplateType, FreeDiagnosisForm, NoteArticleForm, YoutubeVideoForm, MusicCommunityForm } from './types'
+import { WizardMode } from './components/wizard/WizardMode'
+import { Slide, SlidesData, ReelAiConfig, SimpleTemplateType, FreeDiagnosisForm, NoteArticleForm, YoutubeVideoForm, MusicCommunityForm } from './types'
+import { useStoryGenerator, type AIGenerationHistory } from './components/story/useStoryGenerator'
 import { SimpleTemplateSelector } from './components/simple/SimpleTemplateSelector'
 import { SimpleTemplateForms } from './components/simple/SimpleTemplateForms'
+import { useSimpleMode } from './components/simple/useSimpleMode'
 import { SIMPLE_TEMPLATE_DEFAULTS } from './constants/simpleTemplateDefaults'
 import { SlideList } from './components/SlideList'
-import { SlidePreview } from './components/SlidePreview'
-import { SlideForm } from './components/SlideForm'
-import {
-  TemplateVariableValues,
-  extractTemplateVariables,
-  applyTemplateVariables,
-} from './templateVariables'
 import { generateStory, AIPresetKey, CustomPreset } from './storyGenerator'
 import './App.css'
+import { useFactoryPipeline, MAX_HISTORY_THEME_LENGTH, FACTORY_QUICK_TAGS } from './components/factory/useFactoryPipeline'
+import { usePipelineRunner } from './components/factory/usePipelineRunner'
+import { usePresetManager } from './components/factory/usePresetManager'
+import { useRenderUI } from './components/factory/useRenderUI'
+import { useAssetManager } from './components/factory/useAssetManager'
+import { useEditorCore } from './components/factory/useEditorCore'
+import { useInitialReelLoader } from './components/factory/useInitialReelLoader'
+import { usePanelPropsBuilder } from './components/factory/usePanelPropsBuilder'
+import { useSlideEditor } from './components/factory/useSlideEditor'
+import { PreviewWorkspace } from './components/factory/PreviewWorkspace'
+import { SlideEditPanel } from './components/factory/SlideEditPanel'
+import { TemplateModals } from './components/factory/TemplateModals'
+import { ReelHeaderPanel } from './components/factory/ReelHeaderPanel'
 import { FactoryPanel } from './components/factory/FactoryPanel'
 import { FactoryHistoryPanel } from './components/factory/FactoryHistoryPanel'
+import { MassModePanel } from './components/factory/MassModePanel'
+import { AdvancedControlsPanel } from './components/factory/AdvancedControlsPanel'
+import { PostingChecklistPanel } from './components/factory/PostingChecklistPanel'
+import { VariantLearningPanel } from './components/factory/VariantLearningPanel'
+import { RenderQueueTopActions } from './components/factory/RenderQueueTopActions'
+import { UserImageUploadPanel } from './components/factory/UserImageUploadPanel'
+import { useMassMode } from './components/factory/useMassMode'
 import { RenderQueuePanel } from './components/render/RenderQueuePanel'
+import { RenderCompletePanel } from './components/render/RenderCompletePanel'
 import { CompareDashboardPanel } from './components/compare/CompareDashboardPanel'
+import { useCompareDashboard } from './components/compare/useCompareDashboard'
 import { TemplateGalleryPanel } from './components/template/TemplateGalleryPanel'
-
-const API_SERVER_ERROR = 'APIサーバーに接続できません。npm run editor で起動しているか確認してください。'
+import { CustomPresetPanel } from './components/preset/CustomPresetPanel'
+import { useTemplateGallery } from './components/template/useTemplateGallery'
+import { GenerationHistoryPanel } from './components/bottom/GenerationHistoryPanel'
+import { useRenderQueue } from './components/renderQueue/useRenderQueue'
+import { useRenderQueueRunner } from './components/renderQueue/useRenderQueueRunner'
+import { useHistoryManager } from './components/history/useHistoryManager'
+import { AiGenerationHistoryPanel } from './components/history/AiGenerationHistoryPanel'
+import { AssetsPanel } from './components/assets/AssetsPanel'
+import { useImageGenerator } from './components/image/useImageGenerator'
+import { useVariantManager } from './components/factory/useVariantManager'
+import {
+  usePostingManager,
+} from './components/posting/usePostingManager'
+import { SnsCaptionPanel } from './components/posting/SnsCaptionPanel'
+import { EventPostManagementPanel } from './components/posting/EventPostManagementPanel'
+import { useEventPosting } from './components/factory/useEventPosting'
+import { PostEditPanel } from './components/editor/PostEditPanel'
 
 type AIPreset = {
   key: AIPresetKey
@@ -30,316 +63,8 @@ type AIPreset = {
 
 type RenderStatus = "none" | "completed" | "failed"
 
-type RecommendedPreset = {
-  name: string
-  tone: string
-  targetAudience: string
-  platform: string
-  imageStyle: string
-  ctaText: string
-  reason: string
-}
+const USE_WIZARD_MODE = true
 
-type PresetInsight = {
-  summary: string
-  strongestPresets: string[]
-  improvementIdeas: string[]
-  recommendedCombinations: RecommendedPreset[]
-}
-
-type SnsCaption = {
-  youtubeTitle: string
-  youtubeDescription: string
-  instagramCaption: string
-  tiktokCaption?: string
-  xCaption?: string
-  hashtags: string[]
-}
-
-type CaptionEditKey =
-  | 'youtubeTitle'
-  | 'youtubeDescription'
-  | 'instagramCaption'
-  | 'tiktokCaption'
-  | 'xCaption'
-  | 'hashtags'
-
-type PostChecklistKey =
-  | 'downloaded'
-  | 'captionChecked'
-  | 'hashtagsChecked'
-  | 'snsSelected'
-  | 'posted'
-
-type EventPostChecklistKey =
-  | 'downloaded'
-  | 'captionChecked'
-  | 'qrChecked'
-  | 'urlChecked'
-  | 'bgmChecked'
-  | 'postDateEntered'
-
-type PostedSns = 'instagram' | 'tiktok' | 'youtube' | 'x'
-
-type PostedRecord = {
-  sns: PostedSns
-  postedAt: string
-  url: string
-  memo: string
-}
-
-type UserUploadedImage = {
-  id: string
-  name: string
-  url: string
-}
-
-const POST_CHECKLIST_STORAGE_KEY = 'reel-post-checklist'
-const POSTED_RECORDS_STORAGE_KEY = 'reel-posted-records'
-const EVENT_POST_CHECKLIST_KEY = 'bemystyle-reel-event-post-checklist'
-const EVENT_POST_DATE_KEY = 'bemystyle-reel-event-post-date'
-const EVENT_POST_RECORDS_KEY = 'bemystyle-reel-event-post-records'
-
-const EVENT_POST_RECORD_SNS_OPTIONS: { value: EventPostRecord['sns']; label: string }[] = [
-  { value: 'instagram', label: 'Instagram' },
-  { value: 'x', label: 'X' },
-  { value: 'tiktok', label: 'TikTok' },
-  { value: 'youtube', label: 'YouTube' },
-  { value: 'other', label: 'その他' },
-]
-
-const DEFAULT_EVENT_POST_RECORD_FORM = {
-  sns: 'instagram' as EventPostRecord['sns'],
-  postDate: '',
-  postUrl: '',
-  memo: '',
-}
-
-const DEFAULT_POST_CHECKLIST: Record<PostChecklistKey, boolean> = {
-  downloaded: false,
-  captionChecked: false,
-  hashtagsChecked: false,
-  snsSelected: false,
-  posted: false,
-}
-
-const POST_CHECKLIST_ITEMS: { key: PostChecklistKey; label: string }[] = [
-  { key: 'downloaded', label: '動画をダウンロードした' },
-  { key: 'captionChecked', label: '投稿文を確認した' },
-  { key: 'hashtagsChecked', label: 'ハッシュタグを確認した' },
-  { key: 'snsSelected', label: '投稿先SNSを決めた' },
-  { key: 'posted', label: '実際に投稿した' },
-]
-
-const DEFAULT_EVENT_POST_CHECKLIST: Record<EventPostChecklistKey, boolean> = {
-  downloaded: false,
-  captionChecked: false,
-  qrChecked: false,
-  urlChecked: false,
-  bgmChecked: false,
-  postDateEntered: false,
-}
-
-const EVENT_POST_CHECKLIST_ITEMS: { key: EventPostChecklistKey; label: string }[] = [
-  { key: 'downloaded', label: '動画をダウンロードした' },
-  { key: 'captionChecked', label: 'SNS投稿文を確認した' },
-  { key: 'qrChecked', label: 'QRコードを確認した' },
-  { key: 'urlChecked', label: 'イベントURLを確認した' },
-  { key: 'bgmChecked', label: 'BGMを確認した' },
-  { key: 'postDateEntered', label: '投稿日を入力した' },
-]
-
-const POSTED_SNS_LABELS: Record<PostedSns, string> = {
-  instagram: 'Instagram',
-  tiktok: 'TikTok',
-  youtube: 'YouTube',
-  x: 'X',
-}
-
-const DEFAULT_POSTED_FORM: PostedRecord = {
-  sns: 'instagram',
-  postedAt: '',
-  url: '',
-  memo: '',
-}
-
-const formatCaptionHashtags = (caption: SnsCaption) => {
-  return caption.hashtags?.map((tag) => tag.startsWith('#') ? tag : `#${tag}`).join(' ') ?? ''
-}
-
-const formatYouTubeCaption = (caption: SnsCaption) => {
-  return [
-    caption.youtubeTitle,
-    '',
-    caption.youtubeDescription,
-    '',
-    formatCaptionHashtags(caption),
-  ].join('\n')
-}
-
-const formatInstagramCaption = (caption: SnsCaption) => {
-  return [
-    caption.instagramCaption,
-    '',
-    formatCaptionHashtags(caption),
-  ].join('\n')
-}
-
-const formatTikTokCaption = (caption: SnsCaption) => {
-  return [
-    caption.tiktokCaption || caption.instagramCaption,
-    '',
-    formatCaptionHashtags(caption),
-  ].join('\n')
-}
-
-const formatXCaption = (caption: SnsCaption) => {
-  const baseCaption = caption.xCaption || caption.instagramCaption
-  const shortCaption = baseCaption.length > 120
-    ? `${baseCaption.slice(0, 117)}...`
-    : baseCaption
-
-  return [
-    shortCaption,
-    '',
-    formatCaptionHashtags(caption),
-  ].join('\n')
-}
-
-type RenderQueueItem = {
-  id: string
-  variantName: string
-  status: 'pending' | 'rendering' | 'completed' | 'failed'
-  outputPath?: string
-  renderedAt?: string
-  slidesSnapshot?: Slide[]
-  snapshotCreatedAt?: string
-}
-
-type LastPipeline = {
-  completedCount: number
-  failedCount: number
-  finishedAt: string
-}
-
-type LastSmartPipeline = {
-  generatedCount: number
-  recommendedCount: number
-  renderedCount: number
-  failedCount: number
-  finishedAt: string
-}
-
-type LastSmartRewritePipeline = {
-  selectedVariantName: string
-  selectedAngle: string
-  recommendation: number
-  renderedCount: number
-  failedCount: number
-  finishedAt: string
-}
-
-type LastMultiRewriteQueue = {
-  rewrittenCount: number
-  queuedCount: number
-  renderedCount: number
-  failedCount: number
-  selectedVariants: string[]
-  finishedAt: string
-}
-
-type BestVariantAnalysis = {
-  strengths: string[]
-  weaknesses: string[]
-  bestFor: string[]
-  nextActions: string[]
-  summary: string
-}
-
-// ==============================
-// AI Reel Factory — Types
-// ==============================
-type FactorySummary = {
-  generatedCount: number
-  selectedCount: number
-  averageRecommendation: number
-  bestVariantName: string
-  bestRecommendation: number
-  queueAddedCount: number
-  generatedAt: string
-  topVariants: {
-    name: string
-    recommendation: number
-    predictedViews?: number
-    savePotential?: number
-    ctaStrength?: number
-  }[]
-}
-
-type FactoryHistoryItem = FactorySummary & {
-  id: string
-  theme: string
-  favorite?: boolean
-  tags?: string[]
-}
-
-type FactoryHistoryFilter = 'all' | 'favorites' | 'highScore'
-
-type GeneratedVariant = {
-  name: string
-  description: string
-  angle: string
-}
-
-type RewrittenSlide = {
-  headline: string
-  subline?: string
-  emphasis?: string
-}
-
-type VariantLearningEvent = {
-  id: string
-  theme: string
-  variantName: string
-  angle: string
-  action: 'applied' | 'selected_best'
-  createdAt: string
-}
-
-type VariantScore = {
-  variantName: string
-  angle: string
-  recommendation: number
-  predictedViews: number
-  savePotential: number
-  ctaStrength: number
-  reason: string
-}
-
-type AIGenerationHistory = {
-  id: string
-  createdAt: string
-  theme: string
-  presetKey: AIPresetKey | ""
-  templateId?: string
-  templateName?: string
-  slideCount: number
-  imageCount: number
-  renderStatus: RenderStatus
-  renderOutputPath?: string
-  renderErrorMessage?: string
-  renderVariantName?: string
-  renderedAt?: string
-  snsCaption?: SnsCaption
-}
-
-type RewriteExplainResult = {
-  summary: string
-  reasons: string[]
-  improvedPoints: string[]
-  risks: string[]
-  nextSuggestions: string[]
-}
 
 function renderInlineDiff(
   before: string,
@@ -462,86 +187,26 @@ const AI_PRESETS: AIPreset[] = [
   },
 ]
 
-const PRESET_TEMPLATE_CATEGORY_MAP: Record<AIPresetKey, string[]> = {
-  note:             ['note', 'essay', 'story'],
-  singing_pr:       ['singing', 'pr', 'promo'],
-  session:          ['session', 'event', 'community'],
-  youtube_shorts:   ['shorts', 'youtube'],
-  instagram_reels:  ['reels', 'instagram', 'stylish'],
-  mmm_event:        ['mmm', 'event', 'announcement', 'community'],
+const SIMPLE_TEMPLATE_LABELS: Record<SimpleTemplateType, string> = {
+  'mmm-event': 'MMMイベント告知',
+  'free-diagnosis': '無料歌唱診断',
+  'note-article': 'Note記事',
+  'youtube-video': 'YouTube動画',
+  'music-community': '音楽コミュニティ',
+  custom: 'カスタム',
 }
 
-const RECENT_KEY = 'bemystyle-reel:recent-templates'
-const CUSTOM_PRESETS_KEY = 'bemystyle-reel-custom-presets'
-const VALID_CUSTOM_PRESET_KEYS = new Set<string>(['note', 'singing_pr', 'session', 'youtube_shorts', 'instagram_reels', 'mmm_event', ''])
-const RECENT_MAX = 5
-
-const USAGE_KEY = 'bemystyle-reel:template-usage'
-const AI_GENERATION_HISTORY_KEY = 'bemystyle-reel-ai-generation-history'
-const RENDER_QUEUE_KEY = 'bemystyle-reel-render-queue'
-const BEST_VARIANT_KEY = 'bemystyle-reel-best-variant'
-const LAST_PIPELINE_KEY = 'bemystyle-reel-last-pipeline'
-const GENERATED_VARIANTS_KEY = 'bemystyle-reel-generated-variants'
-const REWRITTEN_STORIES_KEY = 'bemystyle-reel-rewritten-stories'
-const VARIANT_LEARNING_EVENTS_KEY = 'bemystyle-reel-variant-learning-events'
-const VARIANT_SCORES_KEY = 'bemystyle-reel-variant-scores'
-const LAST_SMART_PIPELINE_KEY = 'bemystyle-reel-last-smart-pipeline'
-const LAST_SMART_REWRITE_PIPELINE_KEY = 'bemystyle-reel-last-smart-rewrite-pipeline'
-const LAST_MULTI_REWRITE_QUEUE_KEY = 'bemystyle-reel-last-multi-rewrite-queue'
-const BEST_VARIANT_ANALYSIS_KEY = 'bemystyle-reel-best-variant-analysis'
-const REWRITE_EXPLAIN_CACHE_KEY = 'bemystyle-reel-rewrite-explain-cache'
-const EDIT_PRESETS_KEY = 'bemystyle-reel-edit-presets'
-const MMM_EVENT_PRESETS_KEY = 'bemystyle-reel-mmm-event-presets'
-const SIMPLE_TEMPLATE_TYPE_KEY = 'bemystyle-reel-simple-template-type'
-const VALID_SIMPLE_TEMPLATE_TYPES: SimpleTemplateType[] = ['mmm-event', 'free-diagnosis', 'note-article', 'youtube-video', 'music-community', 'custom']
-
-const DEFAULT_EDIT_PRESETS: EditPreset[] = [
-  {
-    id: 'default-mmm-artist',
-    name: 'MMM 上品アーティスト',
-    visualStyleTags: ['アニメ調', '音楽', '演奏', '上品', 'アーティスト'],
-    ctaLabel: 'イベントページへ',
-    createdAt: '2024-01-01T00:00:00.000Z',
-  },
-  {
-    id: 'default-mmm-pop',
-    name: 'MMM かわいいポップ',
-    visualStyleTags: ['かわいい', 'ポップ', '音楽', '青春'],
-    ctaLabel: 'お申し込みはこちら',
-    createdAt: '2024-01-01T00:00:00.000Z',
-  },
-  {
-    id: 'default-mmm-live',
-    name: 'MMM ライブ感強め',
-    visualStyleTags: ['ライブ感', 'ダイナミック', 'かっこいい', '演奏'],
-    ctaLabel: '詳細はこちら',
-    createdAt: '2024-01-01T00:00:00.000Z',
-  },
-]
-
-const DEFAULT_MMM_EVENT_PRESETS: MmmEventPreset[] = [
-  {
-    id: 'default-mmm-rhythm-neko',
-    name: 'Rhythm Neko 大演奏会',
-    title: 'MMM大演奏会',
-    date: '',
-    startTime: '17:30',
-    endTime: '22:30',
-    venue: 'レンタルスペース Rhythm Neko',
-    price: '演奏3,500円・聴くだけ1,000円',
-    url: '',
-    message: '飲食OK。初心者歓迎。演奏参加・聴くだけ参加OK。',
-    createdAt: 'default',
-  },
-]
-
-// ==============================
-// AI Reel Factory — Constants & Utilities
-// ==============================
-const FACTORY_SUMMARY_CACHE_KEY = 'bemystyle-reel-factory-summary-cache'
-const FACTORY_HISTORY_KEY = 'bemystyle-reel-factory-history'
-const MAX_HISTORY_THEME_LENGTH = 80
-const FACTORY_QUICK_TAGS = ['音楽', '成長', '習慣', 'AI', 'コミュニティ', '歌唱診断']
+function formatCacheSavedAt(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const h = String(d.getHours()).padStart(2, '0')
+    const min = String(d.getMinutes()).padStart(2, '0')
+    return `${y}/${m}/${day} ${h}:${min}`
+  } catch { return iso }
+}
 
 // Phase18-F: かんたんモード テーマサジェスト
 const SIMPLE_THEME_SUGGESTIONS = [
@@ -608,112 +273,6 @@ const SIMPLE_TEMPLATE_THEME_SUGGESTIONS: Record<string, string[]> = {
   ],
 }
 
-const FACTORY_TAG_RULES: { tag: string; keywords: string[] }[] = [
-  { tag: '音楽',     keywords: ['音楽', '歌', '演奏', 'バンド', 'ライブ', 'セッション'] },
-  { tag: '成長',     keywords: ['成長', '挑戦', '努力', '練習', '上達', 'レベルアップ'] },
-  { tag: '習慣',     keywords: ['習慣', '継続', '毎日', '積み重ね', 'ルーティン'] },
-  { tag: 'AI',       keywords: ['ai', 'AI', '人工知能', '自動化'] },
-  { tag: 'コミュニティ', keywords: ['コミュニティ', '仲間', '居場所', 'サークル', 'つながり'] },
-  { tag: '歌唱診断', keywords: ['歌唱診断', 'ボーカル', 'ミックスボイス', '発声', '歌声'] },
-]
-
-const inferFactoryTags = (theme: string): string[] => {
-  const text = theme.toLowerCase()
-  return FACTORY_TAG_RULES
-    .filter(rule => rule.keywords.some(kw => text.includes(kw.toLowerCase())))
-    .map(rule => rule.tag)
-    .slice(0, 8)
-}
-
-const escapeCsvValue = (value: unknown): string => {
-  const text = String(value ?? '')
-  if (/[",\n]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`
-  }
-  return text
-}
-
-const isFactoryHistoryItem = (value: unknown): value is FactoryHistoryItem => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-
-  const item = value as Partial<FactoryHistoryItem>
-
-  if (
-    typeof item.id !== 'string' ||
-    typeof item.theme !== 'string' ||
-    typeof item.generatedAt !== 'string' ||
-    typeof item.generatedCount !== 'number' ||
-    typeof item.selectedCount !== 'number' ||
-    typeof item.averageRecommendation !== 'number' ||
-    typeof item.bestVariantName !== 'string' ||
-    typeof item.bestRecommendation !== 'number' ||
-    typeof item.queueAddedCount !== 'number' ||
-    !Array.isArray(item.topVariants)
-  ) return false
-
-  if (!item.topVariants.every(v =>
-    v && typeof v === 'object' &&
-    typeof (v as Record<string, unknown>).name === 'string' &&
-    typeof (v as Record<string, unknown>).recommendation === 'number'
-  )) return false
-
-  if (item.tags !== undefined && !Array.isArray(item.tags)) return false
-  if (Array.isArray(item.tags) && !item.tags.every(t => typeof t === 'string')) return false
-  if (item.favorite !== undefined && typeof item.favorite !== 'boolean') return false
-
-  return true
-}
-
-const AUTO_ANALYZE_ON_BEST_SELECT = false
-
-const AUTO_VARIANT_TEMPLATES = [
-  'Default',
-  'CTA強め版',
-  '感情訴求版',
-  '教育版',
-  'ストーリー版',
-  'YouTube版',
-  'Instagram版',
-]
-
-function loadRecentIds(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_KEY)
-    if (!raw) return []
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((v): v is string => typeof v === 'string')
-  } catch {
-    return []
-  }
-}
-
-function saveRecentIds(ids: string[]): void {
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(ids))
-  } catch {}
-}
-
-function pushRecentId(id: string, current: string[]): string[] {
-  return [id, ...current.filter((v) => v !== id)].slice(0, RECENT_MAX)
-}
-
-function loadUsage(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(USAGE_KEY)
-    if (!raw) return {}
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
-    return parsed as Record<string, number>
-  } catch {
-    return {}
-  }
-}
-
-type AIWorkflowStep = 'theme' | 'story' | 'images' | 'save' | 'render' | 'done'
-
-const WORKFLOW_ORDER: AIWorkflowStep[] = ['theme', 'story', 'images', 'save', 'render', 'done']
-
 const CATEGORIES = [
   { id: 'all',       label: 'すべて' },
   { id: 'singing',   label: '歌唱診断' },
@@ -725,156 +284,100 @@ const CATEGORIES = [
   { id: 'other',     label: 'その他' },
 ] as const
 
-interface HistoryItem {
-  filename: string
-  size: number
-  createdAt: string
-  downloadUrl: string
-}
-
-async function parseJsonResponse(res: Response): Promise<Record<string, unknown>> {
-  const ct = res.headers.get('content-type') ?? ''
-  if (!ct.includes('application/json')) {
-    const text = await res.text()
-    throw new Error(`${API_SERVER_ERROR}\n\n${text.slice(0, 120)}`)
-  }
-  return res.json()
-}
-
 const VISUAL_STYLE_TAG_OPTIONS = [
   'アニメ調', '実写風', '音楽', '演奏', 'かっこいい', 'かわいい',
   '上品', 'アーティスト', 'ダイナミック', 'ポップ', 'ミステリアス', '青春', 'ライブ感',
 ]
 
-const shouldConfirmCostlyAiRun = ({
-  reelAiConfig,
-  imageCount,
-  useUploadedImages,
-}: {
-  reelAiConfig: ReelAiConfig
-  imageCount: number
-  useUploadedImages: boolean
-}) => {
-  return (
-    reelAiConfig.aiMode === 'real' &&
-    !reelAiConfig.dryRun &&
-    !reelAiConfig.testImageLimit &&
-    !useUploadedImages &&
-    imageCount >= 6
-  )
-}
-
-const buildCostConfirmMessage = (imageCount: number) =>
-  `OpenAI APIを使用してAI画像を${imageCount}枚生成します。\n利用枠を消費しますが、実行しますか？`
-
 export default function App() {
-  const [slides, setSlides] = useState<Slide[]>([])
-  const [ctaConfig, setCtaConfig] = useState<CTAConfig>({ qrImage: 'qr-singing.png' })
-  const [title, setTitle] = useState('BeMyStyle Reel')
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [saved, setSaved] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
-  const [saveError, setSaveError] = useState('')
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
-  const [renderStatus, setRenderStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle')
-  const [renderError, setRenderError] = useState('')
-  const [isPreparingRender, setIsPreparingRender] = useState(false)
-  const [renderStartedAt, setRenderStartedAt] = useState<number | null>(null)
-  const [elapsedSec, setElapsedSec] = useState(0)
-  const [latestDownloadUrl, setLatestDownloadUrl] = useState<string | null>(null)
+  // Phase23-K state map:
+  // Core editor/save, SNS/posting history, SimpleMode/templates, story/image generation,
+  // Render/Compare pipelines, Factory, and asset/template management are still co-located here.
+  // Next extraction candidates: useSimpleMode, useTemplateGallery, useHistoryManager, useCompareDashboard.
+  // Core editor / save state
+  const newProjectSideEffectsRef = useRef<() => void>(() => {})
+  const editorCore = useEditorCore({
+    initialTitle: 'BeMyStyle Reel',
+    onNewProject: () => newProjectSideEffectsRef.current(),
+  })
+  const {
+    slides,
+    setSlides,
+    title,
+    setTitle,
+    selectedId,
+    setSelectedId,
+    ctaConfig,
+    setCtaConfig,
+    saved,
+    setSaved,
+    hasUnsavedChanges,
+    setHasUnsavedChanges,
+    loading,
+    setLoading,
+    currentSnapshot,
+    markDirty,
+    updateSlide,
+    toggleVisible,
+    moveSlide,
+    handleSlideTextChange,
+    handleCtaChange,
+    handleNewProject,
+    handleSnapshotSaved,
+  } = editorCore
+  const historyManager = useHistoryManager({
+    currentSnapshot,
+    onSaved: handleSnapshotSaved,
+  })
+  const {
+    history,
+    historyError,
+    saveStatus,
+    saveError,
+    fetchHistory,
+    saveSnapshotToServer,
+    saveToServer,
+  } = historyManager
+
+  // Render preview / video download state
   const [videoPreviewLoading, setVideoPreviewLoading] = useState(false)
   const [videoPreviewError, setVideoPreviewError] = useState('')
   const videoPreviewRetryCount = useRef(0)
   const videoPreviewRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [history, setHistory] = useState<HistoryItem[]>([])
-  const [historyError, setHistoryError] = useState(false)
+
+  // History, render URL copy state
   const [copiedUrl, setCopiedUrl] = useState(false)
-  const [snsCaption, setSnsCaption] = useState<SnsCaption | null>(null)
-  const [isGeneratingSnsCaption, setIsGeneratingSnsCaption] = useState(false)
-  const [snsCaptionError, setSnsCaptionError] = useState('')
-  const [copiedSnsField, setCopiedSnsField] = useState<string | null>(null)
-  const [copiedAllCaption, setCopiedAllCaption] = useState(false)
-  const [copiedCaptionLabel, setCopiedCaptionLabel] = useState('')
-  const [editingCaptionKey, setEditingCaptionKey] = useState<CaptionEditKey | ''>('')
-  const [editingCaptionText, setEditingCaptionText] = useState('')
-  const [regeneratingCaptionKey, setRegeneratingCaptionKey] = useState<CaptionEditKey | ''>('')
-  const [postChecklist, setPostChecklist] = useState<Record<PostChecklistKey, boolean>>(() => {
-    try {
-      const raw = localStorage.getItem(POST_CHECKLIST_STORAGE_KEY)
-      if (!raw) return { ...DEFAULT_POST_CHECKLIST }
-      const parsed = JSON.parse(raw) as Partial<Record<PostChecklistKey, boolean>>
-      return {
-        ...DEFAULT_POST_CHECKLIST,
-        downloaded: parsed.downloaded === true,
-        captionChecked: parsed.captionChecked === true,
-        hashtagsChecked: parsed.hashtagsChecked === true,
-        snsSelected: parsed.snsSelected === true,
-        posted: parsed.posted === true,
-      }
-    } catch {
-      return { ...DEFAULT_POST_CHECKLIST }
-    }
-  })
-  const [postedRecords, setPostedRecords] = useState<PostedRecord[]>(() => {
-    try {
-      const raw = localStorage.getItem(POSTED_RECORDS_STORAGE_KEY)
-      if (!raw) return []
-      const parsed = JSON.parse(raw)
-      if (!Array.isArray(parsed)) return []
 
-      return parsed
-        .filter((record): record is Partial<PostedRecord> => record && typeof record === 'object')
-        .filter((record) => (
-          record.sns === 'instagram' ||
-          record.sns === 'tiktok' ||
-          record.sns === 'youtube' ||
-          record.sns === 'x'
-        ))
-        .map((record) => ({
-          sns: record.sns as PostedSns,
-          postedAt: typeof record.postedAt === 'string' ? record.postedAt : '',
-          url: typeof record.url === 'string' ? record.url : '',
-          memo: typeof record.memo === 'string' ? record.memo : '',
-        }))
-        .filter((record) => record.postedAt)
-    } catch {
-      return []
-    }
-  })
-  const [postedForm, setPostedForm] = useState<PostedRecord>({ ...DEFAULT_POSTED_FORM })
-  const [postedRecordsImportMessage, setPostedRecordsImportMessage] = useState('')
-  const [postedRecordsImportError, setPostedRecordsImportError] = useState('')
-  // Phase19-N: 全データバックアップ
-  const [backupImportMessage, setBackupImportMessage] = useState('')
-  const [backupImportError, setBackupImportError] = useState('')
-  const [userUploadedImages, setUserUploadedImages] = useState<UserUploadedImage[]>([])
-  const [imageSourceMode, setImageSourceMode] = useState<'ai' | 'upload'>('ai')
 
-  // かんたんモード (Phase17-G)
-  const [simpleMode, setSimpleMode] = useState<boolean>(() => {
-    try { return localStorage.getItem('reel-simple-mode') !== 'false' } catch { return true }
-  })
-  // かんたんモード ウィザードステップ (Phase18-B)
-  const [simpleStep, setSimpleStep] = useState<1 | 2 | 3>(1)
-  // Phase19-P: タブ
-  const [activeSimpleTab, setActiveSimpleTab] = useState<'create' | 'edit' | 'post' | 'manage'>('create')
-  // かんたんモード 選択テンプレート (Phase18-E)
-  const [simpleTemplateId, setSimpleTemplateId] = useState('')
-  // Phase19-S: かんたんテンプレートタイプ
-  const [simpleTemplateType, setSimpleTemplateType] = useState<SimpleTemplateType | null>(() => {
-    try {
-      const saved = localStorage.getItem(SIMPLE_TEMPLATE_TYPE_KEY)
-      if (saved && VALID_SIMPLE_TEMPLATE_TYPES.includes(saved as SimpleTemplateType)) return saved as SimpleTemplateType
-      return null
-    } catch { return null }
-  })
+
+  // SimpleMode state / callbacks (Phase23-L)
+  const simpleModeController = useSimpleMode()
+  const {
+    simpleMode,
+    startSimpleMode,
+    exitSimpleMode,
+    simpleStep,
+    goToSimpleStep,
+    activeSimpleTab,
+    selectSimpleTab,
+    showDetailedFeatures,
+    showDetails,
+    resetCompletedView,
+    reuseHintDismissedTemplates,
+    simpleTemplateId,
+    simpleTemplateType,
+    selectSimpleTemplateType,
+    showInTab: showInSimpleTab,
+    dismissReuseHint,
+  } = simpleModeController
   // Phase19-S: テンプレート別フォーム
   const [freeDiagnosisForm, setFreeDiagnosisForm] = useState<FreeDiagnosisForm>({ campaignName: '', targetAudience: '', diagnosisMethod: '', lineUrl: '', message: '' })
   const [noteArticleForm, setNoteArticleForm] = useState<NoteArticleForm>({ articleTitle: '', articleTheme: '', targetReader: '', articleUrl: '', message: '' })
   const [youtubeVideoForm, setYoutubeVideoForm] = useState<YoutubeVideoForm>({ videoTitle: '', videoTheme: '', highlights: '', youtubeUrl: '', message: '' })
   const [musicCommunityForm, setMusicCommunityForm] = useState<MusicCommunityForm>({ communityName: '', activities: '', targetAudience: '', joinUrl: '', message: '' })
   const [reelAiConfig, setReelAiConfig] = useState<ReelAiConfig>({ aiMode: 'real', dryRun: false, testImageLimit: null })
+  // Phase29-B: テストモード（画像生成スキップ）
+  const [testMode, setTestMode] = useState(() => localStorage.getItem('bemystyle-reel-test-mode') === 'true')
   // Phase19-D: MMMイベント告知フォーム
   const [mmmEventForm, setMmmEventForm] = useState({
     title: '',
@@ -887,321 +390,202 @@ export default function App() {
     message: '',
   })
   const [mmmError, setMmmError] = useState('')
-
-  // Phase19-H: MMMイベント情報プリセット
-  const [mmmEventPresets, setMmmEventPresets] = useState<MmmEventPreset[]>(() => {
-    try {
-      const raw = localStorage.getItem(MMM_EVENT_PRESETS_KEY)
-      if (!raw) return DEFAULT_MMM_EVENT_PRESETS
-      const parsed: unknown = JSON.parse(raw)
-      if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_MMM_EVENT_PRESETS
-      return parsed as MmmEventPreset[]
-    } catch {
-      return DEFAULT_MMM_EVENT_PRESETS
-    }
-  })
-  const [mmmEventPresetName, setMmmEventPresetName] = useState('')
-  const [selectedMmmEventPresetId, setSelectedMmmEventPresetId] = useState('')
-  const [mmmEventPresetNotice, setMmmEventPresetNotice] = useState('')
-
-  // Phase19-I: イベント投稿前チェックリスト
-  const [eventPostChecklist, setEventPostChecklist] = useState<Record<EventPostChecklistKey, boolean>>(() => {
-    try {
-      const raw = localStorage.getItem(EVENT_POST_CHECKLIST_KEY)
-      if (!raw) return { ...DEFAULT_EVENT_POST_CHECKLIST }
-      const parsed = JSON.parse(raw) as Partial<Record<EventPostChecklistKey, boolean>>
-      return {
-        ...DEFAULT_EVENT_POST_CHECKLIST,
-        downloaded: parsed.downloaded === true,
-        captionChecked: parsed.captionChecked === true,
-        qrChecked: parsed.qrChecked === true,
-        urlChecked: parsed.urlChecked === true,
-        bgmChecked: parsed.bgmChecked === true,
-        postDateEntered: parsed.postDateEntered === true,
-      }
-    } catch {
-      return { ...DEFAULT_EVENT_POST_CHECKLIST }
-    }
-  })
-  const [eventPostDate, setEventPostDate] = useState(() => {
-    try { return localStorage.getItem(EVENT_POST_DATE_KEY) ?? '' } catch { return '' }
-  })
-
-  // Phase19-K: イベント投稿記録
-  const [eventPostRecords, setEventPostRecords] = useState<EventPostRecord[]>(() => {
-    try {
-      const raw = localStorage.getItem(EVENT_POST_RECORDS_KEY)
-      if (!raw) return []
-      return JSON.parse(raw) as EventPostRecord[]
-    } catch { return [] }
-  })
-  const [eventPostRecordForm, setEventPostRecordForm] = useState({ ...DEFAULT_EVENT_POST_RECORD_FORM })
-  // Phase19-M: 投稿記録フィルター
-  const [eventPostFilter, setEventPostFilter] = useState({
-    sns: 'all',
-    keyword: '',
-    postDate: '',
-    urlStatus: 'all',
-  })
+  const [isSimpleAdvancedSettingsOpen, setIsSimpleAdvancedSettingsOpen] = useState(false)
+  const [isMmmDetailsOpen, setIsMmmDetailsOpen] = useState(false)
+  const [imageCreationMode, setImageCreationMode] = useState<'save' | 'reuse' | 'full' | 'upload'>('upload')
 
   // Phase19-E: 世界観タグ
   const [visualStyleTags, setVisualStyleTags] = useState<string[]>([
     'アニメ調', '音楽', '演奏', '上品', 'アーティスト',
   ])
 
-  // Phase19-E: BGM差し替え
-  const [bgmFileName, setBgmFileName] = useState('')
-  const [bgmUploading, setBgmUploading] = useState(false)
-  const [bgmUploadError, setBgmUploadError] = useState('')
-  const [recommendedCtaLabel, setRecommendedCtaLabel] = useState('')
+  const { slideEditorOpen, setSlideEditorOpen, selectedSlide, selectedSlideIndex, slideCount, closeSlideEditor } = useSlideEditor({ slides, selectedId, setSelectedId })
 
-  // Phase19-G: 画像品質モード
-  const [imageQualityMode, setImageQualityMode] = useState<'standard' | 'high'>('high')
-  // Phase19-J: 節約モード
-  const [costMode, setCostMode] = useState<'normal' | 'save'>('save')
-  const [quotaError, setQuotaError] = useState(false)
-
-  // Phase19-G: QRコード差し替え
-  const [qrUploading, setQrUploading] = useState(false)
-  const [qrUploadError, setQrUploadError] = useState('')
-  const [qrFileName, setQrFileName] = useState('')
-
-  // Phase19-F: 編集プリセット
-  const [editPresets, setEditPresets] = useState<EditPreset[]>(() => {
-    try {
-      const raw = localStorage.getItem(EDIT_PRESETS_KEY)
-      if (!raw) return DEFAULT_EDIT_PRESETS
-      const parsed: unknown = JSON.parse(raw)
-      if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_EDIT_PRESETS
-      return parsed as EditPreset[]
-    } catch {
-      return DEFAULT_EDIT_PRESETS
-    }
-  })
-  const [editPresetName, setEditPresetName] = useState('')
-  const [selectedEditPresetId, setSelectedEditPresetId] = useState('')
-
-  // Phase19-E: スライドテキスト編集パネル開閉
-  const [slideEditorOpen, setSlideEditorOpen] = useState(false)
-  // Phase19-E: スライド画像差し替え中スライドID
-  const [slideImageReplacing, setSlideImageReplacing] = useState<number | null>(null)
-  const [slideImageReplaceError, setSlideImageReplaceError] = useState<Record<number, string>>({})
-
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const historyAreaRef = useRef<HTMLDivElement | null>(null)
-  const userUploadedImagesRef = useRef<UserUploadedImage[]>([])
 
-  // テンプレート関連
-  const [templates, setTemplates] = useState<TemplateInfo[]>([])
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('')
-  const [templateConfirmPending, setTemplateConfirmPending] = useState<string | null>(null)
-  const [templateHints, setTemplateHints] = useState<Template['hints'] | null>(null)
-  const [saveTemplateModal, setSaveTemplateModal] = useState(false)
-  const [saveTemplateName, setSaveTemplateName] = useState('')
-  const [saveTemplateCategory, setSaveTemplateCategory] = useState<string>('other')
-  const [saveTemplateDescription, setSaveTemplateDescription] = useState('')
-  const [saveTemplateStatus, setSaveTemplateStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle')
+  // Phase23-Z: Asset / Image state and callbacks
+  const assetManager = useAssetManager({
+    slides,
+    ctaConfig,
+    setSlides,
+    setCtaConfig,
+    markDirty,
+  })
+  const {
+    userUploadedImages,
+    userUploadedImagesRef,
+    imageSourceMode,
+    setImageSourceMode,
+    bgmFileName,
+    setBgmFileName,
+    bgmUploading,
+    bgmUploadError,
+    setBgmUploadError,
+    qrFileName,
+    qrUploading,
+    qrUploadError,
+    imageQualityMode,
+    setImageQualityMode,
+    costMode,
+    setCostMode,
+    quotaError,
+    setQuotaError,
+    recommendedCtaLabel,
+    setRecommendedCtaLabel,
+    slideImageReplacing,
+    slideImageReplaceError,
+    handleUserImageUpload,
+    removeUserUploadedImage,
+    reorderUserUploadedImage,
+    handleUserImageDropFiles,
+    handleBgmUpload,
+    handleQrUpload,
+    handleSlideImageReplace,
+  } = assetManager
 
-  // テンプレート変数 (Phase11.5-C)
-  const [rawTemplateSlides, setRawTemplateSlides] = useState<Slide[] | null>(null)
-  const [templateVariableKeys, setTemplateVariableKeys] = useState<string[]>([])
-  const [variableValues, setVariableValues] = useState<TemplateVariableValues>({})
+  // Phase23-X: Preset state / callbacks / template variables
+  const presetManager = usePresetManager({
+    slides,
+    title,
+    ctaConfig,
+    setSlides,
+    setTitle,
+    setCtaConfig,
+    setSelectedId,
+    markDirty,
+    visualStyleTags,
+    setVisualStyleTags,
+    bgmFileName,
+    setBgmFileName,
+    mmmEventForm,
+    setMmmEventForm,
+  })
+  const {
+    editPresets,
+    editPresetName,
+    selectedEditPresetId,
+    setEditPresets,
+    setEditPresetName,
+    setSelectedEditPresetId,
+    mmmEventPresets,
+    mmmEventPresetName,
+    selectedMmmEventPresetId,
+    mmmEventPresetNotice,
+    setMmmEventPresets,
+    setMmmEventPresetName,
+    setSelectedMmmEventPresetId,
+    setMmmEventPresetNotice,
+    rawTemplateSlides,
+    templateVariableKeys,
+    variableValues,
+    setVariableValues,
+    applyLoadedTemplate,
+    handleVariableChange,
+    saveEditPreset,
+    applyEditPreset,
+    deleteEditPreset,
+    saveMmmEventPreset,
+    applyMmmEventPreset,
+    deleteMmmEventPreset,
+    isDefaultEditPreset,
+    isDefaultMmmEventPreset,
+  } = presetManager
 
-  // AI テンプレ生成 (Phase12-A/B/C)
-  const [aiTheme, setAiTheme] = useState('')
-  const [selectedPresetKey, setSelectedPresetKey] = useState<AIPresetKey | ''>('')
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [generateError, setGenerateError] = useState('')
-  const [generateSuccess, setGenerateSuccess] = useState(false)
+  const templateGallery = useTemplateGallery({
+    title,
+    slides,
+    ctaConfig,
+    rawTemplateSlides,
+    onTemplateLoaded: applyLoadedTemplate,
+  })
+  const {
+    templates,
+    selectedTemplateId,
+    setSelectedTemplateId,
+    templateConfirmPending,
+    templateHints,
+    saveTemplateModal,
+    saveTemplateName,
+    setSaveTemplateName,
+    saveTemplateCategory,
+    setSaveTemplateCategory,
+    saveTemplateDescription,
+    setSaveTemplateDescription,
+    saveTemplateStatus,
+    generatedAssets,
+    assetsLoading,
+    assetsMessage,
+    recentTemplateIds,
+    usageMap,
+    fetchTemplates,
+    fetchGeneratedAssets,
+    confirmLoadTemplate,
+    cancelLoadTemplate,
+    openSaveTemplateModal,
+    cancelSaveTemplateModal,
+    loadTemplate,
+    saveAsTemplate,
+    duplicateTemplate,
+    deleteTemplate,
+    renameTemplate,
+    toggleFavorite,
+    deleteGeneratedAsset,
+    deleteUnusedAssets,
+  } = templateGallery
 
-  // 自動テンプレ適用 (Phase12-M)
-  const [autoApplyRecommendedTemplate, setAutoApplyRecommendedTemplate] = useState(false)
-  const [autoApplyTemplateNotice, setAutoApplyTemplateNotice] = useState('')
-
-  // AI生成履歴 (Phase12-N/O)
-  const [aiGenerationHistory, setAiGenerationHistory] = useState<AIGenerationHistory[]>([])
-  const [importNotice, setImportNotice] = useState('')
+  // Phase23-R: Story生成 state / callbacks を useStoryGenerator に分離
+  const storyGenerator = useStoryGenerator({
+    slides,
+    setSlides,
+    setHasUnsavedChanges,
+    simpleTemplateType,
+    simpleTemplateId,
+    rawTemplateSlides,
+    templateVariableKeys,
+    variableValues,
+    setVariableValues,
+    selectedTemplateId,
+    templates,
+    visualStyleTags,
+    recommendedCtaLabel,
+    setQuotaError,
+    confirmLoadTemplate,
+    usageMap,
+  })
+  const {
+    aiTheme, setAiTheme,
+    selectedPresetKey, setSelectedPresetKey,
+    isGenerating,
+    autoApplyRecommendedTemplate, setAutoApplyRecommendedTemplate,
+    autoApplyTemplateNotice,
+    aiGenerationHistory,
+    importNotice, importInputRef,
+    customPresets, customPresetForm, setCustomPresetForm,
+    selectedCustomPresetId, setSelectedCustomPresetId,
+    presetImportNotice, presetImportRef,
+    editingCustomPresetId, setEditingCustomPresetId,
+    editingCustomPresetForm, setEditingCustomPresetForm,
+    presetInsight, isGeneratingPresetInsight, presetInsightError,
+    createdInsightIndices, isAnalyticsExpanded, setIsAnalyticsExpanded,
+    updateLatestHistory,
+    deleteAIGenerationHistoryItem, clearAIGenerationHistory,
+    exportAIGenerationHistory, handleImport,
+    handleSaveCustomPreset, handleDeleteCustomPreset,
+    handleUseCustomPreset, handleExportCustomPresets,
+    handleImportCustomPresets, handleSaveEditCustomPreset,
+    handleDuplicateCustomPreset, handleClearCustomPresets,
+    handleExportAnalyticsCsv, handleGeneratePresetInsight,
+    handleSaveInsightPreset, handleToggleFavoriteCustomPreset,
+    handleMoveCustomPreset,
+  } = storyGenerator
 
   // Render Variant / Queue / Compare / AutoGen (Phase13-G/H/I/K)
-  const [renderVariantName, setRenderVariantName] = useState("")
-  const [renderQueue, setRenderQueue] = useState<RenderQueueItem[]>([])
-  const [isBatchRendering, setIsBatchRendering] = useState(false)
-  const [bestVariantId, setBestVariantId] = useState("")
-  const [autoGenerateNotice, setAutoGenerateNotice] = useState("")
-  const importInputRef = useRef<HTMLInputElement>(null)
-
-  // AI Variant Generator (Phase14-D)
-  const [generatedVariants, setGeneratedVariants] = useState<GeneratedVariant[]>([])
-  const [isGeneratingVariants, setIsGeneratingVariants] = useState(false)
-  const [variantGenerateError, setVariantGenerateError] = useState('')
-
-  // AI Story Rewriter (Phase14-E)
-  const [rewrittenStories, setRewrittenStories] = useState<Record<string, Slide[]>>({})
-  const [isRewritingStory, setIsRewritingStory] = useState<Record<string, boolean>>({})
-  const [rewriteStoryError, setRewriteStoryError] = useState<Record<string, string>>({})
-
-  // Best Variant Learning (Phase14-F)
-  const [variantLearningEvents, setVariantLearningEvents] = useState<VariantLearningEvent[]>([])
-
-  // AI Variant Scoring (Phase14-G)
-  const [variantScores, setVariantScores] = useState<VariantScore[]>([])
-  const [isScoringVariants, setIsScoringVariants] = useState(false)
-  const [variantScoreError, setVariantScoreError] = useState('')
-
-  // Smart Queue (Phase14-H)
-  const [smartQueueMessage, setSmartQueueMessage] = useState('')
+  const { items: renderQueue, itemsRef: renderQueueRef, addToRenderQueue, addVariantName: addVariantNameToQueue, addVariantNames: addVariantNamesToQueue, addSnapshotItem: addSnapshotItemToQueue, addQueueItems, updateQueueItem: updateQueueItemFromHook, removeFromQueue, clearQueue } = useRenderQueue()
+  const massMode = useMassMode({ addToRenderQueue })
 
   // Auto Render Pipeline (Phase14-C)
-  const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState(false)
-  const [pipelineStatus, setPipelineStatus] = useState('')
-  const [lastPipeline, setLastPipeline] = useState<LastPipeline | null>(null)
   const compareDashboardRef = useRef<HTMLDivElement | null>(null)
   const batchRenderRef = useRef<(itemIds?: string[]) => Promise<void>>(async () => {})
-  const renderQueueRef = useRef<RenderQueueItem[]>([])
-
-  // Best Variant Analyzer (Phase14-J)
-  const [bestVariantAnalysis, setBestVariantAnalysis] = useState<BestVariantAnalysis | null>(null)
-  const [isAnalyzingBestVariant, setIsAnalyzingBestVariant] = useState(false)
-  const [bestVariantAnalysisError, setBestVariantAnalysisError] = useState('')
-
-  // Smart Pipeline (Phase14-I)
-  const [isSmartPipelineRunning, setIsSmartPipelineRunning] = useState(false)
-  const [smartPipelineStatus, setSmartPipelineStatus] = useState('')
-  const [smartPipelineError, setSmartPipelineError] = useState('')
-  const [lastSmartPipeline, setLastSmartPipeline] = useState<LastSmartPipeline | null>(null)
-  const generatedVariantsRef = useRef<GeneratedVariant[]>([])
-  const variantScoresRef = useRef<VariantScore[]>([])
-
-  // Smart Rewrite Pipeline (Phase14-K)
-  const [isSmartRewritePipelineRunning, setIsSmartRewritePipelineRunning] = useState(false)
-  const [smartRewritePipelineStatus, setSmartRewritePipelineStatus] = useState('')
-  const [smartRewritePipelineError, setSmartRewritePipelineError] = useState('')
-  const [lastSmartRewritePipeline, setLastSmartRewritePipeline] = useState<LastSmartRewritePipeline | null>(null)
-
-  // Multi Rewrite Queue (Phase14-L)
-  const [isMultiRewriteQueueRunning, setIsMultiRewriteQueueRunning] = useState(false)
-  const [multiRewriteQueueStatus, setMultiRewriteQueueStatus] = useState('')
-  const [multiRewriteQueueError, setMultiRewriteQueueError] = useState('')
-  const [lastMultiRewriteQueue, setLastMultiRewriteQueue] = useState<LastMultiRewriteQueue | null>(null)
-
-  // AI Reel Factory (Phase15-A / Phase15-B)
-  const [factoryRunning, setFactoryRunning] = useState(false)
-  const [factoryStep, setFactoryStep] = useState('')
-  const [factoryError, setFactoryError] = useState('')
-  const [factoryLog, setFactoryLog] = useState<string[]>([])
-  const [factoryCurrentImageIndex, setFactoryCurrentImageIndex] = useState<number | null>(null)
-  const [factoryTotalImageCount, setFactoryTotalImageCount] = useState<number | null>(null)
-  const [factorySummary, setFactorySummary] = useState<FactorySummary | null>(null)
-  const [factoryHistory, setFactoryHistory] = useState<FactoryHistoryItem[]>([])
-  const [factoryNotice, setFactoryNotice] = useState('')
-  const [factoryWarning, setFactoryWarning] = useState('')
-
-  // Snapshot Preview (Phase14-N)
-  const [expandedSnapshotIds, setExpandedSnapshotIds] = useState<string[]>([])
-
-  // Snapshot Diff View (Phase14-O)
-  const [expandedDiffIds, setExpandedDiffIds] = useState<string[]>([])
-
-  // AI Rewrite Explain (Phase14-R)
-  const [rewriteExplainResults, setRewriteExplainResults] = useState<Record<string, RewriteExplainResult>>({})
-  const [rewriteExplainLoadingIds, setRewriteExplainLoadingIds] = useState<string[]>([])
-  const [rewriteExplainErrors, setRewriteExplainErrors] = useState<Record<string, string>>({})
-
-  // カスタムプリセット (Phase12-P)
-  const [customPresets, setCustomPresets] = useState<CustomPreset[]>([])
-  const [customPresetForm, setCustomPresetForm] = useState({
-    name: '',
-    presetKey: '' as AIPresetKey | '',
-    tone: '',
-    targetAudience: '',
-    platform: '',
-    imageStyle: '',
-    ctaText: '',
-  })
-  const [selectedCustomPresetId, setSelectedCustomPresetId] = useState('')
-  const [presetImportNotice, setPresetImportNotice] = useState('')
-  const presetImportRef = useRef<HTMLInputElement>(null)
-
-  // AI Insight (Phase12-X/Y)
-  const [presetInsight, setPresetInsight] = useState<PresetInsight | null>(null)
-  const [isGeneratingPresetInsight, setIsGeneratingPresetInsight] = useState(false)
-  const [presetInsightError, setPresetInsightError] = useState('')
-  const [createdInsightIndices, setCreatedInsightIndices] = useState<Set<number>>(new Set())
-  const [isAnalyticsExpanded, setIsAnalyticsExpanded] = useState(false)
-
-  // カスタムプリセット 編集 (Phase12-R)
-  const [editingCustomPresetId, setEditingCustomPresetId] = useState('')
-
-  const [editingCustomPresetForm, setEditingCustomPresetForm] = useState<{
-    name: string
-    presetKey: AIPresetKey | ''
-    tone: string
-    targetAudience: string
-    platform: string
-    imageStyle: string
-    ctaText: string
-  } | null>(null)
-
-  // AI 画像生成 (Phase12-E)
-  const [imageGeneratingId, setImageGeneratingId] = useState<number | null>(null)
-  const [imageGenerateErrors, setImageGenerateErrors] = useState<Record<number, string>>({})
-
-  // AI 一括画像生成 (Phase12-F)
-  const [bulkImageGenerating, setBulkImageGenerating] = useState(false)
-  const [bulkImageProgress, setBulkImageProgress] = useState({ current: 0, total: 0 })
-  const [bulkImageMessage, setBulkImageMessage] = useState('')
-
-  // AIワークフロー (Phase12-H)
-  const [workflowStep, setWorkflowStep] = useState<AIWorkflowStep>('theme')
-  const [workflowMessage, setWorkflowMessage] = useState('')
-  const [workflowError, setWorkflowError] = useState('')
-
-  // 自動ワークフロー (Phase12-I)
-  const [autoWorkflowRunning, setAutoWorkflowRunning] = useState(false)
-
-  // 生成済み素材管理 (Phase12-G)
-  const [generatedAssets, setGeneratedAssets] = useState<Array<{ filename: string; path: string; size: number; createdAt: string }>>([])
-  const [assetsLoading, setAssetsLoading] = useState(false)
-  const [assetsMessage, setAssetsMessage] = useState('')
-
-  // テンプレート管理 (Phase11 / Phase11.5-B)
-  const [recentTemplateIds, setRecentTemplateIds] = useState<string[]>(() => loadRecentIds())
-
-  // テンプレートギャラリー強化 (Phase11.5-F)
-  const [usageMap, setUsageMap] = useState<Record<string, number>>(() => loadUsage())
-
-  const fetchGeneratedAssets = useCallback(async () => {
-    setAssetsLoading(true)
-    try {
-      const res = await fetch('/api/assets/generated')
-      const data = await res.json()
-      if (data.ok) setGeneratedAssets(data.assets)
-    } catch (_) {}
-    finally { setAssetsLoading(false) }
-  }, [])
-
-  const fetchHistory = useCallback(async () => {
-    try {
-      const res = await fetch('/api/render/history')
-      const data = await res.json()
-      if (data.ok) {
-        setHistory(data.items as HistoryItem[])
-        setHistoryError(false)
-      } else {
-        setHistoryError(true)
-      }
-    } catch (_) {
-      setHistoryError(true)
-    }
-  }, [])
-
-  const fetchTemplates = useCallback(async () => {
-    try {
-      const res = await fetch('/api/templates')
-      const data = await res.json()
-      if (data.ok) setTemplates(data.templates as TemplateInfo[])
-    } catch (_) {}
-  }, [])
 
   const fetchReelAiConfig = useCallback(async () => {
     try {
@@ -1217,1692 +601,388 @@ export default function App() {
     } catch (_) {}
   }, [])
 
-  const confirmLoadTemplate = useCallback((id: string) => {
-    setTemplateConfirmPending(id)
-  }, [])
+  const postingManager = usePostingManager({
+    slides,
+    title,
+    selectedPresetKey,
+    customPresets,
+    selectedCustomPresetId,
+    selectedTemplateId,
+    simpleTemplateId,
+    aiTheme,
+    templates,
+    updateLatestHistory,
+  })
+  const {
+    snsCaption,
+    setSnsCaption,
+    isGeneratingSnsCaption,
+    snsCaptionError,
+    copiedSnsField,
+    copiedAllCaption,
+    copiedCaptionLabel,
+    editingCaptionKey,
+    editingCaptionText,
+    setEditingCaptionText,
+    regeneratingCaptionKey,
+    postChecklist,
+    isPostChecklistComplete,
+    postedRecords,
+    postedForm,
+    setPostedForm,
+    postedRecordsImportMessage,
+    postedRecordsImportError,
+    postedReport,
+    generateSnsCaption,
+    regenerateCaptionPart,
+    copySnsText,
+    copyAllCaptions,
+    copyCaptionText,
+    startCaptionEdit,
+    cancelCaptionEdit,
+    saveCaptionEdit,
+    togglePostChecklist,
+    resetPostChecklist,
+    resetPostedRecords,
+    addPostedRecord,
+    deletePostedRecord,
+    exportPostedRecordsCsv,
+    exportPostedRecordsJson,
+    handleImportPostedRecordsJson,
+  } = postingManager
+  newProjectSideEffectsRef.current = () => {
+    setAiTheme('')
+    setIsSimpleAdvancedSettingsOpen(false)
+    resetPostChecklist()
+    resetPostedRecords()
+  }
 
-  const loadTemplate = useCallback(async (id: string) => {
-    setTemplateConfirmPending(null)
-    try {
-      const res = await fetch(`/api/templates/${encodeURIComponent(id)}`)
-      const data = await res.json()
-      if (!data.ok || !data.template) return
-      const tpl = data.template as Template
-      const keys = extractTemplateVariables(tpl.slides)
-      setRawTemplateSlides(tpl.slides)
-      setTemplateVariableKeys(keys)
-      setVariableValues({})
-      setSlides(tpl.slides)
-      setCtaConfig(tpl.cta)
-      setTitle(tpl.title ?? tpl.name)
-      setTemplateHints(tpl.hints ?? null)
-      setSelectedTemplateId(id)
-      if (tpl.slides.length > 0) setSelectedId(tpl.slides[0].id)
-      setHasUnsavedChanges(true)
-      setRecentTemplateIds((prev) => {
-        const next = pushRecentId(id, prev)
-        saveRecentIds(next)
-        return next
-      })
-      setUsageMap((prev) => {
-        const next = { ...prev, [id]: (prev[id] ?? 0) + 1 }
-        localStorage.setItem(USAGE_KEY, JSON.stringify(next))
-        return next
-      })
-    } catch (_) {}
-  }, [setRecentTemplateIds])
-
-  const saveAsTemplate = useCallback(async () => {
-    if (!saveTemplateName.trim()) return
-    setSaveTemplateStatus('saving')
-    try {
-      const variables = extractTemplateVariables(rawTemplateSlides ?? slides)
-      const payload = {
-        name: saveTemplateName.trim(),
-        title,
-        slides,
-        cta: ctaConfig,
-        category: saveTemplateCategory,
-        description: saveTemplateDescription.trim(),
-        variables,
-        thumbnail: slides[0]?.image ?? '',
-      }
-      const res = await fetch('/api/templates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      const body = await res.json()
-      if (!res.ok) throw new Error(body.message ?? `HTTP ${res.status}`)
-      setSaveTemplateStatus('ok')
-      await fetchTemplates()
-      setTimeout(() => {
-        setSaveTemplateStatus('idle')
-        setSaveTemplateModal(false)
-        setSaveTemplateName('')
-        setSaveTemplateCategory('other')
-        setSaveTemplateDescription('')
-      }, 1500)
-    } catch (_) {
-      setSaveTemplateStatus('error')
-      setTimeout(() => setSaveTemplateStatus('idle'), 3000)
-    }
-  }, [saveTemplateName, saveTemplateCategory, saveTemplateDescription, title, slides, ctaConfig, rawTemplateSlides, fetchTemplates])
-
-  const duplicateTemplate = useCallback(async (id: string) => {
-    try {
-      const res = await fetch('/api/templates/duplicate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message)
-      await fetchTemplates()
-    } catch (_) {}
-  }, [fetchTemplates])
-
-  const deleteTemplate = useCallback(async (id: string) => {
-    const res = await fetch(`/api/templates/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    const data = await res.json()
-    if (!data.ok) throw new Error(data.message)
-    if (selectedTemplateId === id) setSelectedTemplateId('')
-    await fetchTemplates()
-  }, [fetchTemplates, selectedTemplateId])
-
-  const renameTemplate = useCallback(async (id: string, name: string) => {
-    const res = await fetch(`/api/templates/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    const data = await res.json()
-    if (!data.ok) throw new Error(data.message)
-    await fetchTemplates()
-  }, [fetchTemplates])
-
-  const handleVariableChange = useCallback((key: string, value: string) => {
-    setVariableValues((prev) => {
-      const next = { ...prev, [key]: value }
-      if (rawTemplateSlides) {
-        setSlides(applyTemplateVariables(rawTemplateSlides, next))
-        setHasUnsavedChanges(true)
-      }
-      return next
-    })
-  }, [rawTemplateSlides])
-
-  const handleAIGenerate = useCallback(async (): Promise<boolean> => {
-    if (!aiTheme.trim() || isGenerating) return false
-    setIsGenerating(true)
-    setGenerateError('')
-    setGenerateSuccess(false)
-    try {
-      const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId)
-      const effectivePresetKey = simpleTemplateId === 'mmm-event' ? 'mmm_event' : selectedPresetKey
-      const story = await generateStory(
-        aiTheme.trim(),
-        effectivePresetKey,
-        selectedCustomPreset
-          ? {
-              tone: selectedCustomPreset.tone,
-              targetAudience: selectedCustomPreset.targetAudience,
-              platform: selectedCustomPreset.platform,
-              imageStyle: selectedCustomPreset.imageStyle,
-              ctaText: selectedCustomPreset.ctaText,
-            }
-          : null,
-        visualStyleTags.length > 0 ? visualStyleTags : undefined
-      )
-
-      // 1. variables を更新
-      const next: TemplateVariableValues = { ...variableValues }
-      for (const [key, value] of Object.entries(story.variables)) {
-        if (templateVariableKeys.includes(key)) {
-          next[key] = value
-        }
-      }
-      const shouldApplyRecommendedCta = simpleTemplateType !== 'custom' && recommendedCtaLabel
-      if (shouldApplyRecommendedCta && templateVariableKeys.includes('cta')) {
-        next.cta = recommendedCtaLabel
-      }
-      setVariableValues(next)
-
-      // 2. rawTemplateSlides に variables 反映
-      const baseSlides = rawTemplateSlides
-        ? applyTemplateVariables(rawTemplateSlides, next)
-        : slides
-
-      // 3. story.slides を上書き
-      const nextSlides = baseSlides.map((slide, index) => {
-        const generated = story.slides[index]
-        if (!generated) return slide
-        return {
-          ...slide,
-          headline: generated.headline,
-          subline: generated.subline ?? slide.subline,
-          emphasis: generated.emphasis ?? slide.emphasis,
-          imagePrompt: generated.imagePrompt ?? slide.imagePrompt,
-          ctaLabel: slide.layout === 'cta' && shouldApplyRecommendedCta ? recommendedCtaLabel : slide.ctaLabel,
-        }
-      })
-
-      setSlides(nextSlides)
-      setHasUnsavedChanges(true)
-      setGenerateSuccess(true)
-
-      const historyEntry: AIGenerationHistory = {
-        id: crypto.randomUUID(),
-        createdAt: new Date().toISOString(),
-        theme: aiTheme.trim(),
-        presetKey: selectedPresetKey,
-        templateId: selectedTemplateId || undefined,
-        templateName: templates.find((t) => t.id === selectedTemplateId)?.name,
-        slideCount: story.slides.length,
-        imageCount: nextSlides.filter((s) => s.image?.startsWith('generated/')).length,
-        renderStatus: 'none',
-      }
-      setAiGenerationHistory((prev) => {
-        const next = [historyEntry, ...prev].slice(0, 20)
-        try { localStorage.setItem(AI_GENERATION_HISTORY_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
-
-      if (selectedCustomPresetId) {
-        const now = new Date().toISOString()
-        setCustomPresets((prev) => {
-          const next = prev.map((p) => {
-            if (p.id !== selectedCustomPresetId) return p
-            const logs = [...(p.usedAt ?? []), now].slice(-100)
-            return { ...p, useCount: (p.useCount ?? 0) + 1, usedAt: logs, lastUsedAt: now }
-          })
-          try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-          return next
-        })
-      }
-
-      return true
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'AI生成に失敗しました'
-      if (err instanceof Error && (err as Error & { errorType?: string }).errorType === 'quota') {
-        setQuotaError(true)
-      }
-      setGenerateError(msg)
-      return false
-    } finally {
-      setIsGenerating(false)
-    }
-  }, [aiTheme, selectedPresetKey, isGenerating, variableValues, templateVariableKeys, rawTemplateSlides, slides, selectedTemplateId, templates, customPresets, selectedCustomPresetId, visualStyleTags, recommendedCtaLabel, simpleTemplateType])
-
-  const deleteAIGenerationHistoryItem = useCallback((id: string) => {
-    setAiGenerationHistory((prev) => {
-      const next = prev.filter((h) => h.id !== id)
-      try { localStorage.setItem(AI_GENERATION_HISTORY_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
-
-  const clearAIGenerationHistory = useCallback(() => {
-    setAiGenerationHistory([])
-    try { localStorage.removeItem(AI_GENERATION_HISTORY_KEY) } catch {}
-  }, [])
-
-  const updateLatestHistory = useCallback((patch: Partial<AIGenerationHistory>) => {
-    setAiGenerationHistory((prev) => {
-      if (prev.length === 0) return prev
-      const next = [{ ...prev[0], ...patch }, ...prev.slice(1)]
-      try { localStorage.setItem(AI_GENERATION_HISTORY_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
-
-  const exportAIGenerationHistory = useCallback(() => {
-    const blob = new Blob([JSON.stringify(aiGenerationHistory, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'bemystyle-reel-ai-history.json'
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [aiGenerationHistory])
-
-  const handleSaveCustomPreset = useCallback(() => {
-    const { name, tone, targetAudience, platform, imageStyle, ctaText } = customPresetForm
-    if (!name || !tone || !targetAudience || !platform || !imageStyle || !ctaText) return
-    const base = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      ...customPresetForm,
-    }
-    setCustomPresets((prev) => {
-      const newPreset: CustomPreset = { ...base, sortOrder: prev.length }
-      const next = [newPreset, ...prev].slice(0, 10)
-      try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-    setCustomPresetForm({ name: '', presetKey: '', tone: '', targetAudience: '', platform: '', imageStyle: '', ctaText: '' })
-  }, [customPresetForm])
-
-  const handleDeleteCustomPreset = useCallback((id: string) => {
-    setCustomPresets((prev) => {
-      const next = prev.filter((p) => p.id !== id)
-      try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-    setSelectedCustomPresetId((current) => current === id ? '' : current)
-  }, [])
-
-  const handleUseCustomPreset = useCallback((preset: CustomPreset) => {
-    setSelectedCustomPresetId(preset.id)
-    setSelectedPresetKey(preset.presetKey)
-    setWorkflowMessage('カスタムプリセットを適用しました。')
-  }, [])
-
-  const handleExportCustomPresets = useCallback(() => {
-    const blob = new Blob([JSON.stringify(customPresets, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'bemystyle-reel-custom-presets.json'
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [customPresets])
-
-  const handleImportCustomPresets = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const input = e.target
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      try {
-        const parsed: unknown = JSON.parse(ev.target?.result as string)
-        if (!Array.isArray(parsed)) throw new Error('JSON形式を確認してください')
-        const validated = (parsed as unknown[]).filter((item): item is CustomPreset => {
-          if (typeof item !== 'object' || item === null) return false
-          const p = item as Record<string, unknown>
-          return (
-            typeof p.id === 'string' &&
-            typeof p.name === 'string' && (p.name as string).trim() !== '' &&
-            typeof p.tone === 'string' && (p.tone as string).trim() !== '' &&
-            typeof p.targetAudience === 'string' && (p.targetAudience as string).trim() !== '' &&
-            typeof p.platform === 'string' && (p.platform as string).trim() !== '' &&
-            typeof p.imageStyle === 'string' && (p.imageStyle as string).trim() !== '' &&
-            typeof p.ctaText === 'string' && (p.ctaText as string).trim() !== '' &&
-            typeof p.createdAt === 'string' &&
-            (p.presetKey === undefined || VALID_CUSTOM_PRESET_KEYS.has(p.presetKey as string))
-          )
-        })
-        if (validated.length === 0) throw new Error('有効なプリセットが見つかりません')
-        setCustomPresets((prev) => {
-          const seen = new Set<string>(prev.map((p) => p.id))
-          const newOnes = validated.filter((p) => !seen.has(p.id))
-          const next = [...newOnes, ...prev].slice(0, 10)
-          try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-          return next
-        })
-        setPresetImportNotice(`${validated.length}件のカスタムプリセットをインポートしました`)
-      } catch (err) {
-        setPresetImportNotice(
-          err instanceof Error ? `インポート失敗: ${err.message}` : 'インポート失敗: JSON形式を確認してください'
-        )
-      }
-      setTimeout(() => setPresetImportNotice(''), 4000)
-      input.value = ''
-    }
-    reader.readAsText(file)
-  }, [])
-
-  const handleSaveEditCustomPreset = useCallback(() => {
-    if (!editingCustomPresetForm) return
-    const { name, tone, targetAudience, platform, imageStyle, ctaText } = editingCustomPresetForm
-    if (!name || !tone || !targetAudience || !platform || !imageStyle || !ctaText) return
-    setCustomPresets((prev) => {
-      const next = prev.map((preset) =>
-        preset.id === editingCustomPresetId
-          ? { ...preset, ...editingCustomPresetForm }
-          : preset
-      )
-      try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-    setEditingCustomPresetId('')
-    setEditingCustomPresetForm(null)
-  }, [editingCustomPresetId, editingCustomPresetForm])
-
-  const handleDuplicateCustomPreset = useCallback((preset: CustomPreset) => {
-    if (customPresets.length >= 10) {
-      setPresetImportNotice('プリセットは最大10件です。先に削除してください。')
-      setTimeout(() => setPresetImportNotice(''), 3000)
-      return
-    }
-    const base = {
-      ...preset,
-      id: crypto.randomUUID(),
-      name: `${preset.name} コピー`,
-      createdAt: new Date().toISOString(),
-      isFavorite: false,
-      useCount: 0,
-    }
-    setCustomPresets((prev) => {
-      const newPreset: CustomPreset = { ...base, sortOrder: prev.length }
-      const next = [...prev, newPreset]
-      try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [customPresets.length])
-
-  const handleClearCustomPresets = useCallback(() => {
-    if (!window.confirm('カスタムプリセットをすべて削除しますか？')) return
-    setCustomPresets([])
-    setSelectedCustomPresetId('')
-    try { localStorage.removeItem(CUSTOM_PRESETS_KEY) } catch {}
-  }, [])
-
-  const handleExportAnalyticsCsv = useCallback(() => {
-    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
-    const header = ['id', 'name', 'presetKey', 'isFavorite', 'useCount', 'sortOrder', 'platform', 'imageStyle', 'ctaText', 'createdAt', 'lastUsedAt', 'usedAtCount']
-    const rows = customPresets.map((p) => [
-      esc(p.id),
-      esc(p.name),
-      esc(p.presetKey),
-      p.isFavorite ? 'true' : 'false',
-      String(p.useCount ?? 0),
-      String(p.sortOrder ?? ''),
-      esc(p.platform),
-      esc(p.imageStyle),
-      esc(p.ctaText),
-      esc(p.createdAt),
-      esc(p.lastUsedAt ?? ''),
-      String((p.usedAt ?? []).length),
-    ].join(','))
-    const csv = '﻿' + [header.join(','), ...rows].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `custom-presets-analytics-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [customPresets])
-
-  const handleGeneratePresetInsight = useCallback(async () => {
-    if (customPresets.length === 0) return
-    setIsGeneratingPresetInsight(true)
-    setPresetInsightError('')
-    setPresetInsight(null)
-    try {
-      const payload = customPresets.map((p) => ({
-        name: p.name,
-        presetKey: p.presetKey,
-        tone: p.tone,
-        targetAudience: p.targetAudience,
-        platform: p.platform,
-        imageStyle: p.imageStyle,
-        ctaText: p.ctaText,
-        useCount: p.useCount ?? 0,
-        isFavorite: p.isFavorite ?? false,
-        lastUsedAt: p.lastUsedAt ?? '',
-        usedAtCount: (p.usedAt ?? []).length,
-      }))
-      const res = await fetch('/api/custom-preset-insights', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ presets: payload }),
-      })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message ?? 'AI提案の取得に失敗しました')
-      const raw = data.insight
-      const combos: RecommendedPreset[] = (raw.recommendedCombinations ?? []).map((item: unknown) =>
-        typeof item === 'string'
-          ? { name: item, tone: '', targetAudience: '', platform: '', imageStyle: '', ctaText: '', reason: '' }
-          : { name: '', tone: '', targetAudience: '', platform: '', imageStyle: '', ctaText: '', reason: '', ...(item as object) }
-      )
-      setPresetInsight({ ...raw, recommendedCombinations: combos })
-      setCreatedInsightIndices(new Set())
-    } catch (err) {
-      setPresetInsightError(err instanceof Error ? err.message : 'AI提案の取得に失敗しました')
-    } finally {
-      setIsGeneratingPresetInsight(false)
-    }
-  }, [customPresets])
-
-  const handleSaveInsightPreset = useCallback((combo: RecommendedPreset, index: number) => {
-    setCustomPresets((prev) => {
-      if (prev.length >= 10) return prev
-      const now = new Date().toISOString()
-      const newPreset: CustomPreset = {
-        id: `custom-${Date.now()}`,
-        name: combo.name || 'AI提案プリセット',
-        presetKey: '',
-        tone: combo.tone || '',
-        targetAudience: combo.targetAudience || '',
-        platform: combo.platform || '',
-        imageStyle: combo.imageStyle || '',
-        ctaText: combo.ctaText || '',
-        createdAt: now,
-        isFavorite: false,
-        useCount: 0,
-        sortOrder: prev.length,
-        usedAt: [],
-        lastUsedAt: '',
-      }
-      const next = [...prev, newPreset]
-      try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-    setCreatedInsightIndices((prev) => new Set([...prev, index]))
-  }, [])
-
-  const handleToggleFavoriteCustomPreset = useCallback((id: string) => {
-    setCustomPresets((prev) => {
-      const next = prev.map((p) => p.id === id ? { ...p, isFavorite: !p.isFavorite } : p)
-      try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
-
-  const handleMoveCustomPreset = useCallback((id: string, direction: 'up' | 'down') => {
-    setCustomPresets((prev) => {
-      const sorted = [...prev].sort((a, b) => {
-        if (a.isFavorite && !b.isFavorite) return -1
-        if (!a.isFavorite && b.isFavorite) return 1
-        const ao = a.sortOrder ?? Infinity
-        const bo = b.sortOrder ?? Infinity
-        if (ao !== bo) return ao - bo
-        const ac = a.useCount ?? 0
-        const bc = b.useCount ?? 0
-        if (ac !== bc) return bc - ac
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      })
-      const idx = sorted.findIndex((p) => p.id === id)
-      if (idx < 0) return prev
-      if (direction === 'up') {
-        if (idx === 0) return prev
-        if (!sorted[idx].isFavorite && sorted[idx - 1].isFavorite) return prev
-        ;[sorted[idx - 1], sorted[idx]] = [sorted[idx], sorted[idx - 1]]
-      } else {
-        if (idx === sorted.length - 1) return prev
-        if (sorted[idx].isFavorite && !sorted[idx + 1].isFavorite) return prev
-        ;[sorted[idx], sorted[idx + 1]] = [sorted[idx + 1], sorted[idx]]
-      }
-      const byId = Object.fromEntries(sorted.map((p, i) => [p.id, { ...p, sortOrder: i }]))
-      const next = prev.map((p) => byId[p.id] ?? p)
-      try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
-
-  const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      try {
-        const parsed: unknown = JSON.parse(ev.target?.result as string)
-        if (!Array.isArray(parsed)) throw new Error('配列ではありません')
-        const validated = (parsed as unknown[]).filter((item): item is AIGenerationHistory => {
-          return (
-            typeof item === 'object' && item !== null &&
-            typeof (item as AIGenerationHistory).id === 'string' &&
-            typeof (item as AIGenerationHistory).createdAt === 'string' &&
-            typeof (item as AIGenerationHistory).theme === 'string'
-          )
-        })
-        if (validated.length === 0) throw new Error('有効な履歴が見つかりません')
-        setAiGenerationHistory((prev) => {
-          const seen = new Set<string>()
-          const next = [...validated, ...prev].filter((h) => {
-            if (seen.has(h.id)) return false
-            seen.add(h.id)
-            return true
-          }).slice(0, 20)
-          try { localStorage.setItem(AI_GENERATION_HISTORY_KEY, JSON.stringify(next)) } catch {}
-          return next
-        })
-        setImportNotice(`${validated.length}件をインポートしました`)
-      } catch (err) {
-        setImportNotice(err instanceof Error ? `インポート失敗: ${err.message}` : 'インポートに失敗しました')
-      }
-      setTimeout(() => setImportNotice(''), 4000)
-      if (importInputRef.current) importInputRef.current.value = ''
-    }
-    reader.readAsText(file)
-  }, [])
+  const eventPosting = useEventPosting({
+    qrFileName,
+    bgmFileName,
+    mmmEventForm,
+    snsCaption,
+    selectedMmmEventPresetId,
+    aiTheme,
+    editPresets,
+    mmmEventPresets,
+    setMmmEventPresets,
+    setEditPresets,
+  })
+  const {
+    eventPostChecklist,
+    eventPostDate,
+    eventPostRecords,
+    eventPostRecordForm,
+    eventPostFilter,
+    setEventPostChecklist,
+    setEventPostDate,
+    setEventPostRecordForm,
+    setEventPostFilter,
+    toggleEventPostChecklist,
+    saveEventPostRecord,
+    deleteEventPostRecord,
+    exportEventPostRecordsCsv,
+    exportReelBackupJson,
+    handleImportReelBackupJson,
+    eventPostChecklistCount,
+    isEventPostChecklistComplete,
+    eventPostReport,
+    eventDashboardStats,
+    filteredEventPostRecords,
+    isEventPostFilterActive,
+    backupImportMessage,
+    backupImportError,
+  } = eventPosting
 
   const handleReuseHistory = useCallback((h: AIGenerationHistory) => {
     setAiTheme(h.theme)
     setSelectedPresetKey(h.presetKey)
-    setWorkflowStep('theme')
     setSnsCaption(h.snsCaption ?? null)
     setRenderVariantName(h.renderVariantName ?? "")
     if (h.templateId && templates.some((t) => t.id === h.templateId)) {
       confirmLoadTemplate(h.templateId)
-      setWorkflowMessage('履歴からテーマとテンプレートを復元しました。')
-    } else if (h.templateId) {
-      setWorkflowMessage('テンプレートが見つからないため、テーマのみ復元しました。')
-    } else {
-      setWorkflowMessage('履歴からテーマを復元しました。')
     }
   }, [templates, confirmLoadTemplate])
 
-  const scoreVariants = useCallback(async () => {
-    if (!aiTheme.trim() || generatedVariants.length === 0) return
-    setIsScoringVariants(true)
-    setVariantScoreError('')
-    try {
-      const res = await fetch('/api/score-variants', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          theme: aiTheme.trim(),
-          variants: generatedVariants,
-          learningEvents: variantLearningEvents.slice(0, 50),
-        }),
-      })
-      const data = await res.json()
-      if (!data.ok) {
-        setVariantScoreError(data.message ?? 'Failed to score variants')
-        return
-      }
-      const scores: VariantScore[] = data.scores
-      setVariantScores(scores)
-      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
-    } catch {
-      setVariantScoreError('Failed to score variants')
-    } finally {
-      setIsScoringVariants(false)
-    }
-  }, [aiTheme, generatedVariants, variantLearningEvents])
+  // Phase23-U: Variant state / callbacks を useVariantManager に分離
+  const variantManager = useVariantManager({
+    aiTheme,
+    slides,
+    setSlides,
+    addVariantNameToQueue,
+    addVariantNamesToQueue,
+  })
+  const {
+    generatedVariants,
+    isGeneratingVariants,
+    variantGenerateError,
+    variantScores,
+    isScoringVariants,
+    variantScoreError,
+    rewrittenStories,
+    isRewritingStory,
+    rewriteStoryError,
+    variantLearningEvents,
+    autoGenerateNotice,
+    smartQueueMessage,
+    variantLearningSummary,
+    generateAIVariants,
+    autoGenerateVariants,
+    scoreVariants,
+    rewriteStory,
+    applyRewrittenStory,
+    recordLearningEvent,
+    clearLearningData,
+    addVariantToQueue,
+    addAllVariantsToQueue,
+    addSmartQueue,
+    setGeneratedVariants,
+    setVariantScores,
+    generatedVariantsRef,
+    variantScoresRef,
+  } = variantManager
 
-  const recordLearningEvent = useCallback((event: Omit<VariantLearningEvent, 'id' | 'createdAt'>) => {
-    const full: VariantLearningEvent = { ...event, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
-    setVariantLearningEvents((prev) => {
-      const next = [full, ...prev]
-      try { localStorage.setItem(VARIANT_LEARNING_EVENTS_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
+  const compareDashboard = useCompareDashboard({
+    renderQueue,
+    generatedVariants,
+    variantScores,
+    variantLearningEvents,
+    aiTheme,
+    slides,
+    recordLearningEvent,
+  })
+  const { ensureSnapshotExpanded } = compareDashboard
 
-  const clearLearningData = useCallback(() => {
-    setVariantLearningEvents([])
-    try { localStorage.removeItem(VARIANT_LEARNING_EVENTS_KEY) } catch {}
-  }, [])
+  const updateQueueItem = updateQueueItemFromHook
 
-  const handleExplainRewrite = useCallback(async (item: RenderQueueItem, opts?: { force?: boolean }) => {
-    if (!item.slidesSnapshot || item.slidesSnapshot.length === 0) return
-    if (rewriteExplainLoadingIds.includes(item.id)) return
-    if (!opts?.force && rewriteExplainResults[item.id]) return
-    setRewriteExplainLoadingIds(prev => [...prev, item.id])
-    setRewriteExplainErrors(prev => { const n = { ...prev }; delete n[item.id]; return n })
-    const score = variantScores.find(s => s.variantName === item.variantName)
-    try {
-      const res = await fetch('/api/explain-rewrite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          beforeSlides: slides,
-          afterSlides: item.slidesSnapshot,
-          variantName: item.variantName,
-          score: score ? {
-            recommendation: score.recommendation,
-            predictedViews: score.predictedViews,
-            savePotential: score.savePotential,
-            ctaStrength: score.ctaStrength,
-          } : undefined,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok || !data.ok) {
-        setRewriteExplainErrors(prev => ({ ...prev, [item.id]: data.message ?? 'リライト分析に失敗しました。' }))
-        return
-      }
-      setRewriteExplainResults(prev => {
-        const next = { ...prev, [item.id]: data.result }
-        try { localStorage.setItem(REWRITE_EXPLAIN_CACHE_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
-    } catch {
-      setRewriteExplainErrors(prev => ({ ...prev, [item.id]: 'リライト分析に失敗しました。' }))
-    } finally {
-      setRewriteExplainLoadingIds(prev => prev.filter(x => x !== item.id))
-    }
-  }, [slides, variantScores, rewriteExplainLoadingIds, rewriteExplainResults])
-
-  const selectBestVariant = useCallback((id: string) => {
-    setBestVariantId(id)
-    try { localStorage.setItem(BEST_VARIANT_KEY, id) } catch {}
-    const item = renderQueue.find((q) => q.id === id)
-    if (item) {
-      const angle = generatedVariants.find((v) => v.name === item.variantName)?.angle ?? 'unknown'
-      recordLearningEvent({ theme: aiTheme, variantName: item.variantName, angle, action: 'selected_best' })
-      if (item.slidesSnapshot && item.slidesSnapshot.length > 0) {
-        setExpandedDiffIds(prev => prev.includes(id) ? prev : [...prev, id])
-        handleExplainRewrite(item)
-      }
-    }
-  }, [renderQueue, generatedVariants, aiTheme, recordLearningEvent, handleExplainRewrite])
-
-  const autoGenerateVariants = useCallback(() => {
-    let added = 0
-    let skipped = 0
-    setRenderQueue((prev) => {
-      const existingNames = new Set(prev.map((q) => q.variantName))
-      const newItems: RenderQueueItem[] = []
-      for (const variantName of AUTO_VARIANT_TEMPLATES) {
-        if (existingNames.has(variantName)) {
-          skipped++
-        } else {
-          newItems.push({ id: crypto.randomUUID(), variantName, status: 'pending' })
-          added++
-        }
-      }
-      const next = [...prev, ...newItems]
-      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-    setTimeout(() => {
-      setAutoGenerateNotice(
-        skipped > 0
-          ? `${added}件追加しました（${skipped}件は既に存在します）`
-          : `${added}件追加しました`
-      )
-      setTimeout(() => setAutoGenerateNotice(''), 4000)
-    }, 0)
-  }, [])
+  const renderRunner = useRenderQueueRunner({
+    renderQueue,
+    slideCount,
+    hasUnsavedChanges,
+    updateQueueItem,
+    saveToServer,
+    saveSnapshotToServer,
+    updateLatestHistory,
+    fetchHistory,
+  })
+  const {
+    batchRender,
+    startRender,
+    isBatchRendering,
+    isPreparingRender,
+    renderVariantName,
+    setRenderVariantName,
+    renderError,
+    renderStatus,
+    elapsedSec,
+    latestDownloadUrl,
+  } = renderRunner
 
   const addToQueue = useCallback(() => {
-    const item: RenderQueueItem = {
-      id: crypto.randomUUID(),
-      variantName: renderVariantName.trim() || 'Default',
-      status: 'pending',
-    }
-    setRenderQueue((prev) => {
-      const next = [...prev, item]
-      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [renderVariantName])
+    addVariantNameToQueue(renderVariantName.trim() || 'Default')
+  }, [renderVariantName, addVariantNameToQueue])
 
-  const removeFromQueue = useCallback((id: string) => {
-    setRenderQueue((prev) => {
-      const next = prev.filter((q) => q.id !== id)
-      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
+  // Keep ref updated so pipelines always read the latest state
+  batchRenderRef.current = batchRender
 
-  const clearQueue = useCallback(() => {
-    setRenderQueue((prev) => {
-      const rendering = prev.filter((q) => q.status === 'rendering')
-      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(rendering)) } catch {}
-      return rendering
-    })
-  }, [])
-
-  const toggleSnapshotPreview = useCallback((id: string) => {
-    setExpandedSnapshotIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    )
-  }, [])
-
-  const toggleDiffView = useCallback((id: string) => {
-    setExpandedDiffIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    )
-  }, [])
-
-  const generateAIVariants = useCallback(async () => {
-    if (!aiTheme.trim()) return
-    setIsGeneratingVariants(true)
-    setVariantGenerateError('')
-    try {
-      const res = await fetch('/api/variant-generator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: aiTheme.trim() }),
-      })
-      const data = await res.json()
-      if (!data.ok) {
-        setVariantGenerateError(data.message ?? 'Failed to generate variants')
-        return
-      }
-      const variants: GeneratedVariant[] = data.variants
-      setGeneratedVariants(variants)
-      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
-    } catch {
-      setVariantGenerateError('Failed to generate variants')
-    } finally {
-      setIsGeneratingVariants(false)
-    }
-  }, [aiTheme])
-
-  const rewriteStory = useCallback(async (angle: string) => {
-    if (slides.length === 0) return
-    setIsRewritingStory((prev) => ({ ...prev, [angle]: true }))
-    setRewriteStoryError((prev) => ({ ...prev, [angle]: '' }))
-    try {
-      const res = await fetch('/api/rewrite-story', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          angle,
-          slides: slides.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
-        }),
-      })
-      const data = await res.json()
-      if (!data.ok) {
-        setRewriteStoryError((prev) => ({ ...prev, [angle]: data.message ?? 'ストーリーのリライトに失敗しました' }))
-        return
-      }
-      const rewritten: RewrittenSlide[] = data.slides
-      const merged: Slide[] = slides.map((s, i) => ({
-        ...s,
-        headline: rewritten[i]?.headline ?? s.headline,
-        subline:  rewritten[i]?.subline  ?? s.subline,
-        emphasis: rewritten[i]?.emphasis ?? s.emphasis,
-      }))
-      setRewrittenStories((prev) => {
-        const next = { ...prev, [angle]: merged }
-        try { localStorage.setItem(REWRITTEN_STORIES_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
-    } catch {
-      setRewriteStoryError((prev) => ({ ...prev, [angle]: 'ストーリーのリライトに失敗しました' }))
-    } finally {
-      setIsRewritingStory((prev) => ({ ...prev, [angle]: false }))
-    }
-  }, [slides])
-
-  const applyRewrittenStory = useCallback((angle: string) => {
-    const rewritten = rewrittenStories[angle]
-    if (!rewritten) return
-    const merged: Slide[] = slides.map((s, i) => {
-      const r = rewritten[i]
-      if (!r) return s
-      return { ...s, headline: r.headline, subline: r.subline, emphasis: r.emphasis }
-    })
-    setSlides(merged)
-    const variantName = generatedVariants.find((v) => v.angle === angle)?.name ?? angle
-    recordLearningEvent({ theme: aiTheme, variantName, angle, action: 'applied' })
-  }, [rewrittenStories, slides, generatedVariants, aiTheme, recordLearningEvent])
-
-  const addVariantToQueue = useCallback((variantName: string) => {
-    setRenderQueue((prev) => {
-      if (prev.some((q) => q.variantName === variantName)) return prev
-      const next = [...prev, { id: crypto.randomUUID(), variantName, status: 'pending' as const }]
-      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
-
-  const addAllVariantsToQueue = useCallback(() => {
-    setRenderQueue((prev) => {
-      const existingNames = new Set(prev.map((q) => q.variantName))
-      const newItems = generatedVariants
-        .filter((v) => !existingNames.has(v.name))
-        .map((v) => ({ id: crypto.randomUUID(), variantName: v.name, status: 'pending' as const }))
-      if (newItems.length === 0) return prev
-      const next = [...prev, ...newItems]
-      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [generatedVariants])
-
-  const addSmartQueue = useCallback(() => {
-    const recommended = variantScores.filter((s) => s.recommendation >= 4)
-    if (recommended.length === 0) {
-      setSmartQueueMessage('おすすめ度4以上のVariantがありません')
-      return
-    }
-    const targets = recommended.flatMap((score) => {
-      const v = generatedVariants.find(
-        (v) => v.name === score.variantName || v.angle === score.angle
-      )
-      return v ? [v] : []
-    })
-    const existingNames = new Set(renderQueue.map((q) => q.variantName))
-    const toAdd = targets.filter((v) => !existingNames.has(v.name))
-    const addedCount = toAdd.length
-    const skippedCount = targets.length - addedCount
-    if (addedCount > 0) {
-      setRenderQueue((prev) => {
-        const prevNames = new Set(prev.map((q) => q.variantName))
-        const newItems = toAdd
-          .filter((v) => !prevNames.has(v.name))
-          .map((v) => ({ id: crypto.randomUUID(), variantName: v.name, status: 'pending' as const }))
-        if (newItems.length === 0) return prev
-        const next = [...prev, ...newItems]
-        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
-    }
-    if (addedCount === 0) {
-      setSmartQueueMessage(`全${targets.length}件は既にQueueにあります`)
-    } else if (skippedCount > 0) {
-      setSmartQueueMessage(`${addedCount}件追加しました / ${skippedCount}件は既にQueueにあります`)
-    } else {
-      setSmartQueueMessage(`${addedCount}件をSmart Queueに追加しました`)
-    }
-  }, [variantScores, generatedVariants, renderQueue])
-
-  const updateQueueItem = useCallback((id: string, patch: Partial<RenderQueueItem>) => {
-    setRenderQueue((prev) => {
-      const next = prev.map((q) => q.id === id ? { ...q, ...patch } : q)
-      renderQueueRef.current = next
-      try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
-
-  const deleteGeneratedAsset = useCallback(async (filename: string) => {
-    try {
-      const res = await fetch(`/api/assets/generated/${encodeURIComponent(filename)}`, { method: 'DELETE' })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message)
-      setGeneratedAssets((prev) => prev.filter((a) => a.filename !== filename))
-      setAssetsMessage('削除しました')
-    } catch (err) {
-      setAssetsMessage(err instanceof Error ? err.message : '削除に失敗しました')
-    }
-    setTimeout(() => setAssetsMessage(''), 3000)
-  }, [])
-
-  const deleteUnusedAssets = useCallback(async (usedSet: Set<string>) => {
-    const unused = generatedAssets.filter((a) => !usedSet.has(a.path))
-    if (unused.length === 0) { setAssetsMessage('未使用画像はありません'); setTimeout(() => setAssetsMessage(''), 3000); return }
-    for (const asset of unused) {
-      try {
-        await fetch(`/api/assets/generated/${encodeURIComponent(asset.filename)}`, { method: 'DELETE' })
-      } catch (_) {}
-    }
-    setGeneratedAssets((prev) => prev.filter((a) => usedSet.has(a.path)))
-    setAssetsMessage(`${unused.length}枚の未使用画像を削除しました`)
-    setTimeout(() => setAssetsMessage(''), 3000)
-  }, [generatedAssets])
-
-  const toggleFavorite = useCallback(async (id: string, current: boolean) => {
-    try {
-      await fetch(`/api/templates/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ favorite: !current }),
-      })
-      await fetchTemplates()
-    } catch (_) {}
-  }, [fetchTemplates])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(AI_GENERATION_HISTORY_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed)) setAiGenerationHistory(parsed.slice(0, 20))
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CUSTOM_PRESETS_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed)) setCustomPresets(parsed.slice(0, 10))
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(RENDER_QUEUE_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed)) setRenderQueue(parsed)
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try { localStorage.setItem('reel-simple-mode', String(simpleMode)) } catch {}
-  }, [simpleMode])
-
-  useEffect(() => {
-    try { if (simpleTemplateType) localStorage.setItem(SIMPLE_TEMPLATE_TYPE_KEY, simpleTemplateType) } catch {}
-  }, [simpleTemplateType])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(BEST_VARIANT_KEY)
-      if (raw) setBestVariantId(raw)
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LAST_PIPELINE_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setLastPipeline(parsed as LastPipeline)
-      }
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(GENERATED_VARIANTS_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed)) setGeneratedVariants(parsed as GeneratedVariant[])
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(REWRITTEN_STORIES_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setRewrittenStories(parsed as Record<string, Slide[]>)
-      }
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(VARIANT_LEARNING_EVENTS_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed)) setVariantLearningEvents(parsed as VariantLearningEvent[])
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(VARIANT_SCORES_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed)) setVariantScores(parsed as VariantScore[])
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LAST_SMART_PIPELINE_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setLastSmartPipeline(parsed as LastSmartPipeline)
-      }
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LAST_SMART_REWRITE_PIPELINE_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setLastSmartRewritePipeline(parsed as LastSmartRewritePipeline)
-      }
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LAST_MULTI_REWRITE_QUEUE_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setLastMultiRewriteQueue(parsed as LastMultiRewriteQueue)
-      }
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(BEST_VARIANT_ANALYSIS_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setBestVariantAnalysis(parsed as BestVariantAnalysis)
-      }
-    } catch {}
-  }, [])
-
-  // Rewrite Explain Cache 復元 (Phase14-S)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(REWRITE_EXPLAIN_CACHE_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setRewriteExplainResults(parsed as Record<string, RewriteExplainResult>)
-      }
-    } catch {
-      console.warn('[Phase14-S] rewrite explain cache parse failed')
-    }
-  }, [])
-
-  // Factory Summary Cache 復元 (Phase15-C)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(FACTORY_SUMMARY_CACHE_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setFactorySummary(parsed as FactorySummary)
-      }
-    } catch {
-      console.warn('[Phase15-C] factory summary cache parse failed')
-    }
-  }, [])
-
-  // Factory History 復元 (Phase15-E)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(FACTORY_HISTORY_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed)) {
-        setFactoryHistory((parsed as FactoryHistoryItem[]).slice(0, 20))
-      }
-    } catch {
-      console.warn('[Phase15-E] factory history parse failed')
-    }
-  }, [])
-
-  // 自動テンプレ適用 (Phase12-M)
-  useEffect(() => {
-    if (!autoApplyRecommendedTemplate || !selectedPresetKey) return
-
-    const categories = PRESET_TEMPLATE_CATEGORY_MAP[selectedPresetKey]
-    const matched = templates.filter((t) => categories.includes(t.category ?? '')).slice(0, 3)
-    const fallback = [...templates]
-      .sort((a, b) => (usageMap[b.id] ?? 0) - (usageMap[a.id] ?? 0))
-      .slice(0, 3)
-    const target = (matched.length > 0 ? matched : fallback)[0]
-
-    if (!target) {
-      setAutoApplyTemplateNotice('おすすめテンプレートが見つかりませんでした')
-      setTimeout(() => setAutoApplyTemplateNotice(''), 3000)
-      return
-    }
-
-    confirmLoadTemplate(target.id)
-    setAutoApplyTemplateNotice(`「${target.name}」を自動選択しました`)
-    setTimeout(() => setAutoApplyTemplateNotice(''), 4000)
-  }, [selectedPresetKey, autoApplyRecommendedTemplate, templates, usageMap, confirmLoadTemplate])
-
-  useEffect(() => {
-    fetch('/data/slides.json')
-      .then((r) => r.json())
-      .then((data: SlidesData) => {
-        setSlides(data.slides)
-        setCtaConfig(data.cta)
-        setTitle(data.title)
-        if (data.slides.length > 0) setSelectedId(data.slides[0].id)
-      })
-      .catch(() => alert('slides.json の読み込みに失敗しました。'))
-      .finally(() => setLoading(false))
-    fetchHistory()
-    fetchTemplates()
-    fetchGeneratedAssets()
-    fetchReelAiConfig()
-  }, [fetchHistory, fetchTemplates, fetchGeneratedAssets, fetchReelAiConfig])
-
-  useEffect(() => {
-    userUploadedImagesRef.current = userUploadedImages
-  }, [userUploadedImages])
-
-  useEffect(() => {
-    return () => {
-      userUploadedImagesRef.current.forEach((image) => URL.revokeObjectURL(image.url))
-    }
-  }, [])
+  useInitialReelLoader({
+    setSlides,
+    setCtaConfig,
+    setTitle,
+    setSelectedId,
+    setLoading,
+    loadHistory: fetchHistory,
+    loadTemplates: fetchTemplates,
+    loadGeneratedImages: fetchGeneratedAssets,
+    fetchReelAiConfig,
+  })
 
   const usedGeneratedImages = new Set(
     slides.map((s) => s.image).filter((img): img is string => !!img?.startsWith('generated/'))
   )
 
-  const selectedSlide = slides.find((s) => s.id === selectedId) ?? null
-  const selectedIdx = slides.findIndex((s) => s.id === selectedId)
-  const isPostChecklistComplete = POST_CHECKLIST_ITEMS.every((item) => postChecklist[item.key])
-  // Phase19-J: 節約モード計算
-  const imageGenerateCount = costMode === 'save' ? Math.min(5, slides.length) : slides.length
-  const effectiveQuality = costMode === 'save' ? 'standard' : imageQualityMode
-  const eventPostChecklistCount = EVENT_POST_CHECKLIST_ITEMS.filter((item) => eventPostChecklist[item.key]).length
-  const isEventPostChecklistComplete = eventPostChecklistCount === EVENT_POST_CHECKLIST_ITEMS.length
-
   // Phase19-P: タブ表示ヘルパー（simpleMode step3以外は常時表示）
+  // Phase21-C: 完成後 + 詳細非表示時はすべてのタブコンテンツを隠す
   const showInTab = (tab: 'create' | 'edit' | 'post' | 'manage') =>
-    !simpleMode || simpleStep !== 3 || activeSimpleTab === tab
-
-  // Phase19-K: イベント投稿記録レポート
-  const eventPostReport = useMemo(() => {
-    const counts: Record<EventPostRecord['sns'], number> = {
-      instagram: 0, x: 0, tiktok: 0, youtube: 0, other: 0,
-    }
-    eventPostRecords.forEach((r) => { counts[r.sns] += 1 })
-    return {
-      total: eventPostRecords.length,
-      counts,
-      urlCount: eventPostRecords.filter((r) => r.postUrl.trim()).length,
-    }
-  }, [eventPostRecords])
-
-  // Phase19-O: 運用ダッシュボード
-  const eventDashboardStats = useMemo(() => {
-    const currentMonth = new Date().toISOString().slice(0, 7)
-    const thisMonthRecords = eventPostRecords.filter((r) => r.postDate.startsWith(currentMonth))
-
-    const snsCounts: Record<EventPostRecord['sns'], number> = {
-      instagram: 0, x: 0, tiktok: 0, youtube: 0, other: 0,
-    }
-    eventPostRecords.forEach((r) => { snsCounts[r.sns] += 1 })
-
-    const recentRecords = [...eventPostRecords]
-      .sort((a, b) => {
-        const da = a.postDate || a.createdAt
-        const db = b.postDate || b.createdAt
-        return db.localeCompare(da)
-      })
-      .slice(0, 3)
-
-    const postedTitles = new Set(eventPostRecords.map((r) => r.eventTitle.trim().toLowerCase()))
-    const unpostedPresets = mmmEventPresets.filter(
-      (p) => !p.id.startsWith('default-') && !postedTitles.has(p.title.trim().toLowerCase())
-    )
-
-    return {
-      thisMonthCount: thisMonthRecords.length,
-      urlCount: eventPostRecords.filter((r) => r.postUrl.trim()).length,
-      total: eventPostRecords.length,
-      snsCounts,
-      recentRecords,
-      unpostedPresets,
-    }
-  }, [eventPostRecords, mmmEventPresets])
-
-  // Phase19-M: フィルター済み投稿記録
-  const filteredEventPostRecords = useMemo(() => {
-    const kw = eventPostFilter.keyword.trim().toLowerCase()
-    return eventPostRecords.filter((r) => {
-      if (eventPostFilter.sns !== 'all' && r.sns !== eventPostFilter.sns) return false
-      if (kw && !r.eventTitle.toLowerCase().includes(kw) && !r.memo.toLowerCase().includes(kw)) return false
-      if (eventPostFilter.postDate && r.postDate !== eventPostFilter.postDate) return false
-      if (eventPostFilter.urlStatus === 'with' && !r.postUrl.trim()) return false
-      if (eventPostFilter.urlStatus === 'without' && r.postUrl.trim()) return false
-      return true
-    })
-  }, [eventPostRecords, eventPostFilter])
-
-  const isEventPostFilterActive = eventPostFilter.sns !== 'all'
-    || eventPostFilter.keyword !== ''
-    || eventPostFilter.postDate !== ''
-    || eventPostFilter.urlStatus !== 'all'
-
-  const postedReport = useMemo(() => {
-    const counts: Record<PostedSns, number> = {
-      instagram: 0,
-      tiktok: 0,
-      youtube: 0,
-      x: 0,
-    }
-
-    postedRecords.forEach((record) => {
-      counts[record.sns] += 1
-    })
-
-    const latest = [...postedRecords]
-      .filter((record) => record.postedAt)
-      .sort((a, b) => b.postedAt.localeCompare(a.postedAt))[0]
-
-    return {
-      total: postedRecords.length,
-      counts,
-      latest,
-      urlCount: postedRecords.filter((record) => record.url.trim()).length,
-    }
-  }, [postedRecords])
-
-  const handleUserImageUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? [])
-    event.target.value = ''
-    if (files.length === 0) return
-
-    const images = files.map((file) => ({
-      id: typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${file.name}-${Math.random().toString(36).slice(2)}`,
-      name: file.name,
-      url: URL.createObjectURL(file),
-    }))
-    setUserUploadedImages((prev) => [...prev, ...images])
-  }, [])
-
-  const removeUserUploadedImage = useCallback((id: string) => {
-    setUserUploadedImages((prev) => {
-      const target = prev.find((image) => image.id === id)
-      if (target) URL.revokeObjectURL(target.url)
-      return prev.filter((image) => image.id !== id)
-    })
-  }, [])
-
-  const togglePostChecklist = useCallback((key: PostChecklistKey) => {
-    setPostChecklist((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }))
-  }, [])
-
-  const resetPostChecklist = useCallback(() => {
-    setPostChecklist({ ...DEFAULT_POST_CHECKLIST })
-  }, [])
-
-  // Phase19-I: イベント投稿前チェックリスト 操作
-  const toggleEventPostChecklist = useCallback((key: EventPostChecklistKey) => {
-    setEventPostChecklist((prev) => ({ ...prev, [key]: !prev[key] }))
-  }, [])
-
-  // Phase19-K: イベント投稿記録 操作
-  const saveEventPostRecord = useCallback(() => {
-    if (!eventPostRecordForm.sns || !eventPostRecordForm.postDate) return
-    const record: EventPostRecord = {
-      id: `epr-${Date.now()}`,
-      eventPresetId: selectedMmmEventPresetId || undefined,
-      eventTitle: mmmEventForm.title || aiTheme || '未設定イベント',
-      sns: eventPostRecordForm.sns,
-      postDate: eventPostRecordForm.postDate,
-      postUrl: eventPostRecordForm.postUrl,
-      memo: eventPostRecordForm.memo,
-      createdAt: new Date().toISOString(),
-    }
-    setEventPostRecords((prev) => [record, ...prev])
-    setEventPostRecordForm({ ...DEFAULT_EVENT_POST_RECORD_FORM })
-  }, [eventPostRecordForm, selectedMmmEventPresetId, mmmEventForm.title, aiTheme])
-
-  const deleteEventPostRecord = useCallback((id: string) => {
-    setEventPostRecords((prev) => prev.filter((r) => r.id !== id))
-  }, [])
-
-  // Phase19-L: イベント投稿記録 CSV出力
-  const exportEventPostRecordsCsv = useCallback(() => {
-    if (filteredEventPostRecords.length === 0) return
-    const csvEscape = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`
-    const headers = ['イベント名', 'SNS', '投稿日', '投稿URL', 'メモ', '作成日']
-    const snsLabel = (sns: EventPostRecord['sns']) =>
-      EVENT_POST_RECORD_SNS_OPTIONS.find((o) => o.value === sns)?.label ?? sns
-    const rows = filteredEventPostRecords.map((r) => [
-      csvEscape(r.eventTitle),
-      csvEscape(snsLabel(r.sns)),
-      csvEscape(r.postDate),
-      csvEscape(r.postUrl),
-      csvEscape(r.memo),
-      csvEscape(r.createdAt.slice(0, 10)),
-    ].join(','))
-    const csv = [headers.map(csvEscape).join(','), ...rows].join('\n')
-    const bom = '﻿'
-    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' })
-    const today = new Date().toISOString().slice(0, 10)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `event-post-records-${today}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [filteredEventPostRecords])
-
-  const resetPostedRecords = useCallback(() => {
-    setPostedRecords([])
-    setPostedForm({ ...DEFAULT_POSTED_FORM })
-  }, [])
-
-  const addPostedRecord = useCallback(() => {
-    if (!postedForm.postedAt) return
-
-    const nextRecord: PostedRecord = {
-      sns: postedForm.sns,
-      postedAt: postedForm.postedAt,
-      url: postedForm.url.trim(),
-      memo: postedForm.memo.trim(),
-    }
-
-    setPostedRecords((prev) => [...prev, nextRecord])
-    setPostedForm({ ...DEFAULT_POSTED_FORM })
-    setPostChecklist((prev) => ({
-      ...prev,
-      posted: true,
-    }))
-  }, [postedForm])
-
-  const deletePostedRecord = useCallback((index: number) => {
-    setPostedRecords((prev) => prev.filter((_, i) => i !== index))
-  }, [])
-
-  const exportPostedRecordsCsv = useCallback(() => {
-    if (postedRecords.length === 0) return
-
-    const selectedTemplateName = selectedTemplateId || simpleTemplateId
-      ? templates.find((t) => t.id === (selectedTemplateId || simpleTemplateId))?.name ?? (selectedTemplateId || simpleTemplateId)
-      : ''
-    const videoTheme = aiTheme.trim() || title
-    const rows = [
-      ['SNS', '投稿日', '投稿URL', 'メモ', '動画テーマ', 'テンプレート'],
-      ...postedRecords.map((record) => [
-        POSTED_SNS_LABELS[record.sns],
-        record.postedAt,
-        record.url,
-        record.memo,
-        videoTheme,
-        selectedTemplateName,
-      ]),
-    ]
-
-    const csv = rows
-      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))
-      .join('\n')
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `posted-records-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [aiTheme, postedRecords, selectedTemplateId, simpleTemplateId, templates, title])
-
-  const exportPostedRecordsJson = useCallback(() => {
-    const payload = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      postedRecords,
-      postChecklist,
-      postedReport,
-    }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: 'application/json;charset=utf-8;',
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `posted-records-backup-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [postChecklist, postedRecords, postedReport])
-
-  const handleImportPostedRecordsJson = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-
-    setPostedRecordsImportMessage('')
-    setPostedRecordsImportError('')
-
-    try {
-      const text = await file.text()
-      const data = JSON.parse(text) as {
-        postedRecords?: unknown
-        postChecklist?: unknown
-      }
-
-      if (!Array.isArray(data.postedRecords)) {
-        throw new Error('JSONの形式が正しくありません')
-      }
-
-      const importedRecords: PostedRecord[] = data.postedRecords.map((record) => {
-        if (!record || typeof record !== 'object') {
-          throw new Error('JSONの形式が正しくありません')
-        }
-        const candidate = record as Partial<PostedRecord>
-        if (
-          candidate.sns !== 'instagram' &&
-          candidate.sns !== 'tiktok' &&
-          candidate.sns !== 'youtube' &&
-          candidate.sns !== 'x'
-        ) {
-          throw new Error('JSONの形式が正しくありません')
-        }
-        if (
-          typeof candidate.postedAt !== 'string' ||
-          typeof candidate.url !== 'string' ||
-          typeof candidate.memo !== 'string'
-        ) {
-          throw new Error('JSONの形式が正しくありません')
-        }
-
-        return {
-          sns: candidate.sns,
-          postedAt: candidate.postedAt,
-          url: candidate.url,
-          memo: candidate.memo,
-        }
-      })
-
-      if (data.postChecklist !== undefined) {
-        if (!data.postChecklist || typeof data.postChecklist !== 'object') {
-          throw new Error('JSONの形式が正しくありません')
-        }
-        const importedChecklist = data.postChecklist as Partial<Record<PostChecklistKey, unknown>>
-        setPostChecklist({
-          downloaded: importedChecklist.downloaded === true,
-          captionChecked: importedChecklist.captionChecked === true,
-          hashtagsChecked: importedChecklist.hashtagsChecked === true,
-          snsSelected: importedChecklist.snsSelected === true,
-          posted: importedChecklist.posted === true,
-        })
-      }
-
-      setPostedRecords(importedRecords)
-      setPostedRecordsImportMessage('投稿記録を復元しました')
-    } catch {
-      setPostedRecordsImportError('JSONの形式が正しくありません')
-    }
-  }, [])
-
-  // Phase19-N: 全データバックアップ出力
-  const exportReelBackupJson = useCallback(() => {
-    const data: ReelBackupData = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      eventPostRecords,
-      eventPostChecklist,
-      eventPostDate,
-      mmmEventPresets,
-      editPresets,
-    }
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json;charset=utf-8;',
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `bemystyle-reel-backup-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [editPresets, eventPostChecklist, eventPostDate, eventPostRecords, mmmEventPresets])
-
-  // Phase19-N: 全データバックアップ復元
-  const handleImportReelBackupJson = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-
-    setBackupImportMessage('')
-    setBackupImportError('')
-
-    try {
-      const text = await file.text()
-      const data = JSON.parse(text) as unknown
-
-      if (!data || typeof data !== 'object') throw new Error()
-      const d = data as Partial<ReelBackupData>
-
-      if (d.version !== 1) {
-        setBackupImportError('バックアップJSONの形式が正しくありません。')
-        return
-      }
-
-      if (!window.confirm('現在の保存データをバックアップ内容で上書きします。よろしいですか？')) return
-
-      try {
-        if (Array.isArray(d.eventPostRecords)) {
-          setEventPostRecords(d.eventPostRecords as EventPostRecord[])
-          localStorage.setItem(EVENT_POST_RECORDS_KEY, JSON.stringify(d.eventPostRecords))
-        }
-        if (d.eventPostChecklist && typeof d.eventPostChecklist === 'object') {
-          const cl = d.eventPostChecklist as Record<string, boolean>
-          setEventPostChecklist({
-            downloaded: cl.downloaded === true,
-            captionChecked: cl.captionChecked === true,
-            qrChecked: cl.qrChecked === true,
-            urlChecked: cl.urlChecked === true,
-            bgmChecked: cl.bgmChecked === true,
-            postDateEntered: cl.postDateEntered === true,
-          })
-          localStorage.setItem(EVENT_POST_CHECKLIST_KEY, JSON.stringify(d.eventPostChecklist))
-        }
-        if (typeof d.eventPostDate === 'string') {
-          setEventPostDate(d.eventPostDate)
-          localStorage.setItem(EVENT_POST_DATE_KEY, d.eventPostDate)
-        }
-        if (Array.isArray(d.mmmEventPresets)) {
-          setMmmEventPresets(d.mmmEventPresets as MmmEventPreset[])
-          localStorage.setItem(MMM_EVENT_PRESETS_KEY, JSON.stringify(d.mmmEventPresets))
-        }
-        if (Array.isArray(d.editPresets)) {
-          setEditPresets(d.editPresets as EditPreset[])
-          localStorage.setItem(EDIT_PRESETS_KEY, JSON.stringify(d.editPresets))
-        }
-        setBackupImportMessage('バックアップを復元しました。')
-      } catch {
-        setBackupImportError('復元に失敗しました。')
-      }
-    } catch {
-      setBackupImportError('バックアップJSONの形式が正しくありません。')
-    }
-  }, [])
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(POST_CHECKLIST_STORAGE_KEY, JSON.stringify(postChecklist))
-    } catch {}
-  }, [postChecklist])
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(POSTED_RECORDS_STORAGE_KEY, JSON.stringify(postedRecords))
-    } catch {}
-  }, [postedRecords])
-
-  // Phase19-I: イベントチェックリスト 永続化
-  useEffect(() => {
-    try { localStorage.setItem(EVENT_POST_CHECKLIST_KEY, JSON.stringify(eventPostChecklist)) } catch {}
-  }, [eventPostChecklist])
-
-  useEffect(() => {
-    try { localStorage.setItem(EVENT_POST_DATE_KEY, eventPostDate) } catch {}
-    if (eventPostDate) {
-      setEventPostChecklist((prev) => prev.postDateEntered ? prev : { ...prev, postDateEntered: true })
-    }
-  }, [eventPostDate])
-
-  // Phase19-I: 自動チェック補助
-  useEffect(() => {
-    if (qrFileName) setEventPostChecklist((prev) => prev.qrChecked ? prev : { ...prev, qrChecked: true })
-  }, [qrFileName])
-
-  useEffect(() => {
-    if (bgmFileName) setEventPostChecklist((prev) => prev.bgmChecked ? prev : { ...prev, bgmChecked: true })
-  }, [bgmFileName])
-
-  useEffect(() => {
-    if (mmmEventForm.url.trim()) setEventPostChecklist((prev) => prev.urlChecked ? prev : { ...prev, urlChecked: true })
-  }, [mmmEventForm.url])
-
-  useEffect(() => {
-    if (snsCaption) setEventPostChecklist((prev) => prev.captionChecked ? prev : { ...prev, captionChecked: true })
-  }, [snsCaption])
-
-  // Phase19-K: イベント投稿記録 永続化
-  useEffect(() => {
-    try { localStorage.setItem(EVENT_POST_RECORDS_KEY, JSON.stringify(eventPostRecords)) } catch {}
-  }, [eventPostRecords])
+    showInSimpleTab(tab, renderStatus === 'completed')
 
   // Phase19-P: 動画生成完了 → 作成タブへ自動遷移
+  // Phase21-C: 完成時に詳細機能を隠してファースト画面へリセット
   useEffect(() => {
     if (renderStatus === 'completed' && simpleMode && simpleStep === 3) {
-      setActiveSimpleTab('create')
+      resetCompletedView()
     }
-  }, [renderStatus, simpleMode, simpleStep])
+  }, [renderStatus, resetCompletedView, simpleMode, simpleStep])
 
-  const handleNewProject = useCallback(() => {
-    if (hasUnsavedChanges && !window.confirm('未保存の変更があります。新規作成すると現在の内容が失われます。続けますか？')) return
-    const blankSlides: Slide[] = Array.from({ length: 14 }, (_, i) => ({
-      id: i + 1,
-      durationSec: i === 13 ? 5 : 3,
-      visible: true,
-      headline: '',
-      subline: '',
-      emphasis: '',
-      image: '',
-      layout: i === 13 ? 'cta' as const : 'bottom' as const,
-      showParticles: false,
-    }))
-    setSlides(blankSlides)
-    setSelectedId(1)
-    setHasUnsavedChanges(true)
-    setAiTheme('')
-    resetPostChecklist()
-    resetPostedRecords()
-  }, [hasUnsavedChanges, resetPostChecklist, resetPostedRecords])
+  // Phase23-Q: 画像生成 state / callbacks を分離
+  const {
+    imageGeneratingId,
+    imageGenerateErrors,
+    bulkImageGenerating,
+    bulkImageProgress,
+    bulkImageMessage,
+    bulkImageSubMessage,
+    failedImageIds,
+    reuseImageMode,
+    setReuseImageMode,
+    cachedImagesForTemplate,
+    setCachedImagesForTemplate,
+    cachedImagesForTemplateSavedAt,
+    setCachedImagesForTemplateSavedAt,
+    effectiveQuality,
+    handleGenerateImage,
+    handleGenerateAllImages,
+    handleRetryFailedImages,
+    handleDeleteImageCache,
+  } = useImageGenerator({
+    slides,
+    simpleTemplateType,
+    costMode,
+    imageQualityMode,
+    updateSlide,
+    setSlides,
+    updateLatestHistory,
+    setQuotaError,
+  })
 
-  const updateSlide = useCallback((id: number, changes: Partial<Slide>) => {
-    setSlides((prev) => prev.map((s) => (s.id === id ? { ...s, ...changes } : s)))
-    setHasUnsavedChanges(true)
+  const handleImageCreationModeChange = useCallback((mode: 'save' | 'reuse' | 'full' | 'upload') => {
+    setImageCreationMode(mode)
+    if (mode === 'save') {
+      setImageSourceMode('ai')
+      setReuseImageMode(false)
+      setCostMode('save')
+    } else if (mode === 'reuse') {
+      setImageSourceMode('ai')
+      setReuseImageMode(true)
+    } else if (mode === 'full') {
+      setImageSourceMode('ai')
+      setReuseImageMode(false)
+      setCostMode('normal')
+    } else {
+      setImageSourceMode('upload')
+      setReuseImageMode(false)
+    }
+  }, [setImageSourceMode, setReuseImageMode, setCostMode])
+
+  const handleToggleTestMode = useCallback(() => {
+    setTestMode((prev) => {
+      const next = !prev
+      localStorage.setItem('bemystyle-reel-test-mode', next ? 'true' : 'false')
+      return next
+    })
   }, [])
 
-  // Phase19-E: BGMアップロード
-  const handleBgmUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setBgmUploading(true)
-    setBgmUploadError('')
-    try {
-      const formData = new FormData()
-      formData.append('audio', file)
-      const res = await fetch('/api/upload-audio', { method: 'POST', body: formData })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message ?? 'BGMアップロードに失敗しました')
-      setBgmFileName(file.name)
-    } catch (err) {
-      setBgmUploadError(err instanceof Error ? err.message : 'BGMアップロードに失敗しました')
-    } finally {
-      setBgmUploading(false)
-    }
-  }, [])
+  // Phase23-S: Factory / Auto Pipeline state & callbacks
+  const factoryPipeline = useFactoryPipeline({
+    aiTheme,
+    setAiTheme,
+    slides,
+    setSlides,
+    setHasUnsavedChanges,
+    selectedPresetKey,
+    selectedCustomPresetId,
+    customPresets,
+    imageSourceMode,
+    costMode,
+    effectiveQuality,
+    reelAiConfig,
+    reuseImageMode,
+    simpleMode,
+    simpleTemplateType,
+    variantLearningEvents,
+    setGeneratedVariants,
+    setVariantScores,
+    variantScoresRef,
+    generatedVariantsRef,
+    renderQueue,
+    renderQueueRef,
+    addQueueItems,
+    isBatchRendering,
+    isPreparingRender,
+    renderStatus,
+    batchRenderRef,
+    compareDashboardRef,
+    autoGenerateVariants,
+    setCachedImagesForTemplate,
+    setCachedImagesForTemplateSavedAt,
+    userUploadedImagesRef,
+    setQuotaError,
+    ensureSnapshotExpanded,
+    testMode,
+  })
+  const {
+    isAutoPipelineRunning,
+    pipelineStatus,
+    lastPipeline,
+    handleAutoRenderPipeline,
+    factoryRunning,
+    factoryStep,
+    factoryStepNum,
+    factoryProgress,
+    factoryCurrentImageIndex,
+    factoryTotalImageCount,
+    factoryError,
+    factoryLog,
+    factoryNotice,
+    factoryWarning,
+    factorySummary,
+    factoryHistory,
+    handleRunReelFactory,
+    clearFactoryMessages,
+    clearFactorySummary,
+    findFactoryQueueItem,
+    handleJumpToQueueItem,
+    handleReuseFactoryTheme,
+    handleDuplicateFactoryTheme,
+    handleRerunFactoryTheme,
+    toggleFactoryHistoryFavorite,
+    handleExportFactoryHistory,
+    handleExportFactoryHistoryCsv,
+    handleImportFactoryHistory,
+    handleDeleteFactoryHistoryItem,
+    handleClearFactoryHistory,
+    handleFactoryHistoryUpdate,
+  } = factoryPipeline
 
-  // Phase19-E: スライド画像差し替え
-  const handleSlideImageReplace = useCallback(async (slideId: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setSlideImageReplacing(slideId)
-    setSlideImageReplaceError((prev) => { const next = { ...prev }; delete next[slideId]; return next })
-    try {
-      const formData = new FormData()
-      formData.append('image', file)
-      const res = await fetch('/api/upload', { method: 'POST', body: formData })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message ?? '画像アップロードに失敗しました')
-      updateSlide(slideId, { image: data.filename })
-    } catch (err) {
-      setSlideImageReplaceError((prev) => ({ ...prev, [slideId]: err instanceof Error ? err.message : '画像差し替えに失敗しました' }))
-    } finally {
-      setSlideImageReplacing(null)
-    }
-  }, [updateSlide])
-
-  // Phase19-E: テキスト編集 (headline / subline / emphasis)
-  const handleSlideTextChange = useCallback((slideId: number, field: 'headline' | 'subline' | 'emphasis', value: string) => {
-    updateSlide(slideId, { [field]: value })
-  }, [updateSlide])
+  // Phase23-W: Smart Pipeline 3本を usePipelineRunner に分離
+  const pipelineRunner = usePipelineRunner({
+    aiTheme,
+    slides,
+    setSlides,
+    variantLearningEvents,
+    setGeneratedVariants,
+    setVariantScores,
+    generatedVariantsRef,
+    variantScoresRef,
+    renderQueueRef,
+    addVariantNamesToQueue,
+    addSnapshotItemToQueue,
+    addQueueItems,
+    isAutoPipelineRunning,
+    isBatchRendering,
+    isPreparingRender,
+    renderStatus,
+    batchRenderRef,
+    compareDashboardRef,
+  })
+  const {
+    isSmartPipelineRunning,
+    smartPipelineStatus,
+    smartPipelineError,
+    lastSmartPipeline,
+    isSmartRewritePipelineRunning,
+    smartRewritePipelineStatus,
+    smartRewritePipelineError,
+    lastSmartRewritePipeline,
+    isMultiRewriteQueueRunning,
+    multiRewriteQueueStatus,
+    multiRewriteQueueError,
+    lastMultiRewriteQueue,
+    handleSmartPipeline,
+    handleSmartRewritePipeline,
+    handleMultiRewriteQueue,
+  } = pipelineRunner
 
   // Phase19-E: 世界観タグ トグル
   const toggleVisualStyleTag = useCallback((tag: string) => {
@@ -2911,110 +991,17 @@ export default function App() {
     )
   }, [])
 
-  // Phase19-F: 編集プリセット 保存
-  const saveEditPreset = useCallback(() => {
-    const name = editPresetName.trim()
-    if (!name) return
-    const preset: EditPreset = {
-      id: `ep-${Date.now()}`,
-      name,
-      visualStyleTags: [...visualStyleTags],
-      bgmFileName: bgmFileName || undefined,
-      createdAt: new Date().toISOString(),
-    }
-    setEditPresets((prev) => {
-      const next = [...prev, preset]
-      localStorage.setItem(EDIT_PRESETS_KEY, JSON.stringify(next))
-      return next
-    })
-    setEditPresetName('')
-  }, [editPresetName, visualStyleTags, bgmFileName])
-
-  // Phase19-F: 編集プリセット 適用
-  const applyEditPreset = useCallback((presetId: string) => {
-    const preset = editPresets.find((p) => p.id === presetId)
-    if (!preset) return
-    setVisualStyleTags(preset.visualStyleTags)
-    if (preset.bgmFileName) setBgmFileName(preset.bgmFileName)
-    setSelectedEditPresetId(presetId)
-  }, [editPresets])
-
-  // Phase19-F: 編集プリセット 削除
-  const deleteEditPreset = useCallback((presetId: string) => {
-    setEditPresets((prev) => {
-      const next = prev.filter((p) => p.id !== presetId)
-      localStorage.setItem(EDIT_PRESETS_KEY, JSON.stringify(next))
-      return next
-    })
-    if (selectedEditPresetId === presetId) setSelectedEditPresetId('')
-  }, [selectedEditPresetId])
-
-  // Phase19-H: MMMイベントプリセット 保存
-  const saveMmmEventPreset = useCallback(() => {
-    const name = mmmEventPresetName.trim()
-    if (!name) {
-      setMmmEventPresetNotice('保存するプリセット名を入力してください。')
-      return
-    }
-    if (!mmmEventForm.title.trim() || !mmmEventForm.venue.trim()) {
-      setMmmEventPresetNotice('イベント名と会場を入力してから保存してください。')
-      return
-    }
-    const preset: MmmEventPreset = {
-      id: `mep-${Date.now()}`,
-      name,
-      ...mmmEventForm,
-      createdAt: new Date().toISOString(),
-    }
-    setMmmEventPresets((prev) => {
-      const next = [...prev, preset]
-      localStorage.setItem(MMM_EVENT_PRESETS_KEY, JSON.stringify(next))
-      return next
-    })
-    setMmmEventPresetName('')
-    setMmmEventPresetNotice('イベント情報を保存しました。')
-    setTimeout(() => setMmmEventPresetNotice(''), 3000)
-  }, [mmmEventPresetName, mmmEventForm])
-
-  // Phase19-H: MMMイベントプリセット 呼び出し
-  const applyMmmEventPreset = useCallback((presetId: string) => {
-    const preset = mmmEventPresets.find((p) => p.id === presetId)
-    if (!preset) return
-    setMmmEventForm({
-      title: preset.title,
-      date: preset.date,
-      startTime: preset.startTime,
-      endTime: preset.endTime,
-      venue: preset.venue,
-      price: preset.price,
-      url: preset.url,
-      message: preset.message,
-    })
-    setMmmEventPresetNotice(`「${preset.name}」を呼び出しました。`)
-    setTimeout(() => setMmmEventPresetNotice(''), 3000)
-  }, [mmmEventPresets])
-
-  // Phase19-H: MMMイベントプリセット 削除
-  const deleteMmmEventPreset = useCallback((presetId: string) => {
-    setMmmEventPresets((prev) => {
-      const next = prev.filter((p) => p.id !== presetId)
-      localStorage.setItem(MMM_EVENT_PRESETS_KEY, JSON.stringify(next))
-      return next
-    })
-    if (selectedMmmEventPresetId === presetId) setSelectedMmmEventPresetId('')
-  }, [selectedMmmEventPresetId])
-
   // Phase19-S: テンプレートタイプ選択ハンドラー
   const handleSimpleTemplateTypeSelect = useCallback((type: SimpleTemplateType) => {
-    setSimpleTemplateType(type)
-    if (type === 'mmm-event') {
-      setSimpleTemplateId('mmm-event')
-    } else {
-      setSimpleTemplateId('')
+    selectSimpleTemplateType(type)
+    if (type !== 'mmm-event') {
       setSelectedTemplateId('')
     }
 
     if (type === 'custom') return
+
+    // Phase29-D: 非customテンプレートはuploadを基本にする
+    handleImageCreationModeChange('upload')
 
     const defaults = SIMPLE_TEMPLATE_DEFAULTS[type]
 
@@ -3036,7 +1023,7 @@ export default function App() {
       )
       setHasUnsavedChanges(true)
     }
-  }, [])
+  }, [handleImageCreationModeChange])
 
   // Phase19-S: テンプレート別テーマ自動生成
   const buildSimpleThemeFromTemplate = useCallback((): string => {
@@ -3080,1499 +1067,6 @@ export default function App() {
         return aiTheme
     }
   }, [simpleTemplateType, mmmEventForm, freeDiagnosisForm, noteArticleForm, youtubeVideoForm, musicCommunityForm, aiTheme])
-
-  const handleGenerateImage = useCallback(async (slideId: number, imagePrompt: string) => {
-    setImageGeneratingId(slideId)
-    setImageGenerateErrors((prev) => { const next = { ...prev }; delete next[slideId]; return next })
-    try {
-      const res = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: imagePrompt, quality: costMode === 'save' ? 'standard' : imageQualityMode }),
-      })
-      const data = await res.json() as { ok?: boolean; image?: string; errorType?: string; message?: string }
-      if (data.errorType === 'quota') { setQuotaError(true) }
-      if (!data.ok) throw new Error(data.message ?? '画像生成に失敗しました')
-      updateSlide(slideId, { image: data.image })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '画像生成に失敗しました'
-      setImageGenerateErrors((prev) => ({ ...prev, [slideId]: msg }))
-    } finally {
-      setImageGeneratingId(null)
-    }
-  }, [updateSlide, imageQualityMode, costMode])
-
-  const handleGenerateAllImages = useCallback(async (): Promise<boolean> => {
-    const allTargets = slides.filter((slide) => slide.imagePrompt).slice(0, 14)
-    if (allTargets.length === 0) return false
-
-    // Phase19-J: 節約モードでは生成枚数を制限
-    const generateTargets = allTargets.slice(0, imageGenerateCount)
-    setBulkImageGenerating(true)
-    setBulkImageProgress({ current: 0, total: generateTargets.length })
-    setBulkImageMessage('')
-
-    try {
-      let nextSlides = [...slides]
-      const generatedImages: string[] = []
-
-      for (let i = 0; i < generateTargets.length; i++) {
-        const target = generateTargets[i]
-        setBulkImageProgress({ current: i + 1, total: generateTargets.length })
-
-        const response = await fetch('/api/generate-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: target.imagePrompt, quality: effectiveQuality }),
-        })
-
-        const data = await response.json() as { ok?: boolean; image?: string; errorType?: string; message?: string }
-        if (!response.ok || !data.ok) {
-          if (data.errorType === 'quota') {
-            setQuotaError(true)
-            setBulkImageMessage('APIクレジット不足のため画像生成を停止しました。')
-            return false
-          }
-          throw new Error(data.message ?? '画像生成に失敗しました')
-        }
-
-        if (data.image) {
-          generatedImages.push(data.image)
-          nextSlides = nextSlides.map((slide) =>
-            slide.id === target.id ? { ...slide, image: data.image! } : slide
-          )
-          setSlides(nextSlides)
-        }
-      }
-
-      // Phase19-J: 節約モードで残りスライドへループ割当
-      if (costMode === 'save' && generatedImages.length > 0) {
-        const remaining = allTargets.slice(generateTargets.length)
-        remaining.forEach((target, idx) => {
-          const loopImage = generatedImages[idx % generatedImages.length]
-          nextSlides = nextSlides.map((slide) =>
-            slide.id === target.id ? { ...slide, image: loopImage } : slide
-          )
-        })
-        setSlides(nextSlides)
-      }
-
-      updateLatestHistory({
-        imageCount: nextSlides.filter((s) => s.image?.startsWith('generated/')).length,
-      })
-      const generated = generateTargets.length
-      setBulkImageMessage(
-        costMode === 'save'
-          ? `${generated}枚生成・${allTargets.length}スライドへループ割当完了`
-          : `${generated}枚のAI画像生成が完了しました`
-      )
-      return true
-    } catch (_) {
-      setBulkImageMessage('一部の画像生成に失敗しました。生成済み画像は保持されています。')
-      return false
-    } finally {
-      setBulkImageGenerating(false)
-    }
-  }, [slides, updateLatestHistory, imageGenerateCount, effectiveQuality, costMode])
-
-  const toggleVisible = useCallback((id: number) => {
-    setSlides((prev) => prev.map((s) => (s.id === id ? { ...s, visible: !s.visible } : s)))
-    setHasUnsavedChanges(true)
-  }, [])
-
-  const moveSlide = useCallback((fromIdx: number, toIdx: number) => {
-    setSlides((prev) => {
-      const next = [...prev]
-      const [item] = next.splice(fromIdx, 1)
-      next.splice(toIdx, 0, item)
-      return next
-    })
-    setHasUnsavedChanges(true)
-  }, [])
-
-  const handleCtaChange = useCallback((config: CTAConfig) => {
-    setCtaConfig(config)
-    setHasUnsavedChanges(true)
-  }, [])
-
-  const handleQrUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setQrUploading(true)
-    setQrUploadError('')
-    try {
-      const formData = new FormData()
-      formData.append('image', file)
-      const res = await fetch('/api/upload', { method: 'POST', body: formData })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message ?? 'アップロードに失敗しました')
-      const relativePath = (data.url as string).replace('/assets/', '')
-      setCtaConfig({ qrImage: relativePath })
-      setQrFileName(file.name)
-      setHasUnsavedChanges(true)
-    } catch (err) {
-      setQrUploadError(err instanceof Error ? err.message : 'アップロードに失敗しました')
-    } finally {
-      setQrUploading(false)
-    }
-  }, [])
-
-  const saveSnapshotToServer = useCallback(async (snapshotSlides: Slide[]): Promise<boolean> => {
-    try {
-      const res = await fetch('/api/slides', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, slides: snapshotSlides, cta: ctaConfig }),
-      })
-      const body = await parseJsonResponse(res)
-      return res.ok && (body as { ok: boolean }).ok
-    } catch {
-      return false
-    }
-  }, [title, ctaConfig])
-
-  const saveToServer = useCallback(async (): Promise<boolean> => {
-    const data: SlidesData = { title, slides, cta: ctaConfig }
-    setSaveStatus('saving')
-    setSaveError('')
-    try {
-      const res = await fetch('/api/slides', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      const body = await parseJsonResponse(res)
-      if (!res.ok) throw new Error((body.message as string) ?? `HTTP ${res.status}`)
-      setSaveStatus('ok')
-      setHasUnsavedChanges(false)
-      setTimeout(() => setSaveStatus('idle'), 2500)
-      return true
-    } catch (err) {
-      setSaveError(String(err))
-      setSaveStatus('error')
-      setTimeout(() => setSaveStatus('idle'), 5000)
-      return false
-    }
-  }, [title, slides, ctaConfig])
-
-  const batchRender = useCallback(async (itemIds?: string[]) => {
-    const targetIds = itemIds ? new Set(itemIds) : null
-    const pending = renderQueue.filter((q) => q.status === 'pending' && (!targetIds || targetIds.has(q.id)))
-    if (pending.length === 0 || isBatchRendering) return
-
-    setIsBatchRendering(true)
-
-    // For non-snapshot items, save current slides once upfront if needed
-    const hasNonSnapshot = pending.some((q) => !q.slidesSnapshot)
-    if (hasNonSnapshot && hasUnsavedChanges) {
-      setIsPreparingRender(true)
-      const ok = await saveToServer()
-      setIsPreparingRender(false)
-      if (!ok) {
-        setIsBatchRendering(false)
-        return
-      }
-    }
-
-    let snapshotWasUsed = false
-
-    for (const item of pending) {
-      // Save snapshot or restore current slides as needed
-      if (item.slidesSnapshot) {
-        setIsPreparingRender(true)
-        const ok = await saveSnapshotToServer(item.slidesSnapshot)
-        setIsPreparingRender(false)
-        if (!ok) {
-          updateQueueItem(item.id, { status: 'failed' })
-          updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: 'スナップショットの保存に失敗しました' })
-          continue
-        }
-        snapshotWasUsed = true
-      } else if (snapshotWasUsed) {
-        // Restore current editor slides before rendering a non-snapshot item
-        setIsPreparingRender(true)
-        const ok = await saveToServer()
-        setIsPreparingRender(false)
-        if (!ok) {
-          updateQueueItem(item.id, { status: 'failed' })
-          updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: 'Slide save failed' })
-          continue
-        }
-        snapshotWasUsed = false
-      }
-
-      updateQueueItem(item.id, { status: 'rendering' })
-      setRenderVariantName(item.variantName)
-      setRenderError('')
-      setRenderStatus('idle')
-      setRenderStartedAt(Date.now())
-      setElapsedSec(0)
-
-      try {
-        const res = await fetch('/api/render', { method: 'POST' })
-        const data = await parseJsonResponse(res)
-        if (!res.ok) throw new Error((data.message as string) ?? `HTTP ${res.status}`)
-        setRenderStatus('running')
-
-        const result = await new Promise<{ success: boolean; url?: string; error?: string }>((resolve) => {
-          const intId = setInterval(async () => {
-            try {
-              const sr = await fetch('/api/render/status')
-              const sd = await parseJsonResponse(sr)
-              const st = sd.status as string
-              setRenderStatus(st as 'idle' | 'running' | 'completed' | 'failed')
-              if (st === 'completed') {
-                clearInterval(intId)
-                resolve({ success: true, url: sd.downloadUrl as string })
-              } else if (st === 'failed') {
-                clearInterval(intId)
-                resolve({ success: false, error: (sd.error as string) ?? '不明なエラー' })
-              }
-            } catch (err) {
-              clearInterval(intId)
-              resolve({ success: false, error: String(err) })
-            }
-          }, 2000)
-        })
-
-        if (result.success) {
-          if (result.url) setLatestDownloadUrl(result.url)
-          fetchHistory()
-          updateQueueItem(item.id, {
-            status: 'completed',
-            outputPath: result.url,
-            renderedAt: new Date().toISOString(),
-          })
-          updateLatestHistory({
-            renderStatus: 'completed',
-            renderOutputPath: result.url,
-            renderVariantName: item.variantName,
-            renderedAt: new Date().toISOString(),
-          })
-        } else {
-          const errMsg = result.error ?? '不明なエラー'
-          setRenderError(errMsg)
-          updateQueueItem(item.id, { status: 'failed' })
-          updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: errMsg })
-        }
-      } catch (err) {
-        const errMsg = String(err)
-        setRenderError(errMsg)
-        setRenderStatus('failed')
-        updateQueueItem(item.id, { status: 'failed' })
-        updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: errMsg })
-      }
-    }
-
-    // Restore current editor slides to server if snapshots dirtied it
-    if (snapshotWasUsed) {
-      await saveToServer()
-    }
-
-    setIsBatchRendering(false)
-  }, [renderQueue, isBatchRendering, hasUnsavedChanges, saveToServer, saveSnapshotToServer, updateQueueItem, updateLatestHistory, fetchHistory])
-
-  // Keep refs updated so pipelines always read the latest state
-  batchRenderRef.current = batchRender
-  renderQueueRef.current = renderQueue
-  generatedVariantsRef.current = generatedVariants
-  variantScoresRef.current = variantScores
-
-  const handleAutoRenderPipeline = useCallback(async () => {
-    if (isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
-    setIsAutoPipelineRunning(true)
-    setPipelineStatus('バリアント生成中...')
-    try {
-      autoGenerateVariants()
-      // Wait for React to flush the setRenderQueue update so batchRenderRef picks up new items
-      await new Promise<void>((resolve) => setTimeout(resolve, 200))
-      setPipelineStatus('バリアントレンダリング中...')
-      await batchRenderRef.current()
-      setPipelineStatus('比較ダッシュボード準備完了')
-      const q = renderQueueRef.current
-      const completedCount = q.filter((item) => item.status === 'completed').length
-      const failedCount = q.filter((item) => item.status === 'failed').length
-      const data: LastPipeline = { completedCount, failedCount, finishedAt: new Date().toISOString() }
-      try { localStorage.setItem(LAST_PIPELINE_KEY, JSON.stringify(data)) } catch {}
-      setLastPipeline(data)
-      setTimeout(() => {
-        compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' })
-      }, 300)
-    } catch {
-      setPipelineStatus('パイプライン失敗')
-    } finally {
-      setIsAutoPipelineRunning(false)
-    }
-  }, [isAutoPipelineRunning, isBatchRendering, isPreparingRender, renderStatus, autoGenerateVariants])
-
-  const handleSmartPipeline = useCallback(async () => {
-    if (isSmartPipelineRunning || isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
-    if (!aiTheme.trim()) return
-    setIsSmartPipelineRunning(true)
-    setSmartPipelineError('')
-    try {
-      // Step 1: AI Variant 生成
-      setSmartPipelineStatus('AIバリアント生成中...')
-      const genRes = await fetch('/api/variant-generator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: aiTheme.trim() }),
-      })
-      const genData = await genRes.json()
-      if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
-      const variants: GeneratedVariant[] = genData.variants
-      setGeneratedVariants(variants)
-      generatedVariantsRef.current = variants
-      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
-
-      // Step 2: AI Score
-      setSmartPipelineStatus('バリアントスコアリング中...')
-      const scoreRes = await fetch('/api/score-variants', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          theme: aiTheme.trim(),
-          variants,
-          learningEvents: variantLearningEvents.slice(0, 50),
-        }),
-      })
-      const scoreData = await scoreRes.json()
-      if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
-      const scores: VariantScore[] = scoreData.scores
-      setVariantScores(scores)
-      variantScoresRef.current = scores
-      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
-
-      // Step 3: Smart Queue 投入
-      setSmartPipelineStatus('推奨バリアントをキューに追加中...')
-      const recommended = scores.filter((s) => s.recommendation >= 4)
-      const recommendedCount = recommended.length
-      if (recommendedCount === 0) {
-        setSmartPipelineStatus('比較ダッシュボード準備完了')
-        setSmartPipelineError('おすすめ度4以上のVariantがありませんでした。Renderをスキップしました。')
-        const data: LastSmartPipeline = {
-          generatedCount: variants.length,
-          recommendedCount: 0,
-          renderedCount: 0,
-          failedCount: 0,
-          finishedAt: new Date().toISOString(),
-        }
-        try { localStorage.setItem(LAST_SMART_PIPELINE_KEY, JSON.stringify(data)) } catch {}
-        setLastSmartPipeline(data)
-        setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
-        return
-      }
-      const targets = recommended.flatMap((score) => {
-        const v = variants.find((v) => v.name === score.variantName || v.angle === score.angle)
-        return v ? [v] : []
-      })
-      setRenderQueue((prev) => {
-        const existingNames = new Set(prev.map((q) => q.variantName))
-        const newItems = targets
-          .filter((v) => !existingNames.has(v.name))
-          .map((v) => ({ id: crypto.randomUUID(), variantName: v.name, status: 'pending' as const }))
-        if (newItems.length === 0) return prev
-        const next = [...prev, ...newItems]
-        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
-      // React の flush を待つ
-      await new Promise<void>((resolve) => setTimeout(resolve, 200))
-
-      // Step 4: Batch Render
-      setSmartPipelineStatus('推奨バリアントのレンダリング中...')
-      await batchRenderRef.current()
-
-      // Step 5: Compare Dashboard
-      setSmartPipelineStatus('比較ダッシュボード準備完了')
-      const q = renderQueueRef.current
-      const renderedCount = q.filter((item) => targets.some((t) => t.name === item.variantName) && item.status === 'completed').length
-      const failedCount = q.filter((item) => targets.some((t) => t.name === item.variantName) && item.status === 'failed').length
-      const data: LastSmartPipeline = {
-        generatedCount: variants.length,
-        recommendedCount,
-        renderedCount,
-        failedCount,
-        finishedAt: new Date().toISOString(),
-      }
-      try { localStorage.setItem(LAST_SMART_PIPELINE_KEY, JSON.stringify(data)) } catch {}
-      setLastSmartPipeline(data)
-      setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
-    } catch (err) {
-      setSmartPipelineError(err instanceof Error ? err.message : 'スマートパイプライン失敗')
-      setSmartPipelineStatus('スマートパイプライン失敗')
-    } finally {
-      setIsSmartPipelineRunning(false)
-    }
-  }, [isSmartPipelineRunning, isAutoPipelineRunning, isBatchRendering, isPreparingRender, renderStatus, aiTheme, variantLearningEvents])
-
-  const handleSmartRewritePipeline = useCallback(async () => {
-    if (isSmartRewritePipelineRunning || isSmartPipelineRunning || isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
-    if (!aiTheme.trim()) return
-    setIsSmartRewritePipelineRunning(true)
-    setSmartRewritePipelineError('')
-    try {
-      // Step 1: AI Variant 生成
-      setSmartRewritePipelineStatus('AIバリアント生成中...')
-      const genRes = await fetch('/api/variant-generator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: aiTheme.trim() }),
-      })
-      const genData = await genRes.json()
-      if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
-      const variants: GeneratedVariant[] = genData.variants
-      setGeneratedVariants(variants)
-      generatedVariantsRef.current = variants
-      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
-
-      // Step 2: Score
-      setSmartRewritePipelineStatus('バリアントスコアリング中...')
-      const scoreRes = await fetch('/api/score-variants', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          theme: aiTheme.trim(),
-          variants,
-          learningEvents: variantLearningEvents.slice(0, 50),
-        }),
-      })
-      const scoreData = await scoreRes.json()
-      if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
-      const scores: VariantScore[] = scoreData.scores
-      setVariantScores(scores)
-      variantScoresRef.current = scores
-      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
-
-      // Step 3: Top Variant 選定
-      setSmartRewritePipelineStatus('トップバリアントを選定中...')
-      type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
-      const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
-        const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
-        return v ? [{ ...s, variant: v }] : []
-      })
-      const topScoredVariant = scoredWithVariant
-        .filter((sv) => sv.recommendation >= 4)
-        .sort((a, b) => {
-          if (b.recommendation !== a.recommendation) return b.recommendation - a.recommendation
-          if (b.predictedViews !== a.predictedViews) return b.predictedViews - a.predictedViews
-          return b.savePotential - a.savePotential
-        })[0]
-
-      if (!topScoredVariant) {
-        setSmartRewritePipelineStatus('スマートリライト完了')
-        setSmartRewritePipelineError('おすすめ度4以上のVariantがありません')
-        const data: LastSmartRewritePipeline = {
-          selectedVariantName: '',
-          selectedAngle: '',
-          recommendation: 0,
-          renderedCount: 0,
-          failedCount: 0,
-          finishedAt: new Date().toISOString(),
-        }
-        try { localStorage.setItem(LAST_SMART_REWRITE_PIPELINE_KEY, JSON.stringify(data)) } catch {}
-        setLastSmartRewritePipeline(data)
-        setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
-        return
-      }
-
-      // Step 4: Rewrite Story
-      setSmartRewritePipelineStatus('ストーリーをリライト中...')
-      const rewriteRes = await fetch('/api/rewrite-story', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          angle: topScoredVariant.variant.angle,
-          slides: slides.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
-        }),
-      })
-      const rewriteData = await rewriteRes.json()
-      if (!rewriteData.ok) throw new Error(rewriteData.message ?? 'ストーリーのリライトに失敗しました')
-      const rewritten: RewrittenSlide[] = rewriteData.slides
-
-      // Step 5: Apply rewritten story
-      setSmartRewritePipelineStatus('リライトを適用中...')
-      const mergedSlides: Slide[] = slides.map((s, i) => ({
-        ...s,
-        headline: rewritten[i]?.headline ?? s.headline,
-        subline: rewritten[i]?.subline ?? s.subline,
-        emphasis: rewritten[i]?.emphasis ?? s.emphasis,
-      }))
-      setSlides(mergedSlides)
-      await new Promise<void>((resolve) => setTimeout(resolve, 100))
-
-      // Step 6: Queue投入（slidesSnapshot付き）
-      setSmartRewritePipelineStatus('リライトバリアントをキューに追加中...')
-      const rewriteVariantName = `${topScoredVariant.variant.name}（Rewrite）`
-      setRenderQueue((prev) => {
-        if (prev.some((q) => q.variantName === rewriteVariantName)) return prev
-        const next = [...prev, {
-          id: crypto.randomUUID(),
-          variantName: rewriteVariantName,
-          status: 'pending' as const,
-          slidesSnapshot: mergedSlides,
-          snapshotCreatedAt: new Date().toISOString(),
-        }]
-        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
-      await new Promise<void>((resolve) => setTimeout(resolve, 200))
-
-      // Step 7: Render
-      setSmartRewritePipelineStatus('レンダリング中...')
-      await batchRenderRef.current()
-
-      // Step 8: Compare Dashboard
-      setSmartRewritePipelineStatus('スマートリライト完了')
-      const q = renderQueueRef.current
-      const renderedCount = q.filter((item) => item.variantName === rewriteVariantName && item.status === 'completed').length
-      const failedCount = q.filter((item) => item.variantName === rewriteVariantName && item.status === 'failed').length
-      const data: LastSmartRewritePipeline = {
-        selectedVariantName: topScoredVariant.variant.name,
-        selectedAngle: topScoredVariant.variant.angle,
-        recommendation: topScoredVariant.recommendation,
-        renderedCount,
-        failedCount,
-        finishedAt: new Date().toISOString(),
-      }
-      try { localStorage.setItem(LAST_SMART_REWRITE_PIPELINE_KEY, JSON.stringify(data)) } catch {}
-      setLastSmartRewritePipeline(data)
-      setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
-    } catch (err) {
-      setSmartRewritePipelineError(err instanceof Error ? err.message : 'スマートリライト失敗')
-      setSmartRewritePipelineStatus('スマートリライト失敗')
-    } finally {
-      setIsSmartRewritePipelineRunning(false)
-    }
-  }, [isSmartRewritePipelineRunning, isSmartPipelineRunning, isAutoPipelineRunning, isBatchRendering, isPreparingRender, renderStatus, aiTheme, variantLearningEvents, slides])
-
-  const handleMultiRewriteQueue = useCallback(async () => {
-    if (isMultiRewriteQueueRunning || isSmartRewritePipelineRunning || isSmartPipelineRunning || isAutoPipelineRunning || isBatchRendering || isPreparingRender || renderStatus === 'running') return
-    if (!aiTheme.trim()) return
-    setIsMultiRewriteQueueRunning(true)
-    setMultiRewriteQueueError('')
-    try {
-      // Step 1: AI Generate
-      setMultiRewriteQueueStatus('AIバリアント生成中...')
-      const genRes = await fetch('/api/variant-generator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: aiTheme.trim() }),
-      })
-      const genData = await genRes.json()
-      if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
-      const variants: GeneratedVariant[] = genData.variants
-      setGeneratedVariants(variants)
-      generatedVariantsRef.current = variants
-      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
-
-      // Step 2: Score
-      setMultiRewriteQueueStatus('バリアントスコアリング中...')
-      const scoreRes = await fetch('/api/score-variants', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          theme: aiTheme.trim(),
-          variants,
-          learningEvents: variantLearningEvents.slice(0, 50),
-        }),
-      })
-      const scoreData = await scoreRes.json()
-      if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
-      const scores: VariantScore[] = scoreData.scores
-      setVariantScores(scores)
-      variantScoresRef.current = scores
-      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
-
-      // Step 3: Select Top 3
-      setMultiRewriteQueueStatus('トップバリアントを選定中...')
-      type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
-      const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
-        const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
-        return v ? [{ ...s, variant: v }] : []
-      })
-      const targets = scoredWithVariant
-        .filter((sv) => sv.recommendation >= 4)
-        .sort((a, b) => {
-          if (b.recommendation !== a.recommendation) return b.recommendation - a.recommendation
-          if (b.predictedViews !== a.predictedViews) return b.predictedViews - a.predictedViews
-          return b.savePotential - a.savePotential
-        })
-        .slice(0, 3)
-
-      if (targets.length === 0) {
-        setMultiRewriteQueueStatus('マルチリライトキュー完了')
-        setMultiRewriteQueueError('おすすめ度4以上のVariantがありません')
-        const data: LastMultiRewriteQueue = {
-          rewrittenCount: 0,
-          queuedCount: 0,
-          renderedCount: 0,
-          failedCount: 0,
-          selectedVariants: [],
-          finishedAt: new Date().toISOString(),
-        }
-        try { localStorage.setItem(LAST_MULTI_REWRITE_QUEUE_KEY, JSON.stringify(data)) } catch {}
-        setLastMultiRewriteQueue(data)
-        setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
-        return
-      }
-
-      // Step 4: Rewrite each target (直列)
-      setMultiRewriteQueueStatus('バリアントをリライト中...')
-      const rewriteResults: { target: ScoredWithVariant; rewritten: RewrittenSlide[] }[] = []
-      for (const target of targets) {
-        const rewriteRes = await fetch('/api/rewrite-story', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            angle: target.variant.angle,
-            slides: slides.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
-          }),
-        })
-        const rewriteData = await rewriteRes.json()
-        if (!rewriteData.ok) throw new Error(rewriteData.message ?? `Failed to rewrite story for ${target.variant.name}`)
-        rewriteResults.push({ target, rewritten: rewriteData.slides })
-      }
-
-      // Step 5: Apply first rewrite to editor
-      setMultiRewriteQueueStatus('最初のリライトを適用中...')
-      const firstRewrite = rewriteResults[0]
-      if (firstRewrite) {
-        const mergedSlides: Slide[] = slides.map((s, i) => ({
-          ...s,
-          headline: firstRewrite.rewritten[i]?.headline ?? s.headline,
-          subline: firstRewrite.rewritten[i]?.subline ?? s.subline,
-          emphasis: firstRewrite.rewritten[i]?.emphasis ?? s.emphasis,
-        }))
-        setSlides(mergedSlides)
-        await new Promise<void>((resolve) => setTimeout(resolve, 100))
-      }
-
-      // Step 6: Queue rewritten variants（各Variant個別slidesSnapshot付き）
-      setMultiRewriteQueueStatus('リライトバリアントをキューに投入中...')
-      const rewriteQueueItems = rewriteResults.map((r) => ({
-        variantName: `${r.target.variant.name}（Rewrite）`,
-        snapshotSlides: slides.map((s, i) => ({
-          ...s,
-          headline: r.rewritten[i]?.headline ?? s.headline,
-          subline: r.rewritten[i]?.subline ?? s.subline,
-          emphasis: r.rewritten[i]?.emphasis ?? s.emphasis,
-        })) as Slide[],
-      }))
-      const rewriteVariantNames = rewriteQueueItems.map((r) => r.variantName)
-      setRenderQueue((prev) => {
-        const existingNames = new Set(prev.map((q) => q.variantName))
-        const newItems = rewriteQueueItems
-          .filter(({ variantName }) => !existingNames.has(variantName))
-          .map(({ variantName, snapshotSlides }) => ({
-            id: crypto.randomUUID(),
-            variantName,
-            status: 'pending' as const,
-            slidesSnapshot: snapshotSlides,
-            snapshotCreatedAt: new Date().toISOString(),
-          }))
-        if (newItems.length === 0) return prev
-        const next = [...prev, ...newItems]
-        try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
-      await new Promise<void>((resolve) => setTimeout(resolve, 200))
-
-      // Step 7: Batch Render
-      setMultiRewriteQueueStatus('レンダリング中...')
-      await batchRenderRef.current()
-
-      // Step 8: Compare Dashboard
-      setMultiRewriteQueueStatus('マルチリライトキュー完了')
-      const q = renderQueueRef.current
-      const renderedCount = q.filter((item) => rewriteVariantNames.includes(item.variantName) && item.status === 'completed').length
-      const failedCount = q.filter((item) => rewriteVariantNames.includes(item.variantName) && item.status === 'failed').length
-      const data: LastMultiRewriteQueue = {
-        rewrittenCount: rewriteResults.length,
-        queuedCount: rewriteVariantNames.length,
-        renderedCount,
-        failedCount,
-        selectedVariants: targets.map((t) => t.variant.name),
-        finishedAt: new Date().toISOString(),
-      }
-      try { localStorage.setItem(LAST_MULTI_REWRITE_QUEUE_KEY, JSON.stringify(data)) } catch {}
-      setLastMultiRewriteQueue(data)
-      setTimeout(() => { compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' }) }, 300)
-    } catch (err) {
-      setMultiRewriteQueueError(err instanceof Error ? err.message : 'マルチリライトキュー失敗')
-      setMultiRewriteQueueStatus('マルチリライトキュー失敗')
-    } finally {
-      setIsMultiRewriteQueueRunning(false)
-    }
-  }, [isMultiRewriteQueueRunning, isSmartRewritePipelineRunning, isSmartPipelineRunning, isAutoPipelineRunning, isBatchRendering, isPreparingRender, renderStatus, aiTheme, variantLearningEvents, slides])
-
-  const findFactoryQueueItem = useCallback((variantName: string) => {
-    return renderQueue.find(
-      (item) =>
-        item.variantName === `${variantName}（Rewrite）` ||
-        item.variantName === variantName
-    )
-  }, [renderQueue])
-
-  const handleJumpToQueueItem = useCallback((variantName: string) => {
-    const item = findFactoryQueueItem(variantName)
-    if (!item) return
-    setExpandedSnapshotIds((prev) =>
-      prev.includes(item.id) ? prev : [...prev, item.id]
-    )
-    requestAnimationFrame(() => {
-      document
-        .getElementById(`render-queue-item-${item.id}`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    })
-  }, [findFactoryQueueItem])
-
-  // ==============================
-  // AI Reel Factory
-  // ==============================
-  const handleRunReelFactory = useCallback(async (overrideTheme?: string) => {
-    const themeForRun = (overrideTheme ?? aiTheme).trim()
-    if (factoryRunning || !themeForRun) {
-      if (!themeForRun) setFactoryError('テーマを入力してください')
-      return
-    }
-    if (imageSourceMode === 'upload' && userUploadedImagesRef.current.length === 0) {
-      setFactoryError('自分の画像を使う場合は、画像を1枚以上アップロードしてください。')
-      return
-    }
-    const useUploadedImages = imageSourceMode === 'upload'
-    const estimatedImageCount = costMode === 'save' ? Math.min(5, slides.length) : Math.min(14, slides.length)
-    if (shouldConfirmCostlyAiRun({ reelAiConfig, imageCount: estimatedImageCount, useUploadedImages })) {
-      const confirmed = window.confirm(buildCostConfirmMessage(estimatedImageCount))
-      if (!confirmed) {
-        setFactoryLog(['高コスト実行をキャンセルしました'])
-        return
-      }
-    }
-    setFactoryRunning(true)
-    setFactoryError('')
-    setFactoryLog([])
-    setFactoryWarning('')
-
-    const addLog = (msg: string) => setFactoryLog((prev) => [...prev, msg])
-
-    try {
-      // Step 1: Story Generate
-      setFactoryStep('Step 1/7: ストーリー生成中...')
-      addLog('[1/7] Story Generate 開始')
-      const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId)
-      const story = await generateStory(
-        themeForRun,
-        selectedPresetKey,
-        selectedCustomPreset
-          ? {
-              tone: selectedCustomPreset.tone,
-              targetAudience: selectedCustomPreset.targetAudience,
-              platform: selectedCustomPreset.platform,
-              imageStyle: selectedCustomPreset.imageStyle,
-              ctaText: selectedCustomPreset.ctaText,
-          }
-          : null
-      )
-      if (story.warning) addLog(`⚠️ ${story.warning}`)
-      const storySlides: Slide[] = slides.map((slide, index) => {
-        const generated = story.slides[index]
-        if (!generated) return slide
-        return {
-          ...slide,
-          headline: generated.headline,
-          subline: generated.subline ?? slide.subline,
-          emphasis: generated.emphasis ?? slide.emphasis,
-          imagePrompt: generated.imagePrompt ?? slide.imagePrompt,
-        }
-      })
-      setSlides(storySlides)
-      setHasUnsavedChanges(true)
-      addLog(`[1/7] Story生成完了 (${storySlides.length}スライド)`)
-
-      if (storySlides.length > 14) {
-        setFactoryWarning('⚠️ ストーリーが15枚以上生成されたため、先頭14枚に調整して続行しました。')
-      } else if (storySlides.length < 14) {
-        setFactoryWarning('⚠️ ストーリー枚数が不足しています。再生成をおすすめします。')
-      }
-
-      // Step 2: Image (AI or Upload)
-      let slidesWithImages = [...storySlides]
-      if (imageSourceMode === 'ai') {
-        setFactoryStep('Step 2/7: AI画像生成中...')
-        addLog('[2/7] AI画像生成 開始')
-        const allImageTargets = storySlides.filter((s) => s.imagePrompt).slice(0, 14)
-        const costLimitedCount = costMode === 'save' ? Math.min(5, allImageTargets.length) : allImageTargets.length
-        const factoryGenerateCount = reelAiConfig.testImageLimit
-          ? Math.min(reelAiConfig.testImageLimit, costLimitedCount)
-          : costLimitedCount
-        const imageTargets = allImageTargets.slice(0, factoryGenerateCount)
-        const factoryGeneratedImages: string[] = []
-        let generatedImageCount = 0
-        setFactoryTotalImageCount(imageTargets.length)
-        setFactoryCurrentImageIndex(0)
-        const imageLimitNotes = [
-          costMode === 'save' ? `節約モード: ${allImageTargets.length}枚→${costLimitedCount}枚` : '',
-          reelAiConfig.testImageLimit ? `REEL_TEST_IMAGE_LIMIT: ${costLimitedCount}枚→${factoryGenerateCount}枚` : '',
-        ].filter(Boolean)
-        addLog(`[2/7] 画像生成対象: ${imageTargets.length}枚${imageLimitNotes.length > 0 ? ` (${imageLimitNotes.join(' / ')})` : ''}`)
-        for (let ii = 0; ii < imageTargets.length; ii++) {
-          setFactoryCurrentImageIndex(ii + 1)
-          const target = imageTargets[ii]
-          addLog(`  画像 ${ii + 1}/${imageTargets.length}: ${target.imagePrompt?.slice(0, 40)}...`)
-          try {
-            const imgRes = await fetch('/api/generate-image', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ prompt: target.imagePrompt, quality: effectiveQuality }),
-            })
-            const imgData = await imgRes.json() as { ok?: boolean; image?: string; errorType?: string; message?: string; path?: string }
-            if (imgData.errorType === 'quota') {
-              setQuotaError(true)
-              throw new Error('APIクレジット不足のため画像生成を停止しました。Billing / Usage / Limits を確認してください。')
-            }
-            if (imgData.ok && imgData.image) {
-              const generatedImg = imgData.image
-              factoryGeneratedImages.push(generatedImg)
-              slidesWithImages = slidesWithImages.map((s) =>
-                s.id === target.id ? { ...s, image: generatedImg } : s
-              )
-              generatedImageCount += 1
-              setSlides([...slidesWithImages])
-              addLog(`  ✅ 画像生成成功 (ID ${target.id}): ${imgData.path ?? imgData.image}`)
-            } else {
-              addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${imgData.message ?? 'APIエラー'}`)
-            }
-          } catch (imgErr) {
-            const errMsg = imgErr instanceof Error ? imgErr.message : String(imgErr)
-            addLog(`  ⚠️ 画像生成スキップ (ID ${target.id}): ${errMsg}`)
-            if (errMsg.includes('APIクレジット不足')) throw imgErr
-          }
-        }
-        // Phase19-J: 節約モード ループ割当
-        if (imageTargets.length < allImageTargets.length && factoryGeneratedImages.length > 0) {
-          const remaining = allImageTargets.slice(factoryGenerateCount)
-          remaining.forEach((target, idx) => {
-            const loopImage = factoryGeneratedImages[idx % factoryGeneratedImages.length]
-            slidesWithImages = slidesWithImages.map((s) =>
-              s.id === target.id ? { ...s, image: loopImage } : s
-            )
-          })
-          setSlides([...slidesWithImages])
-          addLog(`[2/7] 残り${remaining.length}スライドへ生成済み画像をループ割当完了`)
-        }
-        addLog(`[2/7] AI画像生成完了 (${generatedImageCount}/${imageTargets.length}枚)`)
-        setFactoryCurrentImageIndex(null)
-        setFactoryTotalImageCount(null)
-        if (generatedImageCount === 0) {
-          throw new Error('画像生成に失敗しました。\nサーバー側の画像生成API設定に問題がある可能性があります。\n開発者向けログで response_format の混入を確認してください。')
-        }
-      } else {
-        // upload mode: transfer blob URLs to server then assign to slides
-        setFactoryStep('Step 2/7: アップロード画像反映中...')
-        addLog('[2/7] アップロード画像反映')
-        const uploadedImages = userUploadedImagesRef.current
-        addLog(`[2/7] アップロード画像: ${uploadedImages.length}枚`)
-        const serverUrls: string[] = []
-        for (let ui = 0; ui < uploadedImages.length; ui++) {
-          const img = uploadedImages[ui]
-          try {
-            const blobRes = await fetch(img.url)
-            const blob = await blobRes.blob()
-            const fd = new FormData()
-            fd.append('image', blob, img.name)
-            const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd })
-            const uploadData = await uploadRes.json()
-            if (uploadData.ok && uploadData.url) {
-              serverUrls.push(uploadData.url)
-              addLog(`  ✅ アップロード完了 (${ui + 1}/${uploadedImages.length}): ${img.name}`)
-            } else {
-              addLog(`  ⚠️ アップロードスキップ: ${img.name}`)
-            }
-          } catch (uploadErr) {
-            addLog(`  ⚠️ アップロードエラー: ${img.name}: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`)
-          }
-        }
-        if (serverUrls.length === 0) {
-          throw new Error('アップロード画像のサーバー転送に失敗しました。')
-        }
-        slidesWithImages = storySlides.map((slide, index) => ({
-          ...slide,
-          image: serverUrls[index % serverUrls.length],
-        }))
-        setSlides([...slidesWithImages])
-        addLog('[2/7] 画像適用完了')
-      }
-
-      // Step 3: Variant Generate
-      setFactoryStep('Step 3/7: バリアント生成中...')
-      addLog('[3/7] Variant Generate 開始')
-      const genRes = await fetch('/api/variant-generator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: themeForRun, slides: storySlides }),
-      })
-      const genData = await genRes.json()
-      if (!genData.ok) throw new Error(genData.message ?? 'Failed to generate variants')
-      if (typeof genData.warning === 'string') addLog(`⚠️ ${genData.warning}`)
-      const variants: GeneratedVariant[] = genData.variants
-      setGeneratedVariants(variants)
-      generatedVariantsRef.current = variants
-      try { localStorage.setItem(GENERATED_VARIANTS_KEY, JSON.stringify(variants)) } catch {}
-      addLog(`[3/7] Variant生成完了 (${variants.length}件)`)
-
-      // Step 4: Score Variants
-      setFactoryStep('Step 4/7: バリアントスコアリング中...')
-      addLog('[4/7] Score Variants 開始')
-      const scoreRes = await fetch('/api/score-variants', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          theme: themeForRun,
-          variants,
-          learningEvents: variantLearningEvents.slice(0, 50),
-        }),
-      })
-      const scoreData = await scoreRes.json()
-      if (!scoreData.ok) throw new Error(scoreData.message ?? 'Failed to score variants')
-      if (typeof scoreData.warning === 'string') addLog(`⚠️ ${scoreData.warning}`)
-      const scores: VariantScore[] = scoreData.scores
-      setVariantScores(scores)
-      variantScoresRef.current = scores
-      try { localStorage.setItem(VARIANT_SCORES_KEY, JSON.stringify(scores)) } catch {}
-      addLog(`[4/7] スコア完了 (${scores.length}件)`)
-
-      // Step 5: Select top 3 with recommendation >= 4
-      setFactoryStep('Step 5/7: トップバリアントを選定中...')
-      addLog('[5/7] Top Variant 選定')
-      type ScoredWithVariant = VariantScore & { variant: GeneratedVariant }
-      const scoredWithVariant: ScoredWithVariant[] = scores.flatMap((s) => {
-        const v = variants.find((v) => v.name === s.variantName || v.angle === s.angle)
-        return v ? [{ ...s, variant: v }] : []
-      })
-      const targets = scoredWithVariant
-        .filter((sv) => sv.recommendation >= 4)
-        .sort((a, b) => {
-          if (b.recommendation !== a.recommendation) return b.recommendation - a.recommendation
-          if (b.predictedViews !== a.predictedViews) return b.predictedViews - a.predictedViews
-          return b.savePotential - a.savePotential
-        })
-        .slice(0, 3)
-
-      if (targets.length === 0) {
-        addLog('[5/7] recommendation >= 4 のVariantが見つかりませんでした')
-        setFactoryStep('Factory complete')
-        setFactoryError('recommendation >= 4 のVariantが見つかりませんでした。Queue投入をスキップしました。')
-        return
-      }
-      addLog(`[5/7] ${targets.length}件 選定 (Recommend: ${targets.map((t) => t.recommendation).join(', ')})`)
-
-      // Step 6: Rewrite each target
-      setFactoryStep('Step 6/7: バリアントをリライト中...')
-      addLog('[6/7] Rewrite 開始')
-      const queueItems: RenderQueueItem[] = []
-      for (const target of targets) {
-        addLog(`  Rewriting: ${target.variant.name}`)
-        const rewriteRes = await fetch('/api/rewrite-story', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            angle: target.variant.angle,
-            slides: slidesWithImages.map((s) => ({ headline: s.headline, subline: s.subline, emphasis: s.emphasis })),
-          }),
-        })
-        const rewriteData = await rewriteRes.json()
-        if (!rewriteData.ok) throw new Error(rewriteData.message ?? `Failed to rewrite story for ${target.variant.name}`)
-        if (typeof rewriteData.warning === 'string') addLog(`  ⚠️ ${rewriteData.warning}`)
-        const rewritten: RewrittenSlide[] = rewriteData.slides
-        const rewrittenSlides: Slide[] = slidesWithImages.map((s, i) => ({
-          ...s,
-          headline: rewritten[i]?.headline ?? s.headline,
-          subline: rewritten[i]?.subline ?? s.subline,
-          emphasis: rewritten[i]?.emphasis ?? s.emphasis,
-        }))
-        queueItems.push({
-          id: crypto.randomUUID(),
-          variantName: `${target.variant.name}（Rewrite）`,
-          status: 'pending',
-          slidesSnapshot: rewrittenSlides,
-          snapshotCreatedAt: new Date().toISOString(),
-        })
-      }
-      addLog(`[6/7] Rewrite完了 (${queueItems.length}件)`)
-
-      // Step 7: Queue
-      setFactoryStep('Step 7/7: キューに投入中...')
-      addLog('[7/7] Queue投入')
-      const existingNames = new Set(renderQueueRef.current.map((q) => q.variantName))
-      const newQueueItems = queueItems.filter((item) => !existingNames.has(item.variantName))
-      const actualQueueAdded = newQueueItems.length
-      if (newQueueItems.length > 0) {
-        setRenderQueue((prev) => {
-          const next = [...prev, ...newQueueItems]
-          renderQueueRef.current = next
-          try { localStorage.setItem(RENDER_QUEUE_KEY, JSON.stringify(next)) } catch {}
-          return next
-        })
-      }
-      addLog(`[7/7] Queue投入完了 (${actualQueueAdded}件)`)
-
-      // Build Factory Summary (Phase15-B)
-      const sortedTargets = [...targets].sort((a, b) => {
-        if (b.recommendation !== a.recommendation) return b.recommendation - a.recommendation
-        if (b.predictedViews !== a.predictedViews) return b.predictedViews - a.predictedViews
-        return b.savePotential - a.savePotential
-      })
-      const best = sortedTargets[0]
-      const avgRec = scores.reduce((sum, s) => sum + s.recommendation, 0) / scores.length
-      const summary: FactorySummary = {
-        generatedCount: variants.length,
-        selectedCount: targets.length,
-        averageRecommendation: Math.round(avgRec * 10) / 10,
-        bestVariantName: best.variant.name,
-        bestRecommendation: best.recommendation,
-        queueAddedCount: actualQueueAdded,
-        generatedAt: new Date().toISOString(),
-        topVariants: sortedTargets.slice(0, 3).map((t) => ({
-          name: t.variant.name,
-          recommendation: t.recommendation,
-          predictedViews: t.predictedViews,
-          savePotential: t.savePotential,
-          ctaStrength: t.ctaStrength,
-        })),
-      }
-      setFactorySummary(summary)
-      try { localStorage.setItem(FACTORY_SUMMARY_CACHE_KEY, JSON.stringify(summary)) } catch {}
-
-      if (newQueueItems.length === 0) {
-        const message = '動画生成キューに追加できませんでした。画像生成結果を確認してください。'
-        setFactoryStep('Factory failed')
-        setFactoryError(message)
-        addLog(`ERROR: ${message}`)
-        return
-      }
-
-      // Factory History 追加 (Phase15-E)
-      const autoTags = inferFactoryTags(themeForRun)
-      const historyItem: FactoryHistoryItem = {
-        ...summary,
-        id: crypto.randomUUID(),
-        theme: themeForRun,
-        tags: autoTags.length > 0 ? autoTags : undefined,
-      }
-      if (autoTags.length > 0) {
-        addLog(`自動タグ: ${autoTags.join(', ')}`)
-      }
-      setFactoryHistory((prev) => {
-        const next = [historyItem, ...prev].slice(0, 20)
-        try { localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(next)) } catch {}
-        return next
-      })
-
-      // Phase17-C: Auto-render after factory
-      if (reelAiConfig.dryRun) {
-        setFactoryStep('Factory complete')
-        addLog('Dry Runモードのため、自動動画生成をスキップしました。キュー投入まで確認済みです。')
-        await new Promise<void>((resolve) => setTimeout(resolve, 300))
-        compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' })
-        return
-      }
-
-      setFactoryStep('動画生成中...')
-      addLog('AI自動作成が完了しました。続けて動画生成を開始しています。')
-      // Wait for React to flush the setRenderQueue update so batchRenderRef picks up new items
-      await new Promise<void>((resolve) => setTimeout(resolve, 200))
-      try {
-        const newQueueItemIds = new Set(newQueueItems.map((item) => item.id))
-        await batchRenderRef.current([...newQueueItemIds])
-        const q = renderQueueRef.current.filter((item) => newQueueItemIds.has(item.id))
-        const completedCount = q.filter((item) => item.status === 'completed').length
-        const failedCount = q.filter((item) => item.status === 'failed').length
-        if (failedCount > 0 && completedCount === 0) {
-          addLog(`自動動画生成に失敗しました。キューから再実行できます。(成功:${completedCount}件 / 失敗:${failedCount}件)`)
-        } else if (failedCount > 0) {
-          addLog(`動画生成が完了しました（一部失敗）。完成動画を確認できます。(成功:${completedCount}件 / 失敗:${failedCount}件)`)
-        } else {
-          addLog('動画生成が完了しました。完成動画を確認できます。')
-        }
-      } catch {
-        addLog('自動動画生成に失敗しました。キューから再実行できます。')
-      }
-
-      setFactoryStep('Factory complete')
-      await new Promise<void>((resolve) => setTimeout(resolve, 300))
-      compareDashboardRef.current?.scrollIntoView({ behavior: 'smooth' })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Factory Run failed'
-      setFactoryError(msg)
-      setFactoryStep('Factory failed')
-      addLog(`ERROR: ${msg}`)
-    } finally {
-      setFactoryRunning(false)
-      setFactoryCurrentImageIndex(null)
-      setFactoryTotalImageCount(null)
-    }
-  }, [factoryRunning, aiTheme, customPresets, selectedCustomPresetId, selectedPresetKey, slides, variantLearningEvents, imageSourceMode, costMode, effectiveQuality, reelAiConfig])
-
-  const showFactoryNotice = useCallback((message: string) => {
-    setFactoryNotice(message)
-    window.setTimeout(() => {
-      setFactoryNotice('')
-    }, 3500)
-  }, [])
-
-  const handleReuseFactoryTheme = useCallback((theme: string) => {
-    setAiTheme(theme)
-    showFactoryNotice('テーマを再利用できます。必要に応じて編集してください')
-    requestAnimationFrame(() => {
-      document
-        .getElementById('ai-theme-input')
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    })
-  }, [showFactoryNotice])
-
-  const handleDuplicateFactoryTheme = useCallback((theme: string) => {
-    setAiTheme(`${theme} `)
-    showFactoryNotice('テーマを編集してから Factory Run してください')
-    requestAnimationFrame(() => {
-      const el = document.getElementById('ai-theme-input') as HTMLInputElement | null
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el?.focus()
-      el?.setSelectionRange(el.value.length, el.value.length)
-    })
-  }, [showFactoryNotice])
-
-  const handleRerunFactoryTheme = useCallback(async (theme: string) => {
-    setAiTheme(theme)
-    showFactoryNotice('過去テーマで Factory を再実行します')
-    requestAnimationFrame(() => {
-      document
-        .getElementById('ai-theme-input')
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    })
-    await handleRunReelFactory(theme)
-  }, [handleRunReelFactory, showFactoryNotice])
-
-  // ==============================
-  // Factory History
-  // ==============================
-  const toggleFactoryHistoryFavorite = useCallback((id: string) => {
-    setFactoryHistory((prev) => {
-      const next = prev.map((item) =>
-        item.id === id ? { ...item, favorite: !item.favorite } : item
-      )
-      try { localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
-
-  const handleExportFactoryHistory = useCallback(() => {
-    const blob = new Blob([JSON.stringify(factoryHistory, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `bemystyle-reel-factory-history-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [factoryHistory])
-
-  const handleExportFactoryHistoryCsv = useCallback(() => {
-    const headers = [
-      'generatedAt',
-      'theme',
-      'favorite',
-      'bestVariantName',
-      'bestRecommendation',
-      'averageRecommendation',
-      'generatedCount',
-      'selectedCount',
-      'queueAddedCount',
-      'tags',
-      'topVariants',
-    ]
-
-    const rows = factoryHistory.map(item => [
-      item.generatedAt,
-      item.theme,
-      item.favorite ? 'true' : 'false',
-      item.bestVariantName,
-      item.bestRecommendation,
-      item.averageRecommendation,
-      item.generatedCount,
-      item.selectedCount,
-      item.queueAddedCount,
-      (item.tags ?? []).join('|'),
-      item.topVariants.map(v =>
-        `${v.name}:rec${v.recommendation}/views${v.predictedViews ?? ''}/save${v.savePotential ?? ''}/cta${v.ctaStrength ?? ''}`
-      ).join('|'),
-    ])
-
-    const csv = [
-      headers.map(escapeCsvValue).join(','),
-      ...rows.map(row => row.map(escapeCsvValue).join(',')),
-    ].join('\n')
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `bemystyle-reel-factory-history-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [factoryHistory])
-
-  const handleImportFactoryHistory = useCallback((file: File) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result))
-        if (!Array.isArray(parsed)) throw new Error('Invalid history file')
-        const validItems = parsed.filter(isFactoryHistoryItem)
-        if (validItems.length === 0) throw new Error('No valid history items')
-        const next = [...validItems, ...factoryHistory].slice(0, 20)
-        setFactoryHistory(next)
-        localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(next))
-        showFactoryNotice(`${validItems.length}件の履歴をImportしました`)
-      } catch {
-        showFactoryNotice('Factory History の読み込みに失敗しました')
-      }
-    }
-    reader.readAsText(file)
-  }, [factoryHistory, showFactoryNotice])
-
-  const handleDeleteFactoryHistoryItem = useCallback((id: string) => {
-    if (!window.confirm('この履歴を削除しますか？')) return
-    setFactoryHistory((prev) => {
-      const next = prev.filter((item) => item.id !== id)
-      try { localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
-
-  const handleClearFactoryHistory = useCallback(() => {
-    setFactoryHistory([])
-    localStorage.removeItem(FACTORY_HISTORY_KEY)
-  }, [])
-
-  const handleFactoryHistoryUpdate = useCallback((items: FactoryHistoryItem[]) => {
-    setFactoryHistory(items)
-    try { localStorage.setItem(FACTORY_HISTORY_KEY, JSON.stringify(items)) } catch {}
-  }, [])
-
-  const analyzeBestVariant = useCallback(async () => {
-    if (!bestVariantId || isAnalyzingBestVariant) return
-    const bestQueueItem = renderQueue.find((q) => q.id === bestVariantId)
-    if (!bestQueueItem) return
-    const variant = generatedVariants.find((v) => v.name === bestQueueItem.variantName)
-    const score = variantScores.find(
-      (s) => s.variantName === bestQueueItem.variantName || (variant && s.angle === variant.angle)
-    )
-    setIsAnalyzingBestVariant(true)
-    setBestVariantAnalysisError('')
-    try {
-      const res = await fetch('/api/analyze-best-variant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          theme: aiTheme.trim(),
-          bestVariant: { name: bestQueueItem.variantName, angle: variant?.angle ?? 'unknown' },
-          score: score
-            ? {
-                recommendation: score.recommendation,
-                predictedViews: score.predictedViews,
-                savePotential: score.savePotential,
-                ctaStrength: score.ctaStrength,
-              }
-            : null,
-          learningSummary: {
-            topAngles: (() => {
-              const counts: Record<string, number> = {}
-              for (const e of variantLearningEvents) {
-                if (e.angle && e.angle !== 'unknown') counts[e.angle] = (counts[e.angle] ?? 0) + 1
-              }
-              return Object.entries(counts)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 5)
-                .map(([angle, count]) => ({ angle, count }))
-            })(),
-          },
-        }),
-      })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message ?? 'ベストバリアント分析に失敗しました')
-      const analysis: BestVariantAnalysis = data.analysis
-      setBestVariantAnalysis(analysis)
-      try { localStorage.setItem(BEST_VARIANT_ANALYSIS_KEY, JSON.stringify(analysis)) } catch {}
-    } catch (err) {
-      setBestVariantAnalysisError(err instanceof Error ? err.message : 'ベストバリアント分析に失敗しました')
-    } finally {
-      setIsAnalyzingBestVariant(false)
-    }
-  }, [bestVariantId, isAnalyzingBestVariant, renderQueue, generatedVariants, variantScores, aiTheme, variantLearningEvents])
-
-  // AUTO_ANALYZE_ON_BEST_SELECT hook (MVP: OFF)
-  useEffect(() => {
-    if (!AUTO_ANALYZE_ON_BEST_SELECT) return
-    if (bestVariantId) analyzeBestVariant()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bestVariantId])
-
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-  }, [])
-
-  const startPolling = useCallback(() => {
-    stopPolling()
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch('/api/render/status')
-        const data = await parseJsonResponse(res)
-        const status = data.status as string
-        setRenderStatus(status as 'idle' | 'running' | 'completed' | 'failed')
-        if (status === 'completed' || status === 'failed') {
-          stopPolling()
-          if (status === 'failed') {
-            const errMsg = (data.error as string) ?? '不明なエラー'
-            setRenderError(errMsg)
-            updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: errMsg })
-          }
-          if (status === 'completed') {
-            fetchHistory()
-            const url = data.downloadUrl as string
-            if (url) setLatestDownloadUrl(url)
-            updateLatestHistory({
-              renderStatus: 'completed',
-              renderOutputPath: url ?? undefined,
-              renderVariantName: renderVariantName.trim() || 'Default',
-              renderedAt: new Date().toISOString(),
-            })
-          }
-        }
-      } catch (err) {
-        stopPolling()
-        const errMsg = String(err)
-        setRenderStatus('failed')
-        setRenderError(errMsg)
-        updateLatestHistory({ renderStatus: 'failed', renderErrorMessage: errMsg })
-      }
-    }, 2000)
-  }, [stopPolling, fetchHistory, updateLatestHistory, renderVariantName])
-
-  useEffect(() => {
-    const active = isPreparingRender || renderStatus === 'running'
-    if (!active || renderStartedAt === null) return
-    const id = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - renderStartedAt) / 1000))
-    }, 500)
-    return () => clearInterval(id)
-  }, [isPreparingRender, renderStatus, renderStartedAt])
-
-  const startRender = useCallback(async () => {
-    setRenderError('')
-    setRenderStatus('idle')
-    setRenderStartedAt(Date.now())
-    setElapsedSec(0)
-
-    if (slides.length === 0) {
-      setRenderStatus('failed')
-      setRenderError('スライドがありません。先にストーリーを生成してください。')
-      return
-    }
-
-    if (hasUnsavedChanges) {
-      setIsPreparingRender(true)
-      const ok = await saveToServer()
-      setIsPreparingRender(false)
-      if (!ok) return
-    }
-
-    try {
-      const res = await fetch('/api/render', { method: 'POST' })
-      const data = await parseJsonResponse(res)
-      if (!res.ok) {
-        setRenderStatus('failed')
-        setRenderError((data.message as string) ?? `HTTP ${res.status}`)
-        return
-      }
-      setRenderStatus('running')
-      startPolling()
-    } catch (err) {
-      setRenderStatus('failed')
-      setRenderError(String(err))
-    }
-  }, [startPolling, hasUnsavedChanges, saveToServer, slides.length])
-
-  const handleWorkflowStory = useCallback(async () => {
-    setWorkflowError('')
-    const ok = await handleAIGenerate()
-    if (ok) setWorkflowStep('images')
-    else setWorkflowError('このステップで失敗しました。内容を確認して再試行してください。')
-  }, [handleAIGenerate])
-
-  const handleWorkflowImages = useCallback(async () => {
-    setWorkflowError('')
-    const ok = await handleGenerateAllImages()
-    if (ok) setWorkflowStep('save')
-    else setWorkflowError('このステップで失敗しました。内容を確認して再試行してください。')
-  }, [handleGenerateAllImages])
-
-  const handleWorkflowSave = useCallback(async () => {
-    setWorkflowError('')
-    const ok = await saveToServer()
-    if (ok) setWorkflowStep('render')
-    else setWorkflowError('このステップで失敗しました。内容を確認して再試行してください。')
-  }, [saveToServer])
-
-  const handleWorkflowRender = useCallback(async () => {
-    setWorkflowError('')
-    await startRender()
-    setWorkflowStep('done')
-  }, [startRender])
-
-  const handleAutoWorkflow = useCallback(async () => {
-    if (!aiTheme.trim()) {
-      setWorkflowError('テーマを入力してください。')
-      return
-    }
-
-    setAutoWorkflowRunning(true)
-    setWorkflowError('')
-    setWorkflowMessage('AI自動生成を開始しました。')
-
-    try {
-      setWorkflowStep('story')
-      setWorkflowMessage('14枚ストーリーを生成しています...')
-      const storyOk = await handleAIGenerate()
-      if (!storyOk) throw new Error('ストーリー生成に失敗しました。')
-
-      setWorkflowStep('images')
-      setWorkflowMessage('14枚AI画像を生成しています...')
-      const imagesOk = await handleGenerateAllImages()
-      if (!imagesOk) throw new Error('画像生成に失敗しました。')
-
-      setWorkflowStep('save')
-      setWorkflowMessage('スライドを保存しています...')
-      const saveOk = await saveToServer()
-      if (!saveOk) throw new Error('保存に失敗しました。')
-
-      setWorkflowStep('render')
-      setWorkflowMessage('動画生成を開始しています...')
-      startRender()
-
-      setWorkflowStep('done')
-      setWorkflowMessage('AI動画生成フローを開始しました。')
-    } catch (error) {
-      setWorkflowError(
-        error instanceof Error ? error.message : 'AI自動生成に失敗しました。'
-      )
-    } finally {
-      setAutoWorkflowRunning(false)
-    }
-  }, [aiTheme, handleAIGenerate, handleGenerateAllImages, saveToServer, startRender])
 
   const downloadVideo = useCallback(() => {
     window.location.href = latestDownloadUrl ?? '/api/render/download'
@@ -4646,152 +1140,6 @@ export default function App() {
   const scrollToHistory = useCallback(() => {
     historyAreaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
-
-  const generateSnsCaption = useCallback(async () => {
-    setIsGeneratingSnsCaption(true)
-    setSnsCaptionError('')
-    setSnsCaption(null)
-    setEditingCaptionKey('')
-    setEditingCaptionText('')
-    setRegeneratingCaptionKey('')
-    const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId) ?? null
-    try {
-      const res = await fetch('/api/sns-caption', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slides, title, selectedPresetKey, selectedCustomPreset, templateId: selectedTemplateId || simpleTemplateId || '' }),
-      })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message ?? '不明なエラー')
-      const caption = data.caption as SnsCaption
-      setSnsCaption(caption)
-      updateLatestHistory({ snsCaption: caption })
-    } catch (err) {
-      setSnsCaptionError(String(err instanceof Error ? err.message : err))
-    } finally {
-      setIsGeneratingSnsCaption(false)
-    }
-  }, [slides, title, selectedPresetKey, customPresets, selectedCustomPresetId, selectedTemplateId, simpleTemplateId, updateLatestHistory])
-
-  const regenerateCaptionPart = useCallback(async (key: CaptionEditKey) => {
-    if (!snsCaption) return
-
-    setRegeneratingCaptionKey(key)
-    setSnsCaptionError('')
-    setEditingCaptionKey('')
-    setEditingCaptionText('')
-    const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId) ?? null
-
-    try {
-      const res = await fetch('/api/sns-caption', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          slides,
-          title,
-          selectedPresetKey,
-          selectedCustomPreset,
-          templateId: selectedTemplateId || simpleTemplateId || '',
-          regenerateTarget: key,
-          currentCaption: snsCaption,
-        }),
-      })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.message ?? '不明なエラー')
-      const caption = data.caption as SnsCaption
-      setSnsCaption(caption)
-      updateLatestHistory({ snsCaption: caption })
-    } catch (err) {
-      setSnsCaptionError(String(err instanceof Error ? err.message : err))
-    } finally {
-      setRegeneratingCaptionKey('')
-    }
-  }, [customPresets, selectedCustomPresetId, selectedPresetKey, selectedTemplateId, simpleTemplateId, slides, snsCaption, title, updateLatestHistory])
-
-  const copySnsText = useCallback(async (field: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopiedSnsField(field)
-      setTimeout(() => setCopiedSnsField(null), 2000)
-    } catch {
-      // clipboard API 非対応環境では無視
-    }
-  }, [])
-
-  const copyAllCaptions = useCallback(async (caption: SnsCaption) => {
-    const text = [
-      caption.youtubeTitle,
-      '',
-      caption.youtubeDescription,
-      '',
-      caption.instagramCaption,
-      '',
-      caption.tiktokCaption || caption.instagramCaption,
-      '',
-      caption.xCaption || caption.instagramCaption,
-      '',
-      formatCaptionHashtags(caption),
-    ].join('\n')
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopiedAllCaption(true)
-      setTimeout(() => setCopiedAllCaption(false), 3000)
-    } catch {
-      // clipboard API 非対応環境では無視
-    }
-  }, [])
-
-  const copyCaptionText = useCallback(async (label: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopiedCaptionLabel(label)
-      setTimeout(() => setCopiedCaptionLabel(''), 3000)
-    } catch {
-      // clipboard API 非対応環境では無視
-    }
-  }, [])
-
-  const startCaptionEdit = useCallback((key: CaptionEditKey, text: string) => {
-    setEditingCaptionKey(key)
-    setEditingCaptionText(text)
-  }, [])
-
-  const cancelCaptionEdit = useCallback(() => {
-    setEditingCaptionKey('')
-    setEditingCaptionText('')
-  }, [])
-
-  const saveCaptionEdit = useCallback(() => {
-    if (!editingCaptionKey || !snsCaption) return
-
-    const nextCaption: SnsCaption = (() => {
-      switch (editingCaptionKey) {
-        case 'hashtags':
-          return {
-            ...snsCaption,
-            hashtags: editingCaptionText
-              .split(/\s+/)
-              .map((tag) => tag.trim().replace(/^#+/, ''))
-              .filter(Boolean),
-          }
-        case 'youtubeTitle':
-          return { ...snsCaption, youtubeTitle: editingCaptionText }
-        case 'youtubeDescription':
-          return { ...snsCaption, youtubeDescription: editingCaptionText }
-        case 'instagramCaption':
-          return { ...snsCaption, instagramCaption: editingCaptionText }
-        case 'tiktokCaption':
-          return { ...snsCaption, tiktokCaption: editingCaptionText }
-        case 'xCaption':
-          return { ...snsCaption, xCaption: editingCaptionText }
-      }
-    })()
-
-    setSnsCaption(nextCaption)
-    updateLatestHistory({ snsCaption: nextCaption })
-    cancelCaptionEdit()
-  }, [cancelCaptionEdit, editingCaptionKey, editingCaptionText, snsCaption, updateLatestHistory])
-
   const formatHistoryDate = (iso: string) => {
     const d = new Date(iso)
     const pad = (n: number) => String(n).padStart(2, '0')
@@ -4813,160 +1161,15 @@ export default function App() {
     setTimeout(() => setSaved(false), 2500)
   }, [title, slides, ctaConfig])
 
-  const sortedCustomPresets = useMemo(() => {
-    return [...customPresets].sort((a, b) => {
-      if (a.isFavorite && !b.isFavorite) return -1
-      if (!a.isFavorite && b.isFavorite) return 1
-      const ao = a.sortOrder ?? Infinity
-      const bo = b.sortOrder ?? Infinity
-      if (ao !== bo) return ao - bo
-      const ac = a.useCount ?? 0
-      const bc = b.useCount ?? 0
-      if (ac !== bc) return bc - ac
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    })
-  }, [customPresets])
+  const simpleTemplateDerived = useMemo(() => {
+    const selectedSimpleTemplateDefaults =
+      !simpleTemplateType || simpleTemplateType === 'custom'
+        ? null
+        : SIMPLE_TEMPLATE_DEFAULTS[simpleTemplateType]
 
-  const customPresetAnalytics = useMemo(() => {
-    if (customPresets.length === 0) return null
-    const now = Date.now()
-    const todayStr = new Date().toISOString().slice(0, 10)
-    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000
-
-    const totalUse = customPresets.reduce((s, p) => s + (p.useCount ?? 0), 0)
-    const favoriteCount = customPresets.filter((p) => p.isFavorite).length
-
-    let last7Days = 0
-    let todayCount = 0
-    for (const p of customPresets) {
-      for (const ts of p.usedAt ?? []) {
-        const t = new Date(ts).getTime()
-        if (t >= sevenDaysAgo) last7Days++
-        if (ts.slice(0, 10) === todayStr) todayCount++
-      }
-    }
-
-    const top3 = [...customPresets]
-      .filter((p) => (p.useCount ?? 0) > 0)
-      .sort((a, b) => (b.useCount ?? 0) - (a.useCount ?? 0))
-      .slice(0, 3)
-
-    const recentlyUsed = [...customPresets]
-      .filter((p) => p.lastUsedAt)
-      .sort((a, b) => new Date(b.lastUsedAt!).getTime() - new Date(a.lastUsedAt!).getTime())
-      .slice(0, 5)
-
-    const usageByDay: { date: string; label: string; count: number }[] = []
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now - i * 24 * 60 * 60 * 1000)
-      usageByDay.push({ date: d.toISOString().slice(0, 10), label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, count: 0 })
-    }
-    const ctaMap: Record<string, number> = {}
-    const styleMap: Record<string, number> = {}
-    for (const p of customPresets) {
-      const cnt = p.useCount ?? 0
-      if (p.ctaText) ctaMap[p.ctaText] = (ctaMap[p.ctaText] ?? 0) + cnt
-      if (p.imageStyle) styleMap[p.imageStyle] = (styleMap[p.imageStyle] ?? 0) + cnt
-      for (const ts of p.usedAt ?? []) {
-        const day = usageByDay.find((d) => d.date === ts.slice(0, 10))
-        if (day) day.count++
-      }
-    }
-    const chartMax = Math.max(...usageByDay.map((d) => d.count), 1)
-    const topCta = Object.entries(ctaMap).sort((a, b) => b[1] - a[1])[0]
-    const topStyle = Object.entries(styleMap).sort((a, b) => b[1] - a[1])[0]
-    return { totalUse, favoriteCount, top3, recentlyUsed, last7Days, todayCount, usageByDay, chartMax, topCta, topStyle }
-  }, [customPresets])
-
-  const suggestedTemplates = useMemo(() => {
-    if (!selectedPresetKey) return null
-    const categories = PRESET_TEMPLATE_CATEGORY_MAP[selectedPresetKey]
-    const matched = templates.filter((t) => categories.includes(t.category ?? '')).slice(0, 3)
-    if (matched.length > 0) return { items: matched, isFallback: false }
-    const fallback = [...templates]
-      .sort((a, b) => (usageMap[b.id] ?? 0) - (usageMap[a.id] ?? 0))
-      .slice(0, 3)
-    return { items: fallback, isFallback: true }
-  }, [selectedPresetKey, templates, usageMap])
-
-  const hasTheme = aiTheme.trim().length > 0
-  const hasStory = slides.length > 0 && slides.every((slide) => slide.imagePrompt)
-  const hasGeneratedImages = slides.length > 0 && slides.every((slide) => slide.image?.startsWith('generated/'))
-
-  const renderPrecheck = useMemo(() => {
-    const TARGET = 14
-    const generatedCount = slides.filter((s) => s.image?.startsWith('generated/')).length
-    const noImageCount = slides.filter((s) => !s.image).length
-    const checks: { label: string; ok: boolean }[] = [
-      {
-        label: `ストーリー ${slides.length} 枚${slides.length > 0 && slides.length !== TARGET ? `（推奨 ${TARGET} 枚）` : ''}`,
-        ok: slides.length === TARGET,
-      },
-      {
-        label: `生成済み画像 ${generatedCount} / ${slides.length} 枚`,
-        ok: slides.length > 0 && generatedCount === slides.length,
-      },
-      {
-        label: '保存済み',
-        ok: !hasUnsavedChanges,
-      },
-    ]
-    if (noImageCount > 0) {
-      checks.push({ label: `未設定画像 ${noImageCount} 枚あり`, ok: false })
-    }
-    return { checks, canRender: slides.length > 0 }
-  }, [slides, hasUnsavedChanges])
-
-  const variantLearningSummary = useMemo(() => {
-    const totalEvents = variantLearningEvents.length
-    const appliedCount = variantLearningEvents.filter((e) => e.action === 'applied').length
-    const selectedBestCount = variantLearningEvents.filter((e) => e.action === 'selected_best').length
-
-    const angleCounts: Record<string, number> = {}
-    for (const e of variantLearningEvents) {
-      if (e.angle !== 'unknown') angleCounts[e.angle] = (angleCounts[e.angle] ?? 0) + 1
-    }
-    const topAngles = Object.entries(angleCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([angle, count]) => ({ angle, count }))
-
-    const variantCounts: Record<string, number> = {}
-    for (const e of variantLearningEvents) {
-      variantCounts[e.variantName] = (variantCounts[e.variantName] ?? 0) + 1
-    }
-    const topVariantNames = Object.entries(variantCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([name, count]) => ({ name, count }))
-
-    const recentEvents = variantLearningEvents.slice(0, 5)
-
-    return { totalEvents, appliedCount, selectedBestCount, topAngles, topVariantNames, recentEvents }
-  }, [variantLearningEvents])
-
-  const isRendering = isPreparingRender || renderStatus === 'running'
-
-  const completedVariants = useMemo(
-    () =>
-      [...renderQueue]
-        .filter((q) => q.status === 'completed')
-        .sort((a, b) => {
-          const ta = a.renderedAt ? new Date(a.renderedAt).getTime() : 0
-          const tb = b.renderedAt ? new Date(b.renderedAt).getTime() : 0
-          return tb - ta
-        }),
-    [renderQueue]
-  )
-
-  const selectedSimpleTemplateDefaults = useMemo(() => {
-    if (!simpleTemplateType || simpleTemplateType === 'custom') return null
-    return SIMPLE_TEMPLATE_DEFAULTS[simpleTemplateType]
-  }, [simpleTemplateType])
-
-  // Phase19-S: 未入力チェック
-  const missingTemplateInputs = useMemo((): string[] => {
-    switch (simpleTemplateType) {
+    // Phase19-S: 未入力チェック
+    const missingTemplateInputs: string[] = (() => {
+      switch (simpleTemplateType) {
       case 'mmm-event':
         return [
           !mmmEventForm.title.trim() && 'イベント名を入力してください',
@@ -4988,118 +1191,186 @@ export default function App() {
         return !aiTheme.trim() ? ['テーマを入力してください'] : []
       default:
         return ['テンプレートを選んでください']
-    }
+      }
+    })()
+    return { selectedSimpleTemplateDefaults, missingTemplateInputs }
   }, [simpleTemplateType, mmmEventForm, freeDiagnosisForm, noteArticleForm, youtubeVideoForm, musicCommunityForm, aiTheme])
+  const { selectedSimpleTemplateDefaults, missingTemplateInputs } = simpleTemplateDerived
 
-  const renderStepInfo = isPreparingRender
-    ? { step: 1, total: 3, label: '保存中' }
-    : renderStatus === 'running'
-    ? { step: 2, total: 3, label: 'レンダリング中' }
-    : renderStatus === 'completed'
-    ? { step: 3, total: 3, label: '完了' }
-    : null
+  const renderUI = useRenderUI({
+    slides,
+    renderQueue,
+    renderStatus,
+    elapsedSec,
+    hasUnsavedChanges,
+    isPreparingRender,
+    isAutoPipelineRunning,
+    isBatchRendering,
+    isSmartPipelineRunning,
+    isSmartRewritePipelineRunning,
+    isMultiRewriteQueueRunning,
+    factoryRunning,
+    pipelineStatus,
+    smartPipelineStatus,
+    smartRewritePipelineStatus,
+    multiRewriteQueueStatus,
+  })
+  const {
+    renderBtnLabel,
+    renderStatusMsg,
+    renderStatusClass,
+    renderStepInfo,
+    renderProgressPct,
+    pipelineStep,
+    isPipelineDisabled,
+    smartPipelineStep,
+    smartRewritePipelineStep,
+    multiRewriteQueueStep,
+    renderPrecheck,
+    isRendering,
+  } = renderUI
+  const { completedVariants } = renderUI.renderQueueDerived
 
-  const renderProgressPct = renderStatus === 'completed'
-    ? 100
-    : isRendering
-    ? Math.min(Math.round((elapsedSec / 120) * 100), 95)
-    : 0
+  const panelProps = usePanelPropsBuilder({
+    slides,
+    simpleMode,
+    aiTheme,
+    reelAiConfig,
+    reuseImageMode,
+    quotaError,
+    renderQueue,
+    renderUI,
+    renderRunner,
+    factoryPipeline,
+    compareDashboard,
+    storyGenerator,
+    renderQueueActions: { removeFromQueue, clearQueue },
+    handlers: {
+      setQuotaError,
+      renderDiffPanel,
+    },
+  })
 
+  const postEditPanel = (
+    <PostEditPanel
+      slides={{
+        items: slides,
+        imageReplacingId: slideImageReplacing,
+        imageReplaceErrors: slideImageReplaceError,
+        onChangeText: handleSlideTextChange,
+        onReplaceImage: handleSlideImageReplace,
+      }}
+      media={{
+        bgmUploading,
+        bgmFileName,
+        bgmUploadError,
+        qrUploading,
+        qrFileName,
+        qrUploadError,
+        onBgmUpload: handleBgmUpload,
+        onQrUpload: handleQrUpload,
+      }}
+      render={{
+        isRendering,
+        isPreparingRender,
+        onRerenderAfterEdit: async () => {
+          closeSlideEditor()
+          await saveToServer()
+          startRender()
+        },
+      }}
+      actions={{
+        isOpen: slideEditorOpen,
+        onToggleOpen: () => setSlideEditorOpen((v) => !v),
+      }}
+    />
+  )
 
-  const renderBtnLabel = isPreparingRender
-    ? '⏳ 保存して動画生成中...'
-    : renderStatus === 'running'
-    ? '⏳ 生成中...'
-    : renderStatus === 'completed'
-    ? '✓ 動画生成完了'
-    : renderStatus === 'failed'
-    ? '✗ 生成失敗'
-    : '🎬 動画生成'
+  const visualStyleTagsPanel = (
+    <div className="visual-style-tags">
+      <p className="visual-style-tags-label">動画の雰囲気</p>
+      <p className="visual-style-tags-hint">迷ったら変更しなくてOKです。動画の印象を少し寄せたい時だけ選びます。</p>
+      <div className="visual-style-tags-chips">
+        {VISUAL_STYLE_TAG_OPTIONS.map((tag) => (
+          <button
+            key={tag}
+            className={`visual-style-tag-chip${visualStyleTags.includes(tag) ? ' visual-style-tag-chip--active' : ''}`}
+            onClick={() => toggleVisualStyleTag(tag)}
+            type="button"
+          >
+            {tag}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 
-  const renderStatusMsg = isPreparingRender
-    ? '⏳ 保存してから動画生成しています...'
-    : renderStatus === 'running'
-    ? '⏳ 動画生成中… 完了まで 1〜3 分かかります'
-    : renderStatus === 'completed'
-    ? '✓ 動画生成が完了しました！'
-    : renderStatus === 'failed'
-    ? '✗ 生成に失敗しました。エラー内容を確認してください。'
-    : hasUnsavedChanges
-    ? '未保存の変更があります'
-    : null
-
-  const renderStatusClass =
-    isPreparingRender || renderStatus === 'running'
-      ? 'render-status-msg render-status-msg--info'
-      : renderStatus === 'completed'
-      ? 'render-status-msg render-status-msg--ok'
-      : renderStatus === 'failed'
-      ? 'render-status-msg render-status-msg--error'
-      : hasUnsavedChanges
-      ? 'render-status-msg render-status-msg--warning'
-      : 'render-status-msg'
-
-  const pipelineStep =
-    pipelineStatus === 'バリアント生成中...' ? 1 :
-    pipelineStatus === 'バリアントレンダリング中...' ? 2 :
-    pipelineStatus === '比較ダッシュボード準備完了' ? 3 : 0
-
-  const isPipelineDisabled = isAutoPipelineRunning || isBatchRendering || isRendering || isSmartPipelineRunning || isSmartRewritePipelineRunning || isMultiRewriteQueueRunning || factoryRunning
-
-  const factoryStepNum =
-    factoryStep === 'Step 1/7: ストーリー生成中...' ? 1 :
-    factoryStep === 'Step 2/7: AI画像生成中...' ? 2 :
-    factoryStep === 'Step 2/7: アップロード画像反映中...' ? 2 :
-    factoryStep === 'Step 3/7: バリアント生成中...' ? 3 :
-    factoryStep === 'Step 4/7: バリアントスコアリング中...' ? 4 :
-    factoryStep === 'Step 5/7: トップバリアントを選定中...' ? 5 :
-    factoryStep === 'Step 6/7: バリアントをリライト中...' ? 6 :
-    factoryStep === 'Step 7/7: キューに投入中...' ? 7 :
-    factoryStep === 'Factory complete' ? 8 : 0
-
-  // Weighted progress: Story5% | AI/Upload65% | Variant10% | Score5% | Select5% | Rewrite5% | Queue5%
-  const factoryProgress: number = (() => {
-    if (factoryStepNum === 0) return 0
-    if (factoryStepNum === 1) return 3
-    if (factoryStepNum === 2) {
-      const idx = factoryCurrentImageIndex ?? 0
-      const tot = factoryTotalImageCount ?? 14
-      return 5 + Math.round((idx / tot) * 65)
-    }
-    if (factoryStepNum === 3) return 70
-    if (factoryStepNum === 4) return 80
-    if (factoryStepNum === 5) return 85
-    if (factoryStepNum === 6) return 90
-    if (factoryStepNum === 7) return 95
-    return 100
-  })()
-
-  const multiRewriteQueueStep =
-    multiRewriteQueueStatus === 'AIバリアント生成中...' ? 1 :
-    multiRewriteQueueStatus === 'バリアントスコアリング中...' ? 2 :
-    multiRewriteQueueStatus === 'トップバリアントを選定中...' ? 3 :
-    multiRewriteQueueStatus === 'バリアントをリライト中...' ? 4 :
-    multiRewriteQueueStatus === '最初のリライトを適用中...' ? 5 :
-    multiRewriteQueueStatus === 'リライトバリアントをキューに投入中...' ? 6 :
-    multiRewriteQueueStatus === 'レンダリング中...' ? 7 :
-    multiRewriteQueueStatus === 'マルチリライトキュー完了' ? 8 : 0
-
-  const smartRewritePipelineStep =
-    smartRewritePipelineStatus === 'AIバリアント生成中...' ? 1 :
-    smartRewritePipelineStatus === 'バリアントスコアリング中...' ? 2 :
-    smartRewritePipelineStatus === 'トップバリアントを選定中...' ? 3 :
-    smartRewritePipelineStatus === 'ストーリーをリライト中...' ? 4 :
-    smartRewritePipelineStatus === 'リライトを適用中...' ? 5 :
-    smartRewritePipelineStatus === 'リライトバリアントをキューに追加中...' ? 6 :
-    smartRewritePipelineStatus === 'レンダリング中...' ? 7 :
-    smartRewritePipelineStatus === 'スマートリライト完了' ? 8 : 0
-
-  const smartPipelineStep =
-    smartPipelineStatus === 'AIバリアント生成中...' ? 1 :
-    smartPipelineStatus === 'バリアントスコアリング中...' ? 2 :
-    smartPipelineStatus === '推奨バリアントをキューに追加中...' ? 3 :
-    smartPipelineStatus === '推奨バリアントのレンダリング中...' ? 4 :
-    smartPipelineStatus === '比較ダッシュボード準備完了' ? 5 : 0
+  const editPresetPanel = (
+    <div className="edit-preset-panel">
+      <div className="edit-preset-apply">
+        <p className="edit-preset-section-title">保存した設定</p>
+        <div className="edit-preset-apply-row">
+          <select
+            className="edit-preset-select"
+            value={selectedEditPresetId}
+            onChange={(e) => setSelectedEditPresetId(e.target.value)}
+          >
+            <option value="">プリセットを選択...</option>
+            {editPresets.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <button
+            className="btn-edit-preset-apply"
+            onClick={() => applyEditPreset(selectedEditPresetId)}
+            disabled={!selectedEditPresetId}
+            type="button"
+          >
+            適用
+          </button>
+          <button
+            className="btn-edit-preset-delete"
+            onClick={() => deleteEditPreset(selectedEditPresetId)}
+            disabled={!selectedEditPresetId || isDefaultEditPreset(selectedEditPresetId)}
+            type="button"
+          >
+            削除
+          </button>
+        </div>
+        {selectedEditPresetId && (() => {
+          const p = editPresets.find((ep) => ep.id === selectedEditPresetId)
+          return p ? (
+            <p className="edit-preset-preview">
+              雰囲気：{p.visualStyleTags.join(' / ')}
+              {p.bgmFileName ? ` ／ BGM：${p.bgmFileName}` : ''}
+              {p.ctaLabel ? ` ／ CTA：${p.ctaLabel}` : ''}
+            </p>
+          ) : null
+        })()}
+      </div>
+      <div className="edit-preset-save">
+        <p className="edit-preset-section-title">よく使う設定として保存</p>
+        <div className="edit-preset-save-row">
+          <input
+            className="edit-preset-name-input"
+            type="text"
+            placeholder="プリセット名"
+            value={editPresetName}
+            onChange={(e) => setEditPresetName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') saveEditPreset() }}
+          />
+          <button
+            className="btn-edit-preset-save"
+            onClick={saveEditPreset}
+            disabled={!editPresetName.trim()}
+            type="button"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 
   if (loading) {
     return (
@@ -5110,167 +1381,63 @@ export default function App() {
     )
   }
 
+  // Phase-W: USE_WIZARD_MODE = false に変更すると既存UIに戻る
+  if (USE_WIZARD_MODE) {
+    return <WizardMode />
+  }
+
   return (
     <div className={`app${simpleMode ? ' app--simple' : ''}`}>
-      {/* ── テンプレート読み込み確認 ── */}
-      {templateConfirmPending && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <p className="modal-title">テンプレートを読み込みますか？</p>
-            <p className="modal-body">現在の編集内容は破棄されます。</p>
-            <div className="modal-actions">
-              <button className="btn-modal-cancel" onClick={() => setTemplateConfirmPending(null)}>
-                キャンセル
-              </button>
-              <button className="btn-modal-ok" onClick={() => loadTemplate(templateConfirmPending)}>
-                読み込む
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── テンプレート保存モーダル ── */}
-      {saveTemplateModal && (
-        <div className="modal-overlay">
-          <div className="modal modal--wide">
-            <p className="modal-title">テンプレートとして保存</p>
-            <input
-              className="modal-input"
-              type="text"
-              placeholder="テンプレート名を入力"
-              value={saveTemplateName}
-              onChange={(e) => setSaveTemplateName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && saveAsTemplate()}
-              autoFocus
-            />
-            <select
-              className="modal-select"
-              value={saveTemplateCategory}
-              onChange={(e) => setSaveTemplateCategory(e.target.value)}
-            >
-              {CATEGORIES.filter((c) => c.id !== 'all').map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </select>
-            <textarea
-              className="modal-textarea"
-              placeholder="説明文（任意）"
-              value={saveTemplateDescription}
-              onChange={(e) => setSaveTemplateDescription(e.target.value)}
-              rows={3}
-            />
-            {saveTemplateStatus === 'error' && (
-              <p className="save-error">保存に失敗しました</p>
-            )}
-            <div className="modal-actions">
-              <button
-                className="btn-modal-cancel"
-                onClick={() => {
-                  setSaveTemplateModal(false)
-                  setSaveTemplateName('')
-                  setSaveTemplateCategory('other')
-                  setSaveTemplateDescription('')
-                  setSaveTemplateStatus('idle')
-                }}
-                disabled={saveTemplateStatus === 'saving'}
-              >
-                キャンセル
-              </button>
-              <button
-                className="btn-modal-ok"
-                onClick={saveAsTemplate}
-                disabled={!saveTemplateName.trim() || saveTemplateStatus === 'saving'}
-              >
-                {saveTemplateStatus === 'saving' ? '保存中...' : saveTemplateStatus === 'ok' ? '✓ 保存完了' : '保存'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── 本番安全警告バナー ── */}
+      <ReelHeaderPanel section="safety-banner" reelAiConfig={reelAiConfig} />
+      <TemplateModals
+        templateConfirmPending={templateConfirmPending}
+        saveTemplateModal={saveTemplateModal}
+        saveTemplateName={saveTemplateName}
+        saveTemplateCategory={saveTemplateCategory}
+        saveTemplateDescription={saveTemplateDescription}
+        saveTemplateStatus={saveTemplateStatus}
+        categories={CATEGORIES}
+        onCancelLoadTemplate={cancelLoadTemplate}
+        onLoadTemplate={loadTemplate}
+        onCancelSaveTemplateModal={cancelSaveTemplateModal}
+        onSaveTemplate={saveAsTemplate}
+        onChangeSaveTemplateName={setSaveTemplateName}
+        onChangeSaveTemplateCategory={setSaveTemplateCategory}
+        onChangeSaveTemplateDescription={setSaveTemplateDescription}
+      />
 
       {/* ── 左パネル: スライド一覧 ── */}
       <div className="panel panel-left">
-        {simpleMode ? (
-          <div className="panel-header simple-app-header">
-            <div className="panel-header-left">
-              <span className="simple-app-title">🎬 BeMyStyle Reel</span>
-              {hasUnsavedChanges && <span className="unsaved-badge">未保存</span>}
-            </div>
-            <div className="simple-app-header-actions">
-              {simpleStep > 1 && (
-                <button
-                  className="btn-simple-new-header"
-                  onClick={() => { setSimpleStep(1); setAiTheme(''); setFactoryWarning(''); setFactoryNotice(''); resetPostChecklist(); resetPostedRecords() }}
-                >
-                  ＋ 新規作成
-                </button>
-              )}
-              <button className="btn-save-simple" onClick={saveToServer} disabled={saveStatus === 'saving' || isRendering} title="保存">
-                {saveStatus === 'saving' ? '保存中...' : saveStatus === 'ok' ? '✓' : hasUnsavedChanges ? '⚠ 保存' : '💾 保存'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="panel-header">
-            <div className="panel-header-left">
-              <span className="panel-title">スライド一覧</span>
-              {hasUnsavedChanges && <span className="unsaved-badge">未保存</span>}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button className="btn-new-project" onClick={handleNewProject} title="14枚の空白スライドで新規作成">
-                ＋ 新規
-              </button>
-              <span className="panel-badge">{slides.length}枚</span>
-            </div>
-          </div>
-        )}
+        <ReelHeaderPanel
+          section="panel-header"
+          simpleMode={simpleMode}
+          simpleStep={simpleStep}
+          hasUnsavedChanges={hasUnsavedChanges}
+          saveStatus={saveStatus}
+          isRendering={isRendering}
+          slideCount={slideCount}
+          onNewProject={handleNewProject}
+          onSimpleNewProject={() => { goToSimpleStep(1); setAiTheme(''); clearFactoryMessages(); resetPostChecklist(); resetPostedRecords() }}
+          onSave={saveToServer}
+        />
 
         <div className="panel-left-body">
 
         {/* ── モード切替 (Phase17-G / Phase18-D) ── */}
-        {simpleMode ? (
-          <div className="mode-toggle mode-toggle--simple">
-            <button
-              className="btn-detail-mode"
-              onClick={() => setSimpleMode(false)}
-            >
-              ⚙️ 詳細編集
-            </button>
-          </div>
-        ) : (
-          <div className="mode-toggle">
-            <span className="mode-toggle-label">モード</span>
-            <div className="mode-toggle-buttons">
-              <button
-                className="mode-toggle-btn"
-                onClick={() => setSimpleMode(true)}
-              >
-                自動作成
-              </button>
-              <button
-                className="mode-toggle-btn mode-toggle-btn--active"
-              >
-                詳細編集
-              </button>
-            </div>
-          </div>
-        )}
+        <ReelHeaderPanel
+          section="mode-toggle"
+          simpleMode={simpleMode}
+          onStartSimpleMode={startSimpleMode}
+          onExitSimpleMode={exitSimpleMode}
+        />
 
         {!simpleMode && (<>
         {/* テンプレートセクション */}
         <div className="template-section">
           <TemplateGalleryPanel
-            templates={templates}
-            selectedTemplateId={selectedTemplateId}
-            isRendering={isRendering}
-            recentTemplateIds={recentTemplateIds}
-            usageMap={usageMap}
-            onConfirmLoadTemplate={confirmLoadTemplate}
-            onDuplicateTemplate={duplicateTemplate}
-            onToggleFavorite={toggleFavorite}
-            onDeleteTemplate={deleteTemplate}
-            onRenameTemplate={renameTemplate}
+            gallery={{ templates, selectedTemplateId, isRendering, recentTemplateIds, usageMap }}
+            actions={{ confirmLoadTemplate, duplicateTemplate, toggleFavorite, deleteTemplate, renameTemplate }}
           />
           {templateHints && (
             <div className="template-hints">
@@ -5281,509 +1448,48 @@ export default function App() {
             </div>
           )}
           {templateVariableKeys.length > 0 && (
-            <div className="ai-generator">
-              <p className="ai-generator-label">用途プリセット</p>
-              <div className="ai-preset-list">
-                {AI_PRESETS.map((preset) => {
-                  const isActive = selectedPresetKey === preset.key
-                  return (
-                    <button
-                      key={preset.key}
-                      className={`ai-preset-btn${isActive ? ' ai-preset-btn--active' : ''}`}
-                      onClick={() => setSelectedPresetKey(isActive ? '' : preset.key)}
-                      disabled={isGenerating || autoWorkflowRunning || isRendering}
-                      title={preset.description}
-                    >
-                      {isActive && <span className="ai-preset-badge">選択中</span>}
-                      {preset.label}
-                    </button>
-                  )
-                })}
-              </div>
-              <label className="ai-auto-apply-toggle">
-                <input
-                  type="checkbox"
-                  checked={autoApplyRecommendedTemplate}
-                  onChange={(e) => setAutoApplyRecommendedTemplate(e.target.checked)}
-                  disabled={isGenerating || autoWorkflowRunning || isRendering}
-                />
-                おすすめテンプレートを自動で使う
-              </label>
-              {autoApplyRecommendedTemplate && (
-                <p className="ai-auto-apply-desc">
-                  プリセット選択時に、最適なテンプレートを自動で読み込みます。
-                </p>
-              )}
-              {autoApplyTemplateNotice && (
-                <p className={`ai-auto-apply-notice${autoApplyTemplateNotice.includes('見つかりません') ? ' ai-auto-apply-notice--warn' : ' ai-auto-apply-notice--ok'}`}>
-                  {autoApplyTemplateNotice}
-                </p>
-              )}
-              {selectedPresetKey && (
-                <p className="ai-preset-desc">
-                  {AI_PRESETS.find((p) => p.key === selectedPresetKey)?.description}
-                </p>
-              )}
-              {suggestedTemplates && suggestedTemplates.items.length > 0 && (
-                <div className="ai-recommended">
-                  <p className="ai-recommended-label">
-                    {suggestedTemplates.isFallback ? '人気テンプレート（該当なし時）' : 'おすすめテンプレート'}
-                  </p>
-                  {suggestedTemplates.items.map((t) => (
-                    <div key={t.id} className="ai-recommended-card">
-                      <div className="ai-recommended-card-header">
-                        <span className="ai-recommended-card-name" title={t.name}>{t.name}</span>
-                        {t.category && (
-                          <span className="ai-recommended-card-cat">{t.category}</span>
-                        )}
-                      </div>
-                      {t.description && (
-                        <p className="ai-recommended-card-desc">{t.description}</p>
-                      )}
-                      <button
-                        className="ai-recommended-use-btn"
-                        onClick={() => !isRendering && confirmLoadTemplate(t.id)}
-                        disabled={isRendering || autoWorkflowRunning}
-                      >
-                        このテンプレートを使う
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {/* カスタムプリセット (Phase12-P/Q) */}
-              <div className="custom-preset-section">
-                <div className="custom-preset-header-row" style={{ marginTop: 10 }}>
-                  <p className="ai-generator-label" style={{ margin: 0 }}>カスタムプリセット</p>
-                  <div className="custom-preset-header-actions">
-                    <button
-                      className="custom-preset-io-btn"
-                      onClick={handleExportCustomPresets}
-                      disabled={customPresets.length === 0}
-                      title="カスタムプリセットをJSONでダウンロード"
-                    >
-                      エクスポート
-                    </button>
-                    <button
-                      className="custom-preset-io-btn"
-                      onClick={() => presetImportRef.current?.click()}
-                      title="JSONファイルからインポート"
-                    >
-                      インポート
-                    </button>
-                    <input
-                      ref={presetImportRef}
-                      type="file"
-                      accept=".json"
-                      style={{ display: 'none' }}
-                      onChange={handleImportCustomPresets}
-                    />
-                    <button
-                      className="custom-preset-io-btn custom-preset-io-btn--danger"
-                      onClick={handleClearCustomPresets}
-                      disabled={customPresets.length === 0}
-                      title="保存済みプリセットをすべて削除"
-                    >
-                      すべて削除
-                    </button>
-                  </div>
-                </div>
-                {customPresetAnalytics && (
-                  <div className="cp-analytics-card">
-                    <div className="cp-analytics-header">
-                      <p className="cp-analytics-title">📊 CustomPreset Analytics</p>
-                      <button
-                        className="cp-analytics-expand-btn"
-                        onClick={() => setIsAnalyticsExpanded((v) => !v)}
-                      >
-                        {isAnalyticsExpanded ? '閉じる' : '詳細を見る'}
-                      </button>
-                    </div>
-                    <div className="cp-analytics-summary">
-                      <span>総プリセット数：<strong>{customPresets.length}</strong></span>
-                      <span>Favorite：<strong>{customPresetAnalytics.favoriteCount}</strong></span>
-                      <span>総使用回数：<strong>{customPresetAnalytics.totalUse}</strong></span>
-                      <span>今日：<strong>{customPresetAnalytics.todayCount}</strong></span>
-                      <span>直近7日：<strong>{customPresetAnalytics.last7Days}</strong></span>
-                    </div>
-                    {isAnalyticsExpanded && (
-                      <div className="cp-analytics-details">
-                        <div className="cp-analytics-block">
-                          <p className="cp-analytics-block-label">📈 直近7日間の使用推移</p>
-                          <div className="cp-analytics-chart">
-                            {customPresetAnalytics.usageByDay.map((day) => (
-                              <div key={day.date} className="cp-analytics-bar">
-                                <span className="cp-analytics-bar-count">{day.count > 0 ? day.count : ''}</span>
-                                <div
-                                  className="cp-analytics-bar-fill"
-                                  style={{ '--bar-h': `${Math.round((day.count / customPresetAnalytics.chartMax) * 40)}px` } as React.CSSProperties}
-                                />
-                                <span className="cp-analytics-bar-label">{day.label}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        {customPresetAnalytics.top3.length > 0 && (
-                          <div className="cp-analytics-block">
-                            <p className="cp-analytics-block-label">よく使うプリセット TOP3</p>
-                            {customPresetAnalytics.top3.map((p, i) => (
-                              <div key={p.id} className="cp-analytics-row">
-                                <span className="cp-analytics-rank">{i + 1}.</span>
-                                <span className="cp-analytics-name">{p.name}</span>
-                                <span className="cp-analytics-count">{p.useCount}回</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {customPresetAnalytics.recentlyUsed.length > 0 && (
-                          <div className="cp-analytics-block">
-                            <p className="cp-analytics-block-label">最近使われたプリセット</p>
-                            {customPresetAnalytics.recentlyUsed.map((p) => (
-                              <div key={p.id} className="cp-analytics-row">
-                                <span className="cp-analytics-name">{p.name}</span>
-                                <span className="cp-analytics-last-used">{new Date(p.lastUsedAt!).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {customPresetAnalytics.topCta && customPresetAnalytics.topCta[1] > 0 && (
-                          <div className="cp-analytics-block">
-                            <p className="cp-analytics-block-label">人気CTA</p>
-                            <div className="cp-analytics-row">
-                              <span className="cp-analytics-name">{customPresetAnalytics.topCta[0]}</span>
-                              <span className="cp-analytics-count">{customPresetAnalytics.topCta[1]}回</span>
-                            </div>
-                          </div>
-                        )}
-                        {customPresetAnalytics.topStyle && customPresetAnalytics.topStyle[1] > 0 && (
-                          <div className="cp-analytics-block">
-                            <p className="cp-analytics-block-label">人気画像スタイル</p>
-                            <div className="cp-analytics-row">
-                              <span className="cp-analytics-name">{customPresetAnalytics.topStyle[0]}</span>
-                              <span className="cp-analytics-count">{customPresetAnalytics.topStyle[1]}回</span>
-                            </div>
-                          </div>
-                        )}
-                        <div className="cp-analytics-block">
-                          <button
-                            className="cp-analytics-csv-btn"
-                            onClick={handleExportAnalyticsCsv}
-                            disabled={customPresets.length === 0}
-                            title="利用状況をCSVでダウンロード"
-                          >
-                            CSVエクスポート
-                          </button>
-                        </div>
-                        <div className="cp-insight-trigger">
-                          <button
-                            className="cp-insight-btn"
-                            onClick={handleGeneratePresetInsight}
-                            disabled={isGeneratingPresetInsight || customPresets.length === 0}
-                          >
-                            {isGeneratingPresetInsight ? '分析中…' : '🤖 AI改善提案'}
-                          </button>
-                        </div>
-                        {presetInsightError && (
-                          <p className="cp-insight-error">{presetInsightError}</p>
-                        )}
-                        {presetInsight && (
-                          <div className="cp-insight-panel">
-                            <p className="cp-analytics-block-label">🤖 AI改善提案</p>
-                            <p className="cp-insight-summary">{presetInsight.summary}</p>
-                            {presetInsight.strongestPresets.length > 0 && (
-                              <div className="cp-insight-section">
-                                <p className="cp-insight-section-label">勝ちパターン</p>
-                                <ul className="cp-insight-list">
-                                  {presetInsight.strongestPresets.map((s, i) => <li key={i}>{s}</li>)}
-                                </ul>
-                              </div>
-                            )}
-                            {presetInsight.improvementIdeas.length > 0 && (
-                              <div className="cp-insight-section">
-                                <p className="cp-insight-section-label">改善できるプリセット</p>
-                                <ul className="cp-insight-list">
-                                  {presetInsight.improvementIdeas.map((s, i) => <li key={i}>{s}</li>)}
-                                </ul>
-                              </div>
-                            )}
-                            {presetInsight.recommendedCombinations.length > 0 && (
-                              <div className="cp-insight-section">
-                                <p className="cp-insight-section-label">おすすめ新プリセット案</p>
-                                {presetInsight.recommendedCombinations.map((combo, i) => (
-                                  <div key={i} className="cp-insight-combo-card">
-                                    <div className="cp-insight-combo-header">
-                                      <span className="cp-insight-combo-name">{combo.name || 'AI提案プリセット'}</span>
-                                      <button
-                                        className={`cp-insight-create-btn${createdInsightIndices.has(i) ? ' cp-insight-create-btn--done' : ''}`}
-                                        onClick={() => handleSaveInsightPreset(combo, i)}
-                                        disabled={createdInsightIndices.has(i) || customPresets.length >= 10}
-                                        title={customPresets.length >= 10 ? 'プリセットは最大10件です' : undefined}
-                                      >
-                                        {createdInsightIndices.has(i) ? '作成済み ✓' : 'このプリセットを作成'}
-                                      </button>
-                                    </div>
-                                    {combo.reason && <p className="cp-insight-combo-reason">{combo.reason}</p>}
-                                    <div className="cp-insight-combo-tags">
-                                      {combo.platform && <span className="cp-insight-combo-tag">{combo.platform}</span>}
-                                      {combo.tone && <span className="cp-insight-combo-tag">{combo.tone}</span>}
-                                      {combo.ctaText && <span className="cp-insight-combo-tag">CTA: {combo.ctaText}</span>}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {presetImportNotice && (
-                  <p className={`custom-preset-import-notice${presetImportNotice.includes('失敗') ? ' custom-preset-import-notice--error' : ' custom-preset-import-notice--ok'}`}>
-                    {presetImportNotice}
-                  </p>
-                )}
-                <div className="custom-preset-form">
-                  <p className="custom-preset-form-label">カスタムプリセットを追加</p>
-                  <input
-                    className="custom-preset-input"
-                    type="text"
-                    placeholder="名前"
-                    value={customPresetForm.name}
-                    onChange={(e) => setCustomPresetForm((prev) => ({ ...prev, name: e.target.value }))}
-                  />
-                  <select
-                    className="custom-preset-select"
-                    value={customPresetForm.presetKey}
-                    onChange={(e) => setCustomPresetForm((prev) => ({ ...prev, presetKey: e.target.value as AIPresetKey | '' }))}
-                  >
-                    <option value="">ベースプリセット（なし）</option>
-                    {AI_PRESETS.map((p) => (
-                      <option key={p.key} value={p.key}>{p.label}</option>
-                    ))}
-                  </select>
-                  <input
-                    className="custom-preset-input"
-                    type="text"
-                    placeholder="トーン"
-                    value={customPresetForm.tone}
-                    onChange={(e) => setCustomPresetForm((prev) => ({ ...prev, tone: e.target.value }))}
-                  />
-                  <input
-                    className="custom-preset-input"
-                    type="text"
-                    placeholder="対象読者"
-                    value={customPresetForm.targetAudience}
-                    onChange={(e) => setCustomPresetForm((prev) => ({ ...prev, targetAudience: e.target.value }))}
-                  />
-                  <input
-                    className="custom-preset-input"
-                    type="text"
-                    placeholder="プラットフォーム"
-                    value={customPresetForm.platform}
-                    onChange={(e) => setCustomPresetForm((prev) => ({ ...prev, platform: e.target.value }))}
-                  />
-                  <input
-                    className="custom-preset-input"
-                    type="text"
-                    placeholder="画像スタイル"
-                    value={customPresetForm.imageStyle}
-                    onChange={(e) => setCustomPresetForm((prev) => ({ ...prev, imageStyle: e.target.value }))}
-                  />
-                  <input
-                    className="custom-preset-input"
-                    type="text"
-                    placeholder="CTA"
-                    value={customPresetForm.ctaText}
-                    onChange={(e) => setCustomPresetForm((prev) => ({ ...prev, ctaText: e.target.value }))}
-                  />
-                  <button
-                    className="custom-preset-save-btn"
-                    onClick={handleSaveCustomPreset}
-                    disabled={
-                      !customPresetForm.name ||
-                      !customPresetForm.tone ||
-                      !customPresetForm.targetAudience ||
-                      !customPresetForm.platform ||
-                      !customPresetForm.imageStyle ||
-                      !customPresetForm.ctaText
-                    }
-                  >
-                    保存
-                  </button>
-                </div>
-                {sortedCustomPresets.length > 0 && (
-                  <div className="custom-preset-list">
-                    {sortedCustomPresets.map((preset, sortedIdx) => {
-                      const isSelected = selectedCustomPresetId === preset.id
-                      const isEditing = editingCustomPresetId === preset.id
-                      const canMoveUp = sortedIdx > 0 && !(!preset.isFavorite && sortedCustomPresets[sortedIdx - 1]?.isFavorite)
-                      const canMoveDown = sortedIdx < sortedCustomPresets.length - 1 && !(preset.isFavorite && !sortedCustomPresets[sortedIdx + 1]?.isFavorite)
-                      return (
-                        <div key={preset.id} className={`custom-preset-card${isSelected ? ' custom-preset-card--active' : ''}`}>
-                          {isEditing && editingCustomPresetForm ? (
-                            <div className="custom-preset-edit-form">
-                              <input
-                                className="custom-preset-input"
-                                type="text"
-                                placeholder="名前"
-                                value={editingCustomPresetForm.name}
-                                onChange={(e) => setEditingCustomPresetForm((prev) => prev && ({ ...prev, name: e.target.value }))}
-                              />
-                              <select
-                                className="custom-preset-select"
-                                value={editingCustomPresetForm.presetKey}
-                                onChange={(e) => setEditingCustomPresetForm((prev) => prev && ({ ...prev, presetKey: e.target.value as AIPresetKey | '' }))}
-                              >
-                                <option value="">ベースプリセット（なし）</option>
-                                {AI_PRESETS.map((p) => (
-                                  <option key={p.key} value={p.key}>{p.label}</option>
-                                ))}
-                              </select>
-                              <input
-                                className="custom-preset-input"
-                                type="text"
-                                placeholder="トーン"
-                                value={editingCustomPresetForm.tone}
-                                onChange={(e) => setEditingCustomPresetForm((prev) => prev && ({ ...prev, tone: e.target.value }))}
-                              />
-                              <input
-                                className="custom-preset-input"
-                                type="text"
-                                placeholder="対象読者"
-                                value={editingCustomPresetForm.targetAudience}
-                                onChange={(e) => setEditingCustomPresetForm((prev) => prev && ({ ...prev, targetAudience: e.target.value }))}
-                              />
-                              <input
-                                className="custom-preset-input"
-                                type="text"
-                                placeholder="プラットフォーム"
-                                value={editingCustomPresetForm.platform}
-                                onChange={(e) => setEditingCustomPresetForm((prev) => prev && ({ ...prev, platform: e.target.value }))}
-                              />
-                              <input
-                                className="custom-preset-input"
-                                type="text"
-                                placeholder="画像スタイル"
-                                value={editingCustomPresetForm.imageStyle}
-                                onChange={(e) => setEditingCustomPresetForm((prev) => prev && ({ ...prev, imageStyle: e.target.value }))}
-                              />
-                              <input
-                                className="custom-preset-input"
-                                type="text"
-                                placeholder="CTA"
-                                value={editingCustomPresetForm.ctaText}
-                                onChange={(e) => setEditingCustomPresetForm((prev) => prev && ({ ...prev, ctaText: e.target.value }))}
-                              />
-                              <div className="custom-preset-edit-actions">
-                                <button
-                                  className="custom-preset-edit-save-btn"
-                                  onClick={handleSaveEditCustomPreset}
-                                  disabled={
-                                    !editingCustomPresetForm.name ||
-                                    !editingCustomPresetForm.tone ||
-                                    !editingCustomPresetForm.targetAudience ||
-                                    !editingCustomPresetForm.platform ||
-                                    !editingCustomPresetForm.imageStyle ||
-                                    !editingCustomPresetForm.ctaText
-                                  }
-                                >
-                                  保存
-                                </button>
-                                <button
-                                  className="custom-preset-edit-cancel-btn"
-                                  onClick={() => { setEditingCustomPresetId(''); setEditingCustomPresetForm(null) }}
-                                >
-                                  キャンセル
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <>
-                              <div className="custom-preset-card-header">
-                                <button
-                                  className={`custom-preset-fav-btn${preset.isFavorite ? ' custom-preset-fav-btn--active' : ''}`}
-                                  onClick={() => handleToggleFavoriteCustomPreset(preset.id)}
-                                  title="お気に入り"
-                                >
-                                  {preset.isFavorite ? '⭐' : '☆'}
-                                </button>
-                                <span className="custom-preset-card-name">{preset.name}</span>
-                                {preset.presetKey && (
-                                  <span className="custom-preset-card-base">
-                                    {AI_PRESETS.find((p) => p.key === preset.presetKey)?.label ?? preset.presetKey}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="custom-preset-use-count">
-                                使用回数 {preset.useCount ?? 0}
-                              </div>
-                              <div className="custom-preset-card-body">
-                                <span className="custom-preset-tag">トーン: {preset.tone}</span>
-                                <span className="custom-preset-tag">対象: {preset.targetAudience}</span>
-                                <span className="custom-preset-tag">PF: {preset.platform}</span>
-                                <span className="custom-preset-tag">スタイル: {preset.imageStyle}</span>
-                                <span className="custom-preset-tag">CTA: {preset.ctaText}</span>
-                              </div>
-                              <div className="custom-preset-card-actions">
-                                <button
-                                  className={`custom-preset-use-btn${isSelected ? ' custom-preset-use-btn--active' : ''}`}
-                                  onClick={() => handleUseCustomPreset(preset)}
-                                >
-                                  {isSelected ? '適用中' : '使用'}
-                                </button>
-                                <button
-                                  className="custom-preset-edit-btn"
-                                  onClick={() => {
-                                    setEditingCustomPresetId(preset.id)
-                                    setEditingCustomPresetForm({
-                                      name: preset.name,
-                                      presetKey: preset.presetKey,
-                                      tone: preset.tone,
-                                      targetAudience: preset.targetAudience,
-                                      platform: preset.platform,
-                                      imageStyle: preset.imageStyle,
-                                      ctaText: preset.ctaText,
-                                    })
-                                  }}
-                                >
-                                  編集
-                                </button>
-                                <button
-                                  className="custom-preset-duplicate-btn"
-                                  onClick={() => handleDuplicateCustomPreset(preset)}
-                                >
-                                  複製
-                                </button>
-                                <button
-                                  className="custom-preset-delete-btn"
-                                  onClick={() => handleDeleteCustomPreset(preset.id)}
-                                >
-                                  削除
-                                </button>
-                                <button
-                                  className="custom-preset-move-btn"
-                                  onClick={() => handleMoveCustomPreset(preset.id, 'up')}
-                                  disabled={!canMoveUp}
-                                  title="上に移動"
-                                >↑</button>
-                                <button
-                                  className="custom-preset-move-btn"
-                                  onClick={() => handleMoveCustomPreset(preset.id, 'down')}
-                                  disabled={!canMoveDown}
-                                  title="下に移動"
-                                >↓</button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-
-            </div>
+            <CustomPresetPanel
+              aiPresets={AI_PRESETS}
+              selectedPresetKey={selectedPresetKey}
+              onSelectPresetKey={setSelectedPresetKey}
+              isGenerating={isGenerating}
+              isRendering={isRendering}
+              autoApplyRecommendedTemplate={autoApplyRecommendedTemplate}
+              onChangeAutoApplyRecommendedTemplate={setAutoApplyRecommendedTemplate}
+              autoApplyTemplateNotice={autoApplyTemplateNotice}
+              templates={templates}
+              usageMap={usageMap}
+              onConfirmLoadTemplate={confirmLoadTemplate}
+              customPresets={customPresets}
+              customPresetForm={customPresetForm}
+              onChangeCustomPresetForm={setCustomPresetForm}
+              selectedCustomPresetId={selectedCustomPresetId}
+              presetImportNotice={presetImportNotice}
+              presetImportRef={presetImportRef}
+              editingCustomPresetId={editingCustomPresetId}
+              onChangeEditingCustomPresetId={setEditingCustomPresetId}
+              editingCustomPresetForm={editingCustomPresetForm}
+              onChangeEditingCustomPresetForm={setEditingCustomPresetForm}
+              presetInsight={presetInsight}
+              isGeneratingPresetInsight={isGeneratingPresetInsight}
+              presetInsightError={presetInsightError}
+              createdInsightIndices={createdInsightIndices}
+              isAnalyticsExpanded={isAnalyticsExpanded}
+              onToggleAnalyticsExpanded={() => setIsAnalyticsExpanded((v) => !v)}
+              onSaveCustomPreset={handleSaveCustomPreset}
+              onDeleteCustomPreset={handleDeleteCustomPreset}
+              onUseCustomPreset={handleUseCustomPreset}
+              onExportCustomPresets={handleExportCustomPresets}
+              onImportCustomPresets={handleImportCustomPresets}
+              onSaveEditCustomPreset={handleSaveEditCustomPreset}
+              onDuplicateCustomPreset={handleDuplicateCustomPreset}
+              onClearCustomPresets={handleClearCustomPresets}
+              onExportAnalyticsCsv={handleExportAnalyticsCsv}
+              onGeneratePresetInsight={handleGeneratePresetInsight}
+              onSaveInsightPreset={handleSaveInsightPreset}
+              onToggleFavoriteCustomPreset={handleToggleFavoriteCustomPreset}
+              onMoveCustomPreset={handleMoveCustomPreset}
+            />
           )}
           {templateVariableKeys.length > 0 && (
             <div className="template-variables">
@@ -5809,180 +1515,57 @@ export default function App() {
               <button
                 className={`bulk-image-btn${bulkImageGenerating ? ' bulk-image-btn--loading' : ''}`}
                 onClick={handleGenerateAllImages}
-                disabled={bulkImageGenerating || autoWorkflowRunning}
+                disabled={bulkImageGenerating}
               >
                 {bulkImageGenerating
-                  ? `${bulkImageProgress.current} / ${bulkImageProgress.total} 生成中...`
+                  ? `画像生成中：${bulkImageProgress.current} / ${bulkImageProgress.total}枚 完了`
                   : '14枚AI画像生成'}
               </button>
+              {bulkImageGenerating && bulkImageSubMessage && (
+                <p className="bulk-image-sub-message">{bulkImageSubMessage}</p>
+              )}
               {bulkImageMessage && (
                 <p className={`bulk-image-message${bulkImageMessage.includes('失敗') ? ' bulk-image-message--error' : ' bulk-image-message--ok'}`}>
                   {bulkImageMessage}
                 </p>
+              )}
+              {failedImageIds.length > 0 && !bulkImageGenerating && !quotaError && (
+                <button
+                  className="bulk-image-retry-btn"
+                  onClick={handleRetryFailedImages}
+                >
+                  失敗画像を再生成（{failedImageIds.length}枚）
+                </button>
               )}
             </div>
           )}
 
 
           {/* AI生成履歴 (Phase12-N) */}
-          {aiGenerationHistory.length > 0 && (
-            <div className="ai-gen-history">
-              <div className="ai-gen-history-header">
-                <p className="ai-gen-history-title">AI生成履歴</p>
-                <div className="ai-gen-history-header-actions">
-                  <button
-                    className="ai-gen-history-io-btn"
-                    onClick={exportAIGenerationHistory}
-                    title="履歴をJSONでダウンロード"
-                  >
-                    エクスポート
-                  </button>
-                  <button
-                    className="ai-gen-history-io-btn"
-                    onClick={() => importInputRef.current?.click()}
-                    title="JSONファイルから履歴をインポート"
-                  >
-                    インポート
-                  </button>
-                  <input
-                    ref={importInputRef}
-                    type="file"
-                    accept=".json"
-                    style={{ display: 'none' }}
-                    onChange={handleImport}
-                  />
-                  <button
-                    className="ai-gen-history-clear-btn"
-                    onClick={clearAIGenerationHistory}
-                  >
-                    全削除
-                  </button>
-                </div>
-              </div>
-              {importNotice && (
-                <p className={`ai-gen-history-import-notice${importNotice.includes('失敗') ? ' ai-gen-history-import-notice--error' : ' ai-gen-history-import-notice--ok'}`}>
-                  {importNotice}
-                </p>
-              )}
-              <ul className="ai-gen-history-list">
-                {aiGenerationHistory.map((h) => (
-                  <li key={h.id} className="ai-gen-history-item">
-                    <div className="ai-gen-history-item-main">
-                      <span className="ai-gen-history-theme" title={h.theme}>{h.theme}</span>
-                      {h.presetKey && (
-                        <span className="ai-gen-history-preset">
-                          {AI_PRESETS.find((p) => p.key === h.presetKey)?.label ?? h.presetKey}
-                        </span>
-                      )}
-                    </div>
-                    {h.templateName && (
-                      <p className="ai-gen-history-template">{h.templateName}</p>
-                    )}
-                    <div className="ai-gen-history-meta">
-                      <span>{formatHistoryDate(h.createdAt)}</span>
-                      <span>スライド{h.slideCount}枚</span>
-                      <span>画像{h.imageCount}枚</span>
-                      <span className={`ai-gen-history-render-status ai-gen-history-render-status--${h.renderStatus}`}>
-                        {h.renderStatus === 'none' ? '未レンダリング' : h.renderStatus === 'completed' ? '完了' : '失敗'}
-                      </span>
-                      {h.renderOutputPath && (
-                        <a className="ai-gen-history-render-dl" href={h.renderOutputPath} download>
-                          DL
-                        </a>
-                      )}
-                      {h.snsCaption && (
-                        <span className="ai-gen-history-sns-badge">SNS文あり</span>
-                      )}
-                    </div>
-                    {(h.renderVariantName || h.renderedAt) && (
-                      <div className="ai-gen-history-variant">
-                        <span>バリアント: {h.renderVariantName ?? 'Default'}</span>
-                        {h.renderedAt && (
-                          <span>生成日時: {new Date(h.renderedAt).toLocaleString()}</span>
-                        )}
-                      </div>
-                    )}
-                    {h.renderErrorMessage && (
-                      <p className="ai-gen-history-render-error">{h.renderErrorMessage}</p>
-                    )}
-                    <div className="ai-gen-history-actions">
-                      <button
-                        className="ai-gen-history-reuse-btn"
-                        onClick={() => handleReuseHistory(h)}
-                        disabled={autoWorkflowRunning || isGenerating}
-                      >
-                        このテーマで再生成
-                      </button>
-                      <button
-                        className="ai-gen-history-delete-btn"
-                        onClick={() => deleteAIGenerationHistoryItem(h.id)}
-                      >
-                        削除
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <AiGenerationHistoryPanel
+            aiGenerationHistory={aiGenerationHistory}
+            aiPresets={AI_PRESETS}
+            importNotice={importNotice}
+            importInputRef={importInputRef}
+            isGenerating={isGenerating}
+            formatHistoryDate={formatHistoryDate}
+            onExportAIGenerationHistory={exportAIGenerationHistory}
+            onImportAIGenerationHistory={handleImport}
+            onClearAIGenerationHistory={clearAIGenerationHistory}
+            onReuseHistory={handleReuseHistory}
+            onDeleteAIGenerationHistoryItem={deleteAIGenerationHistoryItem}
+          />
 
           {/* 生成済み素材 (Phase12-G) */}
-          <div className="assets-section">
-            <div className="assets-header-row">
-              <p className="assets-label">生成済み素材</p>
-              <div className="assets-header-actions">
-                <button
-                  className="assets-refresh-btn"
-                  onClick={fetchGeneratedAssets}
-                  disabled={assetsLoading}
-                  title="更新"
-                >
-                  {assetsLoading ? '...' : '↻'}
-                </button>
-                <button
-                  className="assets-bulk-delete-btn"
-                  onClick={() => deleteUnusedAssets(usedGeneratedImages)}
-                  disabled={assetsLoading || generatedAssets.length === 0}
-                >
-                  未使用画像を一括削除
-                </button>
-              </div>
-            </div>
-            {assetsMessage && (
-              <p className={`assets-message${assetsMessage.includes('失敗') ? ' assets-message--error' : ' assets-message--ok'}`}>
-                {assetsMessage}
-              </p>
-            )}
-            {generatedAssets.length === 0 ? (
-              <p className="assets-empty">生成済み画像はありません</p>
-            ) : (
-              <ul className="assets-list">
-                {generatedAssets.map((asset) => {
-                  const isUsed = usedGeneratedImages.has(asset.path)
-                  return (
-                    <li key={asset.filename} className="assets-item">
-                      <div className="assets-item-info">
-                        <span className="assets-item-name" title={asset.filename}>{asset.filename}</span>
-                        <span className="assets-item-size">{(asset.size / 1024).toFixed(0)}KB</span>
-                        {isUsed
-                          ? <span className="assets-item-badge assets-item-badge--used">使用中</span>
-                          : <span className="assets-item-badge assets-item-badge--unused">未使用</span>
-                        }
-                      </div>
-                      <button
-                        className="assets-delete-btn"
-                        onClick={() => deleteGeneratedAsset(asset.filename)}
-                        disabled={isUsed}
-                        title={isUsed ? '使用中のため削除できません' : '削除'}
-                      >
-                        削除
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
+          <AssetsPanel
+            assets={generatedAssets}
+            assetsLoading={assetsLoading}
+            assetsMessage={assetsMessage}
+            usedGeneratedImages={usedGeneratedImages}
+            onRefreshAssets={fetchGeneratedAssets}
+            onDeleteAsset={deleteGeneratedAsset}
+            onDeleteUnusedAssets={deleteUnusedAssets}
+          />
         </div>
         </>)}
 
@@ -6031,8 +1614,11 @@ export default function App() {
                   ))}
                 </div>
 
-                {simpleStep === 1 && (
+                {simpleStep === 1 && !massMode.isMassMode && (
                   <div className="simple-step-card">
+                    <div className="simple-step-guide">
+                      <p className="simple-step-guide-title">Step1：テンプレートを選んで必須項目を入力してください</p>
+                    </div>
                     {/* Phase19-S: テンプレートタイプ選択カード */}
                     <SimpleTemplateSelector
                       selected={simpleTemplateType}
@@ -6056,43 +1642,9 @@ export default function App() {
                     )}
 
                     {simpleTemplateType === 'mmm-event' ? (
-                      /* ── Phase19-D: MMMイベント告知専用フォーム ── */
+                      /* ── Phase19-D: MMMイベント告知専用フォーム (Phase30-B: 必須3項目優先表示) ── */
                       <div className="mmm-event-form">
-                        {/* Phase19-H: イベント情報プリセット 呼び出しUI */}
-                        <div className="mmm-event-preset-panel">
-                          <p className="mmm-event-preset-title">保存したイベント情報</p>
-                          <div className="mmm-event-preset-row">
-                            <select
-                              className="mmm-event-preset-select"
-                              value={selectedMmmEventPresetId}
-                              onChange={(e) => setSelectedMmmEventPresetId(e.target.value)}
-                            >
-                              <option value="">プリセットを選択...</option>
-                              {mmmEventPresets.map((p) => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                              ))}
-                            </select>
-                            <button
-                              className="btn-mmm-event-preset-apply"
-                              onClick={() => applyMmmEventPreset(selectedMmmEventPresetId)}
-                              disabled={!selectedMmmEventPresetId}
-                              type="button"
-                            >
-                              呼び出す
-                            </button>
-                            <button
-                              className="btn-mmm-event-preset-delete"
-                              onClick={() => deleteMmmEventPreset(selectedMmmEventPresetId)}
-                              disabled={!selectedMmmEventPresetId || mmmEventPresets.find((p) => p.id === selectedMmmEventPresetId)?.id.startsWith('default-')}
-                              type="button"
-                            >
-                              削除
-                            </button>
-                          </div>
-                          {mmmEventPresetNotice && (
-                            <p className="mmm-event-preset-notice">{mmmEventPresetNotice}</p>
-                          )}
-                        </div>
+                        {/* 必須フィールドのみ先頭表示 */}
                         <div className="mmm-event-form-grid">
                           <label className="mmm-field">
                             <span className="mmm-field-label">イベント名 <span className="mmm-required">必須</span></span>
@@ -6114,26 +1666,6 @@ export default function App() {
                               onChange={(e) => setMmmEventForm((prev) => ({ ...prev, date: e.target.value }))}
                             />
                           </label>
-                          <label className="mmm-field mmm-field--half">
-                            <span className="mmm-field-label">開始時間</span>
-                            <input
-                              className="mmm-field-input"
-                              type="text"
-                              placeholder="例：17:30"
-                              value={mmmEventForm.startTime}
-                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, startTime: e.target.value }))}
-                            />
-                          </label>
-                          <label className="mmm-field mmm-field--half">
-                            <span className="mmm-field-label">終了時間</span>
-                            <input
-                              className="mmm-field-input"
-                              type="text"
-                              placeholder="例：22:30"
-                              value={mmmEventForm.endTime}
-                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, endTime: e.target.value }))}
-                            />
-                          </label>
                           <label className="mmm-field">
                             <span className="mmm-field-label">会場 <span className="mmm-required">必須</span></span>
                             <input
@@ -6144,160 +1676,163 @@ export default function App() {
                               onChange={(e) => setMmmEventForm((prev) => ({ ...prev, venue: e.target.value }))}
                             />
                           </label>
-                          <label className="mmm-field">
-                            <span className="mmm-field-label">参加費</span>
-                            <input
-                              className="mmm-field-input"
-                              type="text"
-                              placeholder="例：演奏3,500円・聴くだけ1,000円"
-                              value={mmmEventForm.price}
-                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, price: e.target.value }))}
-                            />
-                          </label>
-                          <label className="mmm-field">
-                            <span className="mmm-field-label">イベントURL（CTA用）</span>
-                            <input
-                              className="mmm-field-input"
-                              type="url"
-                              placeholder="例：https://..."
-                              value={mmmEventForm.url}
-                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, url: e.target.value }))}
-                            />
-                          </label>
-                          <label className="mmm-field">
-                            <span className="mmm-field-label">一言メッセージ（任意）</span>
-                            <input
-                              className="mmm-field-input"
-                              type="text"
-                              placeholder="例：飲食OK。音楽仲間を作りたい方大歓迎。"
-                              value={mmmEventForm.message}
-                              onChange={(e) => setMmmEventForm((prev) => ({ ...prev, message: e.target.value }))}
-                            />
-                          </label>
-                        </div>
-                        {/* Phase19-H: イベント情報プリセット 保存UI */}
-                        <div className="mmm-event-preset-save">
-                          <p className="mmm-event-preset-title">イベント情報を保存</p>
-                          <div className="mmm-event-preset-save-row">
-                            <input
-                              className="mmm-event-preset-name-input"
-                              type="text"
-                              placeholder="プリセット名（例：春の演奏会）"
-                              value={mmmEventPresetName}
-                              onChange={(e) => setMmmEventPresetName(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === 'Enter') saveMmmEventPreset() }}
-                            />
-                            <button
-                              className="btn-mmm-event-preset-save"
-                              onClick={saveMmmEventPreset}
-                              type="button"
-                            >
-                              保存
-                            </button>
-                          </div>
-                        </div>
-                        <div className="mmm-hints">
-                          <span className="mmm-hint-chip">初心者歓迎</span>
-                          <span className="mmm-hint-chip">見学だけでもOK</span>
-                          <span className="mmm-hint-chip">演奏参加・聴くだけ参加OK</span>
-                          <span className="mmm-hint-chip">音楽仲間を作りたい方に</span>
                         </div>
                         {mmmError && <p className="mmm-error">{mmmError}</p>}
-                        {/* Phase19-E: 世界観タグ */}
-                        <div className="visual-style-tags">
-                          <p className="visual-style-tags-label">動画の雰囲気</p>
-                          <div className="visual-style-tags-chips">
-                            {VISUAL_STYLE_TAG_OPTIONS.map((tag) => (
-                              <button
-                                key={tag}
-                                className={`visual-style-tag-chip${visualStyleTags.includes(tag) ? ' visual-style-tag-chip--active' : ''}`}
-                                onClick={() => toggleVisualStyleTag(tag)}
-                                type="button"
-                              >
-                                {tag}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        {/* Phase19-F: 編集プリセット */}
-                        <div className="edit-preset-panel">
-                          <div className="edit-preset-apply">
-                            <p className="edit-preset-section-title">保存した設定</p>
-                            <div className="edit-preset-apply-row">
-                              <select
-                                className="edit-preset-select"
-                                value={selectedEditPresetId}
-                                onChange={(e) => setSelectedEditPresetId(e.target.value)}
-                              >
-                                <option value="">プリセットを選択...</option>
-                                {editPresets.map((p) => (
-                                  <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                              </select>
-                              <button
-                                className="btn-edit-preset-apply"
-                                onClick={() => applyEditPreset(selectedEditPresetId)}
-                                disabled={!selectedEditPresetId}
-                                type="button"
-                              >
-                                適用
-                              </button>
-                              <button
-                                className="btn-edit-preset-delete"
-                                onClick={() => deleteEditPreset(selectedEditPresetId)}
-                                disabled={!selectedEditPresetId || DEFAULT_EDIT_PRESETS.some((p) => p.id === selectedEditPresetId)}
-                                type="button"
-                              >
-                                削除
-                              </button>
-                            </div>
-                            {selectedEditPresetId && (() => {
-                              const p = editPresets.find((ep) => ep.id === selectedEditPresetId)
-                              return p ? (
-                                <p className="edit-preset-preview">
-                                  雰囲気：{p.visualStyleTags.join(' / ')}
-                                  {p.bgmFileName ? ` ／ BGM：${p.bgmFileName}` : ''}
-                                  {p.ctaLabel ? ` ／ CTA：${p.ctaLabel}` : ''}
-                                </p>
-                              ) : null
-                            })()}
-                          </div>
-                          <div className="edit-preset-save">
-                            <p className="edit-preset-section-title">よく使う設定として保存</p>
-                            <div className="edit-preset-save-row">
-                              <input
-                                className="edit-preset-name-input"
-                                type="text"
-                                placeholder="プリセット名"
-                                value={editPresetName}
-                                onChange={(e) => setEditPresetName(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') saveEditPreset() }}
-                              />
-                              <button
-                                className="btn-edit-preset-save"
-                                onClick={saveEditPreset}
-                                disabled={!editPresetName.trim()}
-                                type="button"
-                              >
-                                保存
-                              </button>
-                            </div>
-                          </div>
-                        </div>
                         <button
                           className="btn-simple-next"
                           onClick={() => {
                             setMmmError('')
                             if (!mmmEventForm.title.trim() || !mmmEventForm.date.trim() || !mmmEventForm.venue.trim()) {
-                              setMmmError('MMMイベント告知では、イベント名・開催日・会場を入力してください。')
+                              setMmmError('イベント名・開催日・会場を入力してください。')
                               return
                             }
                             setAiTheme(buildMmmTheme(mmmEventForm))
-                            setSimpleStep(2)
+                            goToSimpleStep(2)
                           }}
                         >
-                          AI自動作成
+                          Storyを作る
                         </button>
+                        {/* 詳細・任意項目（折りたたみ） */}
+                        <div className="mmm-details-toggle-wrapper">
+                          <button
+                            className="mmm-details-toggle"
+                            onClick={() => setIsMmmDetailsOpen((v) => !v)}
+                            type="button"
+                          >
+                            {isMmmDetailsOpen ? '▼ 詳細を閉じる' : '▶ 詳細を追加（時間・参加費・URL・保存済みプリセット）'}
+                          </button>
+                          {isMmmDetailsOpen && (
+                            <div className="mmm-details-body">
+                              {/* Phase19-H: イベント情報プリセット 呼び出しUI */}
+                              <div className="mmm-event-preset-panel">
+                                <p className="mmm-event-preset-title">保存したイベント情報</p>
+                                <div className="mmm-event-preset-row">
+                                  <select
+                                    className="mmm-event-preset-select"
+                                    value={selectedMmmEventPresetId}
+                                    onChange={(e) => setSelectedMmmEventPresetId(e.target.value)}
+                                  >
+                                    <option value="">プリセットを選択...</option>
+                                    {mmmEventPresets.map((p) => (
+                                      <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    className="btn-mmm-event-preset-apply"
+                                    onClick={() => applyMmmEventPreset(selectedMmmEventPresetId)}
+                                    disabled={!selectedMmmEventPresetId}
+                                    type="button"
+                                  >
+                                    呼び出す
+                                  </button>
+                                  <button
+                                    className="btn-mmm-event-preset-delete"
+                                    onClick={() => deleteMmmEventPreset(selectedMmmEventPresetId)}
+                                    disabled={!selectedMmmEventPresetId || isDefaultMmmEventPreset(selectedMmmEventPresetId)}
+                                    type="button"
+                                  >
+                                    削除
+                                  </button>
+                                </div>
+                                {mmmEventPresetNotice && (
+                                  <p className="mmm-event-preset-notice">{mmmEventPresetNotice}</p>
+                                )}
+                              </div>
+                              {/* 任意フィールド */}
+                              <div className="mmm-event-form-grid">
+                                <label className="mmm-field mmm-field--half">
+                                  <span className="mmm-field-label">開始時間</span>
+                                  <input
+                                    className="mmm-field-input"
+                                    type="text"
+                                    placeholder="例：17:30"
+                                    value={mmmEventForm.startTime}
+                                    onChange={(e) => setMmmEventForm((prev) => ({ ...prev, startTime: e.target.value }))}
+                                  />
+                                </label>
+                                <label className="mmm-field mmm-field--half">
+                                  <span className="mmm-field-label">終了時間</span>
+                                  <input
+                                    className="mmm-field-input"
+                                    type="text"
+                                    placeholder="例：22:30"
+                                    value={mmmEventForm.endTime}
+                                    onChange={(e) => setMmmEventForm((prev) => ({ ...prev, endTime: e.target.value }))}
+                                  />
+                                </label>
+                                <label className="mmm-field">
+                                  <span className="mmm-field-label">参加費</span>
+                                  <input
+                                    className="mmm-field-input"
+                                    type="text"
+                                    placeholder="例：演奏3,500円・聴くだけ1,000円"
+                                    value={mmmEventForm.price}
+                                    onChange={(e) => setMmmEventForm((prev) => ({ ...prev, price: e.target.value }))}
+                                  />
+                                </label>
+                                <label className="mmm-field">
+                                  <span className="mmm-field-label">イベントURL（CTA用）</span>
+                                  <input
+                                    className="mmm-field-input"
+                                    type="url"
+                                    placeholder="例：https://..."
+                                    value={mmmEventForm.url}
+                                    onChange={(e) => setMmmEventForm((prev) => ({ ...prev, url: e.target.value }))}
+                                  />
+                                </label>
+                                <label className="mmm-field">
+                                  <span className="mmm-field-label">一言メッセージ（任意）</span>
+                                  <input
+                                    className="mmm-field-input"
+                                    type="text"
+                                    placeholder="例：飲食OK。音楽仲間を作りたい方大歓迎。"
+                                    value={mmmEventForm.message}
+                                    onChange={(e) => setMmmEventForm((prev) => ({ ...prev, message: e.target.value }))}
+                                  />
+                                </label>
+                              </div>
+                              {/* Phase19-H: イベント情報プリセット 保存UI */}
+                              <div className="mmm-event-preset-save">
+                                <p className="mmm-event-preset-title">イベント情報を保存</p>
+                                <div className="mmm-event-preset-save-row">
+                                  <input
+                                    className="mmm-event-preset-name-input"
+                                    type="text"
+                                    placeholder="プリセット名（例：春の演奏会）"
+                                    value={mmmEventPresetName}
+                                    onChange={(e) => setMmmEventPresetName(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') saveMmmEventPreset() }}
+                                  />
+                                  <button
+                                    className="btn-mmm-event-preset-save"
+                                    onClick={saveMmmEventPreset}
+                                    type="button"
+                                  >
+                                    保存
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="mmm-hints">
+                                <span className="mmm-hint-chip">初心者歓迎</span>
+                                <span className="mmm-hint-chip">見学だけでもOK</span>
+                                <span className="mmm-hint-chip">演奏参加・聴くだけ参加OK</span>
+                                <span className="mmm-hint-chip">音楽仲間を作りたい方に</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {/* Phase29-D: 画像アップロード（ボタン後に配置） */}
+                        <div className="simple-upload-section">
+                          <p className="simple-upload-label">画像をアップロード（任意・最大14枚）</p>
+                          <p className="simple-upload-hint">14枚あると全スライドを自分の画像で作れます。足りない分は補完されます。</p>
+                          <UserImageUploadPanel
+                            userUploadedImages={userUploadedImages}
+                            onUpload={handleUserImageUpload}
+                            onDropFiles={handleUserImageDropFiles}
+                            onRemove={removeUserUploadedImage}
+                            onReorder={reorderUserUploadedImage}
+                          />
+                        </div>
                       </div>
                     ) : simpleTemplateType && simpleTemplateType !== 'custom' ? (
                       /* Phase19-S: テンプレート別フォーム */
@@ -6327,11 +1862,23 @@ export default function App() {
                           onClick={() => {
                             const theme = buildSimpleThemeFromTemplate()
                             setAiTheme(theme)
-                            setSimpleStep(2)
+                            goToSimpleStep(2)
                           }}
                         >
-                          AI自動作成
+                          Storyを作る
                         </button>
+                        {/* Phase29-D: 画像アップロード（Phase30-B: ボタン後に移動） */}
+                        <div className="simple-upload-section">
+                          <p className="simple-upload-label">画像をアップロード（任意・最大14枚）</p>
+                          <p className="simple-upload-hint">14枚あると全スライドを自分の画像で作れます。足りない分は補完されます。</p>
+                          <UserImageUploadPanel
+                            userUploadedImages={userUploadedImages}
+                            onUpload={handleUserImageUpload}
+                            onDropFiles={handleUserImageDropFiles}
+                            onRemove={removeUserUploadedImage}
+                            onReorder={reorderUserUploadedImage}
+                          />
+                        </div>
                       </>
                     ) : simpleTemplateType === 'custom' ? (
                       /* 自由入力：既存テーマ入力フロー */
@@ -6339,146 +1886,14 @@ export default function App() {
                         <input
                           className="ai-generator-input simple-step-input"
                           type="text"
-                          placeholder="テーマを入力..."
+                          placeholder="例：6月のMMMセッション会を紹介 / Note記事の見どころを紹介"
                           value={aiTheme}
                           onChange={(e) => setAiTheme(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' && aiTheme.trim()) setSimpleStep(2) }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && aiTheme.trim()) goToSimpleStep(2) }}
                         />
-                        <div className="image-source-selector">
-                          <p className="image-source-label">画像の作り方</p>
-                          <div className="image-source-options">
-                            <label className="image-source-option">
-                              <input
-                                type="radio"
-                                name="imageSourceMode"
-                                value="ai"
-                                checked={imageSourceMode === 'ai'}
-                                onChange={() => setImageSourceMode('ai')}
-                              />
-                              AI画像を生成
-                            </label>
-                            <label className="image-source-option">
-                              <input
-                                type="radio"
-                                name="imageSourceMode"
-                                value="upload"
-                                checked={imageSourceMode === 'upload'}
-                                onChange={() => setImageSourceMode('upload')}
-                              />
-                              自分の画像を使う
-                            </label>
-                          </div>
-                          {imageSourceMode === 'upload' && (
-                            <div className="user-image-upload">
-                              <p className="user-image-upload-hint">自分の画像を使うと、AI画像生成を待たずに動画化できます。</p>
-                              <div className="user-image-upload-header">
-                                <label className="btn-user-image-upload">
-                                  画像をアップロード
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    multiple
-                                    onChange={handleUserImageUpload}
-                                  />
-                                </label>
-                              </div>
-                              {userUploadedImages.length > 0 && (
-                                <div className="user-image-upload-preview">
-                                  <p className="user-image-upload-count">アップロード済み画像：{userUploadedImages.length}枚</p>
-                                  <div className="user-image-upload-grid">
-                                    {userUploadedImages.map((image) => (
-                                      <div className="user-image-upload-item" key={image.id}>
-                                        <img src={image.url} alt={image.name} />
-                                        <span title={image.name}>{image.name}</span>
-                                        <button onClick={() => removeUserUploadedImage(image.id)}>削除</button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {/* Phase19-G: 画像品質モード */}
-                        {imageSourceMode === 'ai' && (
-                          <div className="image-quality-selector">
-                            <p className="image-quality-label">画像品質</p>
-                            <div className="image-quality-options">
-                              <label className="image-quality-option">
-                                <input
-                                  type="radio"
-                                  name="imageQuality"
-                                  value="standard"
-                                  checked={imageQualityMode === 'standard'}
-                                  onChange={() => setImageQualityMode('standard')}
-                                  disabled={costMode === 'save'}
-                                />
-                                <span>標準</span>
-                              </label>
-                              <label className="image-quality-option image-quality-option--high">
-                                <input
-                                  type="radio"
-                                  name="imageQuality"
-                                  value="high"
-                                  checked={imageQualityMode === 'high'}
-                                  onChange={() => setImageQualityMode('high')}
-                                  disabled={costMode === 'save'}
-                                />
-                                <span>高品質（推奨）</span>
-                              </label>
-                            </div>
-                          </div>
-                        )}
-                        {/* Phase19-J: 節約モード / Phase19-Z: コストモードカード */}
-                        {imageSourceMode === 'ai' && (
-                          <div className="cost-mode-selector">
-                            <p className="cost-mode-label">生成コスト</p>
-                            <div className={`cost-mode-card cost-mode-card--${costMode}`}>
-                              <div className="cost-mode-card-header">
-                                <span className="cost-mode-card-title">
-                                  {costMode === 'save' ? '現在：おすすめ節約モード' : '現在：フル生成モード'}
-                                </span>
-                                {costMode === 'save' ? (
-                                  <span className="cost-mode-badge cost-mode-badge--recommended">おすすめ</span>
-                                ) : (
-                                  <span className="cost-mode-badge cost-mode-badge--warning">⚠ コスト注意</span>
-                                )}
-                              </div>
-                              <ul className="cost-mode-card-details">
-                                <li>AI画像：{costMode === 'save' ? '5枚生成' : '最大14枚生成'}</li>
-                                <li>利用枠：{costMode === 'save' ? '少なめ' : '多め'}</li>
-                                <li>{costMode === 'save' ? '通常はこちらがおすすめです' : '必要な場合のみ使用してください'}</li>
-                              </ul>
-                            </div>
-                            <div className="cost-mode-options">
-                              <label className="cost-mode-option">
-                                <input
-                                  type="radio"
-                                  name="costMode"
-                                  value="save"
-                                  checked={costMode === 'save'}
-                                  onChange={() => setCostMode('save')}
-                                />
-                                <span>おすすめ：節約モード</span>
-                              </label>
-                              <label className="cost-mode-option">
-                                <input
-                                  type="radio"
-                                  name="costMode"
-                                  value="normal"
-                                  checked={costMode === 'normal'}
-                                  onChange={() => setCostMode('normal')}
-                                />
-                                <span>フル生成モード</span>
-                              </label>
-                            </div>
-                            <p className="cost-mode-description">
-                              {costMode === 'save'
-                                ? '節約モードでは、AI画像を5枚生成して動画内で繰り返し利用します。'
-                                : 'フル生成モードでは、最大14枚のAI画像を生成します。'}
-                            </p>
-                          </div>
-                        )}
+                        <p className="simple-custom-input-hint">
+                          自由入力では「誰に向けて、何を伝えたいか」を1文で入れると作りやすくなります。
+                        </p>
                         {/* Phase18-F: テーマサジェスト */}
                         <div className="simple-suggestions">
                           <p className="simple-suggestion-title">おすすめテーマ</p>
@@ -6494,87 +1909,6 @@ export default function App() {
                             ))}
                           </div>
                         </div>
-                        {/* Phase19-E: 世界観タグ */}
-                        <div className="visual-style-tags">
-                          <p className="visual-style-tags-label">動画の雰囲気</p>
-                          <div className="visual-style-tags-chips">
-                            {VISUAL_STYLE_TAG_OPTIONS.map((tag) => (
-                              <button
-                                key={tag}
-                                className={`visual-style-tag-chip${visualStyleTags.includes(tag) ? ' visual-style-tag-chip--active' : ''}`}
-                                onClick={() => toggleVisualStyleTag(tag)}
-                                type="button"
-                              >
-                                {tag}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        {/* Phase19-F: 編集プリセット */}
-                        <div className="edit-preset-panel">
-                          <div className="edit-preset-apply">
-                            <p className="edit-preset-section-title">保存した設定</p>
-                            <div className="edit-preset-apply-row">
-                              <select
-                                className="edit-preset-select"
-                                value={selectedEditPresetId}
-                                onChange={(e) => setSelectedEditPresetId(e.target.value)}
-                              >
-                                <option value="">プリセットを選択...</option>
-                                {editPresets.map((p) => (
-                                  <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                              </select>
-                              <button
-                                className="btn-edit-preset-apply"
-                                onClick={() => applyEditPreset(selectedEditPresetId)}
-                                disabled={!selectedEditPresetId}
-                                type="button"
-                              >
-                                適用
-                              </button>
-                              <button
-                                className="btn-edit-preset-delete"
-                                onClick={() => deleteEditPreset(selectedEditPresetId)}
-                                disabled={!selectedEditPresetId || DEFAULT_EDIT_PRESETS.some((p) => p.id === selectedEditPresetId)}
-                                type="button"
-                              >
-                                削除
-                              </button>
-                            </div>
-                            {selectedEditPresetId && (() => {
-                              const p = editPresets.find((ep) => ep.id === selectedEditPresetId)
-                              return p ? (
-                                <p className="edit-preset-preview">
-                                  雰囲気：{p.visualStyleTags.join(' / ')}
-                                  {p.bgmFileName ? ` ／ BGM：${p.bgmFileName}` : ''}
-                                  {p.ctaLabel ? ` ／ CTA：${p.ctaLabel}` : ''}
-                                </p>
-                              ) : null
-                            })()}
-                          </div>
-                          <div className="edit-preset-save">
-                            <p className="edit-preset-section-title">よく使う設定として保存</p>
-                            <div className="edit-preset-save-row">
-                              <input
-                                className="edit-preset-name-input"
-                                type="text"
-                                placeholder="プリセット名"
-                                value={editPresetName}
-                                onChange={(e) => setEditPresetName(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') saveEditPreset() }}
-                              />
-                              <button
-                                className="btn-edit-preset-save"
-                                onClick={saveEditPreset}
-                                disabled={!editPresetName.trim()}
-                                type="button"
-                              >
-                                保存
-                              </button>
-                            </div>
-                          </div>
-                        </div>
                         {missingTemplateInputs.length > 0 && (
                           <div className="simple-missing-guide">
                             <p className="simple-missing-guide-title">あと少しです：</p>
@@ -6585,14 +1919,173 @@ export default function App() {
                         )}
                         <button
                           className="btn-simple-next"
-                          onClick={() => setSimpleStep(2)}
+                          onClick={() => goToSimpleStep(2)}
                           disabled={!aiTheme.trim()}
                         >
-                          AI自動作成
+                          Storyを作る
                         </button>
+                        {/* Phase29-D: 画像の作り方を選ぶ（Phase30-B: ボタン後に移動） */}
+                        <div className="image-creation-selector">
+                          <p className="image-creation-label">画像の作り方を選ぶ</p>
+                          <p className="image-creation-group-label">おすすめ：自分の画像を使う</p>
+                          <label className={`image-creation-option${imageCreationMode === 'upload' ? ' image-creation-option--active' : ''}`}>
+                            <input
+                              type="radio"
+                              name="imageCreationMode"
+                              value="upload"
+                              checked={imageCreationMode === 'upload'}
+                              onChange={() => handleImageCreationModeChange('upload')}
+                            />
+                            <span className="image-creation-option-body">
+                              <span className="image-creation-option-header">
+                                <span className="image-creation-option-title">画像をアップロード</span>
+                                <span className="image-creation-badge image-creation-badge--recommended">おすすめ</span>
+                              </span>
+                              <span className="image-creation-option-desc">自分で用意した画像を使います。ChatGPTなどで作った画像でもOK。AI画像生成コストは発生しません。最大14枚。</span>
+                            </span>
+                          </label>
+                          {imageCreationMode === 'upload' && (
+                            <UserImageUploadPanel
+                              userUploadedImages={userUploadedImages}
+                              onUpload={handleUserImageUpload}
+                              onDropFiles={handleUserImageDropFiles}
+                              onRemove={removeUserUploadedImage}
+                              onReorder={reorderUserUploadedImage}
+                            />
+                          )}
+                          {cachedImagesForTemplate.length > 0 && (
+                            <label className={`image-creation-option${imageCreationMode === 'reuse' ? ' image-creation-option--active' : ''}`}>
+                              <input
+                                type="radio"
+                                name="imageCreationMode"
+                                value="reuse"
+                                checked={imageCreationMode === 'reuse'}
+                                onChange={() => handleImageCreationModeChange('reuse')}
+                              />
+                              <span className="image-creation-option-body">
+                                <span className="image-creation-option-header">
+                                  <span className="image-creation-option-title">前回のAI画像を再利用</span>
+                                </span>
+                                <span className="image-creation-option-desc">
+                                  前回作ったAI画像を使って、すばやく安く動画を作ります。
+                                </span>
+                              </span>
+                            </label>
+                          )}
+                          {imageCreationMode === 'reuse' && cachedImagesForTemplate.length > 0 && (
+                            <div className="reuse-image-cache-info reuse-image-cache-info--inline">
+                              <div className="reuse-image-cache-info-row">
+                                <span className="reuse-image-cache-info-icon">📦</span>
+                                <span className="reuse-image-cache-info-label">保存済み画像</span>
+                                <span className="reuse-image-cache-info-value">{cachedImagesForTemplate.length}枚</span>
+                              </div>
+                              {cachedImagesForTemplateSavedAt && (
+                                <div className="reuse-image-cache-info-row">
+                                  <span className="reuse-image-cache-info-icon">🕐</span>
+                                  <span className="reuse-image-cache-info-label">最終保存</span>
+                                  <span className="reuse-image-cache-info-value">{formatCacheSavedAt(cachedImagesForTemplateSavedAt)}</span>
+                                </div>
+                              )}
+                              <div className="reuse-image-cache-thumbs">
+                                {cachedImagesForTemplate.slice(0, 5).map((img, i) => (
+                                  <img key={i} className="reuse-image-cache-thumb" src={`/assets/${img}`} alt={`キャッシュ画像 ${i + 1}`} />
+                                ))}
+                                {cachedImagesForTemplate.length > 5 && (
+                                  <span className="reuse-image-cache-thumb-more">+{cachedImagesForTemplate.length - 5}枚</span>
+                                )}
+                              </div>
+                              <button className="btn-cache-delete" onClick={handleDeleteImageCache}>🗑 キャッシュを削除</button>
+                            </div>
+                          )}
+                        </div>
                       </>
                     ) : null}
+
+                    {simpleTemplateType && (
+                      <div className="simple-advanced-settings">
+                        <button
+                          className="simple-advanced-settings-toggle"
+                          onClick={() => setIsSimpleAdvancedSettingsOpen((v) => !v)}
+                          type="button"
+                          aria-expanded={isSimpleAdvancedSettingsOpen}
+                        >
+                          {isSimpleAdvancedSettingsOpen ? '▼ 上級設定を閉じる' : '▶ 上級設定を表示'}
+                        </button>
+                        {isSimpleAdvancedSettingsOpen && (
+                          <div className="simple-advanced-settings-body">
+                            <div className="simple-advanced-settings-section">
+                              <p className="simple-advanced-settings-title">世界観タグ</p>
+                              {visualStyleTagsPanel}
+                            </div>
+                            <div className="simple-advanced-settings-section">
+                              <p className="simple-advanced-settings-title">編集プリセット</p>
+                              {editPresetPanel}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Phase29-B: テストモードトグル */}
+                    <div className="test-mode-toggle">
+                      <button
+                        className={`btn-test-mode${testMode ? ' btn-test-mode--on' : ''}`}
+                        onClick={handleToggleTestMode}
+                        type="button"
+                      >
+                        🧪 テストモード：{testMode ? 'ON' : 'OFF'}
+                      </button>
+                      {testMode && (
+                        <p className="test-mode-hint">
+                          AI画像生成をスキップします（コストを消費しません）
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Phase22-A: 量産モード入口 */}
+                    <button
+                      className="btn-enter-mass-mode"
+                      onClick={massMode.enterMassMode}
+                      type="button"
+                    >
+                      🏭 量産モード（複数テーマをまとめて入力）
+                    </button>
                   </div>
+                )}
+
+                {/* Phase22-A/C: 量産モードパネル */}
+                {simpleStep === 1 && massMode.isMassMode && (
+                  <MassModePanel
+                    massThemes={massMode.massThemes}
+                    massQueueRunning={massMode.massQueueRunning}
+                    massQueueSummary={massMode.massQueueSummary}
+                    massPipelineMode={massMode.massPipelineMode}
+                    massRegeneratingId={massMode.massRegeneratingId}
+                    massImageGeneratingId={massMode.massImageGeneratingId}
+                    massInputType={massMode.massInputType}
+                    massInputTheme={massMode.massInputTheme}
+                    massStoryPreviewId={massMode.massStoryPreviewId}
+                    massCopiedId={massMode.massCopiedId}
+                    massCollapseDone={massMode.massCollapseDone}
+                    onExitMassMode={massMode.onExitMassMode}
+                    onAddTheme={massMode.onAddTheme}
+                    onDeleteTheme={massMode.onDeleteTheme}
+                    onClearThemes={massMode.onClearThemes}
+                    onClearCompletedThemes={massMode.onClearCompletedThemes}
+                    onStartQueue={massMode.onStartQueue}
+                    onStopQueue={massMode.onStopQueue}
+                    onReGenerateItem={massMode.onReGenerateItem}
+                    onGenerateImages={massMode.onGenerateImages}
+                    onAddItemToQueue={massMode.onAddItemToQueue}
+                    onTogglePostChecklist={massMode.onTogglePostChecklist}
+                    onUpdatePostCaption={massMode.onUpdatePostCaption}
+                    onGenerateCaptionForItem={massMode.onGenerateCaptionForItem}
+                    onCopyCaption={massMode.onCopyCaption}
+                    onInputTypeChange={massMode.onInputTypeChange}
+                    onInputValueChange={massMode.onInputValueChange}
+                    onStoryPreviewToggle={massMode.onStoryPreviewToggle}
+                    onCollapseDoneToggle={massMode.onCollapseDoneToggle}
+                    onPipelineModeChange={massMode.onPipelineModeChange}
+                  />
                 )}
 
                 {simpleStep === 2 && (
@@ -6604,23 +2097,45 @@ export default function App() {
                         : '指定なし'}
                     </p>
                     <p className="simple-step-theme">テーマ：{aiTheme}</p>
+                    {testMode && (
+                      <div className="test-mode-step2-badge">🧪 テストモードON — AI画像生成をスキップ</div>
+                    )}
                     <ul className="simple-step-content-list">
-                      {imageSourceMode === 'ai' ? (
-                        <li>14枚のAI画像を自動生成</li>
+                      {testMode && imageSourceMode === 'ai' ? (
+                        <li className="test-mode-list-item">
+                          {userUploadedImages.length > 0
+                            ? `アップロード画像 ${userUploadedImages.length}枚を使用（AI生成スキップ）`
+                            : cachedImagesForTemplate.length > 0
+                              ? `キャッシュ画像 ${cachedImagesForTemplate.length}枚を再利用（AI生成スキップ）`
+                              : 'プレースホルダー画像を使用（AI生成スキップ）'}
+                        </li>
+                      ) : reuseImageMode ? (
+                        <li className="reuse-image-list-item">前回のAI画像を再利用（画像生成スキップ）</li>
+                      ) : imageSourceMode === 'ai' ? (
+                        <li className="ai-image-list-item">AI画像を生成（高コスト）</li>
                       ) : (
                         <li>アップロード画像 {userUploadedImages.length}枚を動画素材として使用</li>
                       )}
-                      <li>テキストを自動作成</li>
+                      <li>AIでStoryを自動生成</li>
                       <li>ショート動画を自動生成</li>
                     </ul>
+                    {imageSourceMode === 'upload' && userUploadedImages.length === 0 && (
+                      <div className="step2-upload-reminder">
+                        <p className="step2-upload-reminder-title">画像がアップロードされていません</p>
+                        <p className="step2-upload-reminder-desc">戻って画像をアップロードすると、自分の画像で動画を作れます。14枚あると全スライドを使えます。足りない分は補完されます。</p>
+                      </div>
+                    )}
+                    {reuseImageMode && (
+                      <p className="reuse-image-step2-note">画像生成をスキップするため早く完成します</p>
+                    )}
                     <div className="simple-step-actions">
-                      <button className="btn-simple-back" onClick={() => setSimpleStep(1)}>戻る</button>
+                      <button className="btn-simple-back" onClick={() => goToSimpleStep(1)}>戻る</button>
                       <button
                         className="btn-simple-start"
-                        onClick={() => { setSimpleStep(3); handleRunReelFactory() }}
+                        onClick={() => { goToSimpleStep(3); handleRunReelFactory() }}
                         disabled={factoryRunning}
                       >
-                        AI自動作成を開始
+                        動画を作る
                       </button>
                     </div>
                   </div>
@@ -6630,7 +2145,13 @@ export default function App() {
                   <div className="simple-step-card simple-step-card--status">
                     {factoryRunning ? (
                       <div className="simple-factory-progress">
-                        {factoryStepNum === 2 && !factoryStep.includes('アップロード') && factoryCurrentImageIndex != null && factoryTotalImageCount != null ? (
+                        {factoryStepNum === 2 && factoryStep.includes('キャッシュ') ? (
+                          <>
+                            <p className="simple-factory-status-emoji">🚀</p>
+                            <p className="simple-factory-status-title">画像生成をスキップ中</p>
+                            <p className="simple-factory-status-sub">前回の画像を再利用しています</p>
+                          </>
+                        ) : factoryStepNum === 2 && !factoryStep.includes('アップロード') && factoryCurrentImageIndex != null && factoryTotalImageCount != null ? (
                           <>
                             <p className="simple-factory-status-emoji">🎨</p>
                             <p className="simple-factory-status-title">AI画像生成中</p>
@@ -6664,201 +2185,32 @@ export default function App() {
                         <p className="simple-factory-bar-pct">{factoryProgress}%</p>
                       </div>
                     ) : renderStatus === 'completed' ? (
-                      <div className="render-complete-priority">
-                        <p className="render-complete-priority-title">🎬 完成動画ができました！</p>
-                        {renderPreviewUrl ? (
-                          videoPreviewLoading ? (
-                            <div className="video-preview-loading">
-                              <p className="video-preview-loading-icon">🎬</p>
-                              <p className="video-preview-loading-title">動画を準備しています</p>
-                              <p className="video-preview-loading-sub">プレビュー生成中...</p>
-                              <div className="video-preview-loading-bar">
-                                <div className="video-preview-loading-bar-fill" />
-                              </div>
-                            </div>
-                          ) : videoPreviewError ? (
-                            <div className="video-preview-error">
-                              <p className="video-preview-error-msg">⚠ {videoPreviewError}</p>
-                              <button
-                                className="btn-video-retry"
-                                onClick={() => checkVideoReady(renderPreviewUrl)}
-                              >
-                                ↻ プレビュー再取得
-                              </button>
-                            </div>
-                          ) : (
-                            <video
-                              className="render-complete-video render-complete-video--priority"
-                              src={renderPreviewUrl}
-                              controls
-                              playsInline
-                              onLoadedData={() => setVideoPreviewLoading(false)}
-                              onCanPlay={() => setVideoPreviewLoading(false)}
-                              onError={() => setVideoPreviewError('動画の読み込みに失敗しました。再取得をお試しください。')}
-                            />
-                          )
-                        ) : (
-                          <p className="render-preview-missing">
-                            動画生成は完了しましたが、プレビューURLが見つかりません。
-                            「動画を開く」または「ダウンロード」から確認してください。
-                          </p>
-                        )}
-                        <div className="render-complete-cta-row">
-                          <button className="btn-download-mp4 btn-download-mp4--large" onClick={downloadVideo}>
-                            ⬇ MP4ダウンロード
-                          </button>
-                          <a
-                            className="btn-open-video btn-open-video--large"
-                            href={latestViewUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            🔗 新しいタブで開く
-                          </a>
-                        </div>
-                        <div className="render-complete-actions render-complete-actions--priority">
-                          <button
-                            className="btn-sns-post btn-sns-post--instagram"
-                            onClick={() => window.open('https://www.instagram.com/', '_blank')}
-                          >
-                            Instagramに投稿
-                          </button>
-                          <button
-                            className="btn-sns-post btn-sns-post--tiktok"
-                            onClick={() => window.open('https://www.tiktok.com/upload', '_blank')}
-                          >
-                            TikTokに投稿
-                          </button>
-                          <button
-                            className="btn-sns-post btn-sns-post--youtube"
-                            onClick={() => window.open('https://studio.youtube.com', '_blank')}
-                          >
-                            YouTube Shortsに投稿
-                          </button>
-                        </div>
-                        <div className="render-next-actions">
-                          <p className="render-next-actions-title">次にやること</p>
-                          <ol>
-                            <li>動画を確認</li>
-                            <li>投稿文をコピー</li>
-                            <li>SNSへ投稿</li>
-                            <li>投稿記録を残す</li>
-                          </ol>
-                        </div>
-
-                        {/* Phase19-E: 生成後編集パネル */}
-                        <div className="post-edit-panel">
-                          <button
-                            className="post-edit-panel-toggle"
-                            onClick={() => setSlideEditorOpen((v) => !v)}
-                          >
-                            {slideEditorOpen ? '▲ 編集パネルを閉じる' : '✏ 文字・画像・BGMを修正する'}
-                          </button>
-
-                          {slideEditorOpen && (
-                            <div className="post-edit-panel-body">
-                              {/* BGM差し替え */}
-                              <div className="post-edit-section">
-                                <p className="post-edit-section-title">BGM差し替え</p>
-                                <label className="bgm-upload-label">
-                                  {bgmUploading ? 'アップロード中...' : bgmFileName ? `現在：${bgmFileName}` : 'mp3 / wav / m4a を選択'}
-                                  <input
-                                    type="file"
-                                    accept=".mp3,.wav,.m4a,audio/*"
-                                    disabled={bgmUploading}
-                                    onChange={handleBgmUpload}
-                                  />
-                                </label>
-                                {bgmUploadError && <p className="post-edit-error">{bgmUploadError}</p>}
-                                {bgmFileName && !bgmUploadError && (
-                                  <p className="post-edit-success">BGMを「{bgmFileName}」に設定しました</p>
-                                )}
-                              </div>
-
-                              {/* Phase19-G: QRコード差し替え */}
-                              <div className="post-edit-section">
-                                <p className="post-edit-section-title">QRコード差し替え（14枚目）</p>
-                                <label className="bgm-upload-label">
-                                  {qrUploading ? 'アップロード中...' : qrFileName ? `現在：${qrFileName}` : 'QR画像を選択（PNG / JPG）'}
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    disabled={qrUploading}
-                                    onChange={handleQrUpload}
-                                  />
-                                </label>
-                                {qrUploadError && <p className="post-edit-error">{qrUploadError}</p>}
-                                {qrFileName && !qrUploadError && (
-                                  <p className="post-edit-success">QRコードを「{qrFileName}」に変更しました。再生成で反映されます。</p>
-                                )}
-                              </div>
-
-                              {/* スライドテキスト編集 + 画像差し替え */}
-                              <div className="post-edit-section">
-                                <p className="post-edit-section-title">スライド文字を修正</p>
-                                <div className="slide-text-editor">
-                                  {slides.map((slide, idx) => (
-                                    <div key={slide.id} className="slide-text-editor-item">
-                                      <p className="slide-text-editor-index">Slide {idx + 1}</p>
-                                      <label className="slide-text-field">
-                                        <span>見出し</span>
-                                        <input
-                                          type="text"
-                                          value={slide.headline}
-                                          onChange={(e) => handleSlideTextChange(slide.id, 'headline', e.target.value)}
-                                        />
-                                      </label>
-                                      <label className="slide-text-field">
-                                        <span>サブ</span>
-                                        <input
-                                          type="text"
-                                          value={slide.subline ?? ''}
-                                          onChange={(e) => handleSlideTextChange(slide.id, 'subline', e.target.value)}
-                                        />
-                                      </label>
-                                      <label className="slide-text-field">
-                                        <span>強調</span>
-                                        <input
-                                          type="text"
-                                          value={slide.emphasis ?? ''}
-                                          onChange={(e) => handleSlideTextChange(slide.id, 'emphasis', e.target.value)}
-                                        />
-                                      </label>
-                                      <div className="slide-image-replace">
-                                        <label className="slide-image-replace-label">
-                                          {slideImageReplacing === slide.id ? '差し替え中...' : '画像を差し替え'}
-                                          <input
-                                            type="file"
-                                            accept="image/*"
-                                            disabled={slideImageReplacing === slide.id}
-                                            onChange={(e) => handleSlideImageReplace(slide.id, e)}
-                                          />
-                                        </label>
-                                        {slideImageReplaceError[slide.id] && (
-                                          <p className="post-edit-error">{slideImageReplaceError[slide.id]}</p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-
-                              {/* 再生成ボタン */}
-                              <button
-                                className="btn-rerender-after-edit"
-                                onClick={async () => {
-                                  setSlideEditorOpen(false)
-                                  await saveToServer()
-                                  startRender()
-                                }}
-                                disabled={isRendering || isPreparingRender}
-                              >
-                                修正内容で動画を再生成
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                      <RenderCompletePanel
+                        variant="priority"
+                        preview={{
+                          renderPreviewUrl,
+                          latestViewUrl,
+                          videoPreviewLoading,
+                          videoPreviewError,
+                          onRetryVideoPreview: checkVideoReady,
+                          onVideoPreviewReady: () => setVideoPreviewLoading(false),
+                          onVideoPreviewError: () => setVideoPreviewError('動画の読み込みに失敗しました。再取得をお試しください。'),
+                        }}
+                        actions={{
+                          onDownloadVideo: downloadVideo,
+                        }}
+                        reuse={{
+                          reuseImageMode,
+                          cachedImagesCount: cachedImagesForTemplate.length,
+                          showReuseDiscoveryBanner: !reuseImageMode && cachedImagesForTemplate.length > 0 && !!simpleTemplateType && !reuseHintDismissedTemplates.includes(simpleTemplateType),
+                          onDismissReuseHint: dismissReuseHint,
+                        }}
+                        display={{
+                          showDetailedFeatures,
+                          onShowDetails: showDetails,
+                          detailsChildren: postEditPanel,
+                        }}
+                      />
                     ) : null}
                   </div>
                 )}
@@ -6868,8 +2220,8 @@ export default function App() {
             {/* Phase19-G: PCレイアウト右カラムラッパー (simpleMode step3) */}
             <div className={simpleMode && simpleStep === 3 ? 'simple-pc-right' : undefined}>
 
-            {/* Phase19-P: タブナビゲーション */}
-            {simpleMode && simpleStep === 3 && (
+            {/* Phase19-P: タブナビゲーション (Phase21-C: 詳細表示時のみ) */}
+            {simpleMode && simpleStep === 3 && showDetailedFeatures && (
               <nav className="simple-tab-nav">
                 {(
                   [
@@ -6882,7 +2234,7 @@ export default function App() {
                   <button
                     key={key}
                     className={`simple-tab-btn${activeSimpleTab === key ? ' simple-tab-btn--active' : ''}`}
-                    onClick={() => setActiveSimpleTab(key)}
+                    onClick={() => selectSimpleTab(key)}
                   >
                     {label}
                   </button>
@@ -6890,93 +2242,9 @@ export default function App() {
               </nav>
             )}
 
-            {/* テーマ入力 (Phase18-A: 最上部に配置) — 通常モードのみ */}
-            {!simpleMode && (
-            <div className="ai-generator" style={{ marginBottom: 12 }}>
-              <p className="ai-generator-label">テーマ入力</p>
-              <div className="ai-generator-row">
-                <input
-                  id="ai-theme-input"
-                  className="ai-generator-input"
-                  type="text"
-                  placeholder="テーマを入力..."
-                  value={aiTheme}
-                  onChange={(e) => setAiTheme(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
-                  disabled={isGenerating}
-                />
-                <button
-                  className={`ai-generator-btn${isGenerating ? ' ai-generator-btn--loading' : ''}`}
-                  onClick={handleAIGenerate}
-                  disabled={!aiTheme.trim() || isGenerating}
-                >
-                  {isGenerating ? '生成中...' : 'ストーリー生成'}
-                </button>
-              </div>
-              {generateError && !quotaError && (
-                <p className="ai-generator-error">{generateError}</p>
-              )}
-              {quotaError && (
-                <div className="quota-error-panel">
-                  <p className="quota-error-title">OpenAI APIの利用枠が不足しています</p>
-                  <ol className="quota-error-steps">
-                    <li>Billing のクレジット残高を確認</li>
-                    <li>Usage の利用状況を確認</li>
-                    <li>Limits の月間上限を確認</li>
-                    <li>Project / Organization の予算設定を確認</li>
-                  </ol>
-                  <p className="quota-error-alt">「自分の画像を使う」を選ぶとAI画像生成なしで動画化できます。</p>
-                  <button className="btn-quota-error-dismiss" onClick={() => setQuotaError(false)} type="button">閉じる</button>
-                </div>
-              )}
-              {generateSuccess && !generateError && (
-                <p className="ai-generator-success">14枚のストーリーを生成しました</p>
-              )}
-            </div>
-            )}
-
-            {/* 🏭 AI Reel Factory (Phase16-L / Phase18-B) */}
+            {/* 🏭 AI Reel Factory (Phase16-L / Phase18-B / Phase22-M) */}
             {(!simpleMode || simpleStep === 3) && showInTab('create') && (
-            <FactoryPanel
-              hideHistory={simpleMode}
-              factoryRunning={factoryRunning}
-              factoryStep={factoryStep}
-              factoryStepNum={factoryStepNum}
-              factoryProgress={factoryProgress}
-              factoryCurrentImageIndex={factoryCurrentImageIndex}
-              factoryTotalImageCount={factoryTotalImageCount}
-              factoryError={factoryError}
-              factoryLog={factoryLog}
-              factoryNotice={factoryNotice}
-              factoryWarning={factoryWarning}
-              isPipelineDisabled={isPipelineDisabled || !aiTheme.trim()}
-              hasTheme={aiTheme.trim().length > 0}
-              reelAiConfig={reelAiConfig}
-              generatedSlides={slides
-                .filter((s): s is typeof s & { image: string } => !!s.image?.startsWith('generated/'))
-                .map((s) => ({ id: s.id, headline: s.headline, image: s.image }))}
-              onRunFactory={() => handleRunReelFactory()}
-              factorySummary={factorySummary}
-              findFactoryQueueItem={findFactoryQueueItem}
-              onClearSummary={() => {
-                setFactorySummary(null)
-                localStorage.removeItem(FACTORY_SUMMARY_CACHE_KEY)
-              }}
-              onJumpToQueueItem={handleJumpToQueueItem}
-              factoryHistory={factoryHistory}
-              maxThemeLength={MAX_HISTORY_THEME_LENGTH}
-              quickTags={FACTORY_QUICK_TAGS}
-              onHistoryUpdate={handleFactoryHistoryUpdate}
-              onToggleFavorite={toggleFactoryHistoryFavorite}
-              onReuseTheme={handleReuseFactoryTheme}
-              onDuplicateTheme={handleDuplicateFactoryTheme}
-              onRerunFactory={handleRerunFactoryTheme}
-              onDelete={handleDeleteFactoryHistoryItem}
-              onExportJson={handleExportFactoryHistory}
-              onExportCsv={handleExportFactoryHistoryCsv}
-              onImportFile={handleImportFactoryHistory}
-              onClearHistory={handleClearFactoryHistory}
-            />
+            <FactoryPanel {...panelProps.factoryPanelProps} />
             )}
 
             {!simpleMode && (
@@ -7050,772 +2318,102 @@ export default function App() {
             )}
             {(!simpleMode || (simpleStep === 3 && activeSimpleTab !== 'edit')) && renderStatus === 'completed' && !isRendering && (
               <div className="render-complete-card">
-                {/* Phase19-P: 作成タブ — 動画プレビュー・DL */}
-                {showInTab('create') && (<>
-                <div className="render-complete-card-header">
-                  🎬 完成動画ができました！
-                </div>
-                {renderPreviewUrl ? (
-                  videoPreviewLoading ? (
-                    <div className="video-preview-loading">
-                      <p className="video-preview-loading-icon">🎬</p>
-                      <p className="video-preview-loading-title">動画を準備しています</p>
-                      <p className="video-preview-loading-sub">プレビュー生成中...</p>
-                      <div className="video-preview-loading-bar">
-                        <div className="video-preview-loading-bar-fill" />
-                      </div>
-                    </div>
-                  ) : videoPreviewError ? (
-                    <div className="video-preview-error">
-                      <p className="video-preview-error-msg">⚠ {videoPreviewError}</p>
-                      <button
-                        className="btn-video-retry"
-                        onClick={() => checkVideoReady(renderPreviewUrl)}
-                      >
-                        ↻ プレビュー再取得
-                      </button>
-                    </div>
-                  ) : (
-                    <video
-                      className="render-complete-video"
-                      src={renderPreviewUrl}
-                      controls
-                      muted
-                      playsInline
-                      onLoadedData={() => setVideoPreviewLoading(false)}
-                      onCanPlay={() => setVideoPreviewLoading(false)}
-                      onError={() => setVideoPreviewError('動画の読み込みに失敗しました。再取得をお試しください。')}
-                    />
-                  )
-                ) : (
-                  <p className="render-preview-missing">
-                    動画生成は完了しましたが、プレビューURLが見つかりません。
-                    「動画を開く」または「ダウンロード」から確認してください。
-                  </p>
-                )}
-                <div className="render-complete-cta-row">
-                  <button className="btn-download-mp4 btn-download-mp4--large" onClick={downloadVideo}>
-                    ⬇ MP4ダウンロード
-                  </button>
-                  <a
-                    className="btn-open-video btn-open-video--large"
-                    href={latestViewUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    🔗 新しいタブで開く
-                  </a>
-                </div>
-                <ul className="render-complete-specs">
-                  <li>1080 × 1920 縦型動画</li>
-                  <li>YouTube Shorts / Instagram Reels 対応</li>
-                  <li>{slides.length} 枚スライド構成</li>
-                </ul>
-                <div className="render-next-actions">
-                  <p className="render-next-actions-title">次にやること</p>
-                  <ol>
-                    <li>動画を確認</li>
-                    <li>投稿文をコピー</li>
-                    <li>SNSへ投稿</li>
-                    <li>投稿記録を残す</li>
-                  </ol>
-                </div>
-                <div className="render-complete-actions">
-                  <button className="btn-download-mp4" onClick={downloadVideo}>
-                    ↓ 動画をダウンロード
-                  </button>
-                  <a
-                    className="btn-open-video"
-                    href={latestViewUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    ↗ 動画を開く
-                  </a>
-                </div>
-                <div className="render-complete-sub-actions">
-                  <button className="btn-copy-url" onClick={copyRenderUrl}>
-                    {copiedUrl ? '✓ コピー済み' : 'URLをコピー'}
-                  </button>
-                  <button className="btn-scroll-history" onClick={scrollToHistory}>
-                    履歴を見る
-                  </button>
-                  <button className="btn-rerender btn-rerender--inline" onClick={startRender}>
-                    再レンダリング
-                  </button>
-                </div>
-                </>)}
-                {/* Phase19-P: 投稿タブ — SNS・チェックリスト */}
-                {showInTab('post') && (<>
-                {/* SNS投稿ボタン群 (Phase18-C) */}
-                <div className="sns-post-actions">
-                  <p className="sns-post-actions-title">SNSへ投稿</p>
-                  <button
-                    className="btn-sns-post btn-sns-post--instagram"
-                    onClick={() => window.open('https://www.instagram.com/', '_blank')}
-                  >
-                    <span className="btn-sns-post-icon">📱</span>
-                    <span className="btn-sns-post-body">
-                      <span className="btn-sns-post-label">Instagramに投稿</span>
-                      <span className="btn-sns-post-hint">動画を保存してInstagramアプリへ投稿してください</span>
-                    </span>
-                  </button>
-                  <button
-                    className="btn-sns-post btn-sns-post--tiktok"
-                    onClick={() => window.open('https://www.tiktok.com/upload', '_blank')}
-                  >
-                    <span className="btn-sns-post-icon">🎵</span>
-                    <span className="btn-sns-post-label">TikTokに投稿</span>
-                  </button>
-                  <button
-                    className="btn-sns-post btn-sns-post--youtube"
-                    onClick={() => window.open('https://studio.youtube.com', '_blank')}
-                  >
-                    <span className="btn-sns-post-icon">▶</span>
-                    <span className="btn-sns-post-label">YouTube Shortsに投稿</span>
-                  </button>
-                  <button
-                    className="btn-sns-post btn-sns-post--x"
-                    onClick={() => snsCaption && copyAllCaptions(snsCaption)}
-                    disabled={!snsCaption}
-                  >
-                    <span className="btn-sns-post-icon">𝕏</span>
-                    <span className="btn-sns-post-label">投稿文をコピー</span>
-                  </button>
-                  {copiedAllCaption && (
-                    <p className="sns-copy-toast">投稿文をコピーしました</p>
-                  )}
-                </div>
-
-                {/* 投稿前チェックリスト (Phase18-C) */}
-                <div className="sns-post-checklist">
-                  <p className="sns-post-checklist-title">投稿前チェック</p>
-                  <ul className="sns-post-checklist-list">
-                    {POST_CHECKLIST_ITEMS.map((item) => (
-                      <li key={item.key}>
-                        <label className="sns-post-checklist-item">
-                          <input
-                            type="checkbox"
-                            checked={postChecklist[item.key]}
-                            onChange={() => togglePostChecklist(item.key)}
-                          />
-                          <span>{item.label}</span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                  {isPostChecklistComplete && (
-                    <p className="sns-post-checklist-complete">投稿完了おつかれさまでした！</p>
-                  )}
-                </div>
-
-                {/* Phase19-I: MMMイベント投稿前チェックリスト */}
-                {simpleTemplateId === 'mmm-event' && (<>
-                  <div className="event-post-checklist">
-                    <div className="event-post-checklist-header">
-                      <p className="event-post-checklist-title">投稿前チェック</p>
-                      {isEventPostChecklistComplete ? (
-                        <p className="event-post-checklist-complete">投稿準備完了</p>
-                      ) : (
-                        <p className="event-post-checklist-progress">
-                          {eventPostChecklistCount} / {EVENT_POST_CHECKLIST_ITEMS.length} 完了
-                          {EVENT_POST_CHECKLIST_ITEMS.length - eventPostChecklistCount > 0 && (
-                            <span className="event-post-checklist-remaining">
-                              　あと{EVENT_POST_CHECKLIST_ITEMS.length - eventPostChecklistCount}つ確認すると投稿準備完了です
-                            </span>
-                          )}
-                        </p>
-                      )}
-                    </div>
-                    <ul className="event-post-checklist-list">
-                      {EVENT_POST_CHECKLIST_ITEMS.map((item) => (
-                        <li key={item.key}>
-                          <label className="event-post-checklist-item">
-                            <input
-                              type="checkbox"
-                              checked={eventPostChecklist[item.key]}
-                              onChange={() => toggleEventPostChecklist(item.key)}
-                            />
-                            <span>{item.label}</span>
-                          </label>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="event-post-date-row">
-                      <label className="event-post-date-label">投稿日</label>
-                      <input
-                        type="date"
-                        className="event-post-date-input"
-                        value={eventPostDate}
-                        onChange={(e) => setEventPostDate(e.target.value)}
+                <RenderCompletePanel
+                  variant="standard"
+                  preview={{
+                    renderPreviewUrl,
+                    latestViewUrl,
+                    videoPreviewLoading,
+                    videoPreviewError,
+                    onRetryVideoPreview: checkVideoReady,
+                    onVideoPreviewReady: () => setVideoPreviewLoading(false),
+                    onVideoPreviewError: () => setVideoPreviewError('動画の読み込みに失敗しました。再取得をお試しください。'),
+                  }}
+                  actions={{
+                    onDownloadVideo: downloadVideo,
+                    onCopyRenderUrl: copyRenderUrl,
+                    onScrollToHistory: scrollToHistory,
+                    onRerender: startRender,
+                  }}
+                  posting={{
+                    isGeneratingSnsCaption,
+                    snsCaptionError,
+                    copiedAllCaption,
+                    hasSnsCaption: !!snsCaption,
+                    onGenerateSnsCaption: generateSnsCaption,
+                    onCopyPostCaption: () => snsCaption && copyAllCaptions(snsCaption),
+                    onGoToManageTab: simpleMode && simpleStep === 3 ? () => selectSimpleTab('manage') : undefined,
+                    postChecklistContent: (
+                      <PostingChecklistPanel
+                        simpleTemplateId={simpleTemplateId}
+                        postChecklist={postChecklist}
+                        isPostChecklistComplete={isPostChecklistComplete}
+                        onTogglePostChecklist={togglePostChecklist}
+                        eventPostChecklist={eventPostChecklist}
+                        eventPostDate={eventPostDate}
+                        eventPostChecklistCount={eventPostChecklistCount}
+                        isEventPostChecklistComplete={isEventPostChecklistComplete}
+                        onToggleEventPostChecklist={toggleEventPostChecklist}
+                        onChangeEventPostDate={setEventPostDate}
                       />
-                    </div>
-                  </div>
-                </>)}
-                </>)}
+                    ),
+                  }}
+                  display={{
+                    showCreateTab: showInTab('create'),
+                    showPostTab: showInTab('post'),
+                    slideCount,
+                    copiedUrl,
+                  }}
+                />
                 {/* Phase19-P: 管理タブ — ダッシュボード・記録・バックアップ */}
-                {showInTab('manage') && (<>
-                {/* Phase19-O: 運用ダッシュボード */}
-                {simpleTemplateId === 'mmm-event' && (
-                  <div className="event-dashboard-panel">
-                    <p className="event-dashboard-title">運用ダッシュボード</p>
-                    <div className="event-dashboard-stats">
-                      <div className="event-dashboard-stat">
-                        <span className="event-dashboard-stat-label">今月の投稿数</span>
-                        <strong className="event-dashboard-stat-value">{eventDashboardStats.thisMonthCount}件</strong>
-                      </div>
-                      <div className="event-dashboard-stat">
-                        <span className="event-dashboard-stat-label">URL付き投稿</span>
-                        <strong className="event-dashboard-stat-value">{eventDashboardStats.urlCount}件</strong>
-                      </div>
-                      <div className="event-dashboard-stat">
-                        <span className="event-dashboard-stat-label">総投稿数</span>
-                        <strong className="event-dashboard-stat-value">{eventDashboardStats.total}件</strong>
-                      </div>
-                    </div>
-
-                    {eventDashboardStats.total > 0 && (
-                      <div className="event-dashboard-sns">
-                        <p className="event-dashboard-section-label">SNS別</p>
-                        <div className="event-dashboard-sns-row">
-                          {(
-                            [
-                              { key: 'instagram', label: 'Instagram' },
-                              { key: 'x', label: 'X' },
-                              { key: 'tiktok', label: 'TikTok' },
-                              { key: 'youtube', label: 'YouTube' },
-                              { key: 'other', label: 'その他' },
-                            ] as const
-                          ).map(({ key, label }) =>
-                            eventDashboardStats.snsCounts[key] > 0 ? (
-                              <span key={key} className="event-dashboard-sns-badge">
-                                {label} {eventDashboardStats.snsCounts[key]}
-                              </span>
-                            ) : null
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {eventDashboardStats.recentRecords.length > 0 && (
-                      <div className="event-dashboard-recent">
-                        <p className="event-dashboard-section-label">直近投稿</p>
-                        <ul className="event-dashboard-recent-list">
-                          {eventDashboardStats.recentRecords.map((r) => (
-                            <li key={r.id} className="event-dashboard-recent-item">
-                              <span className="event-dashboard-recent-date">{r.postDate || r.createdAt.slice(0, 10)}</span>
-                              <span className="event-dashboard-recent-sns">
-                                {EVENT_POST_RECORD_SNS_OPTIONS.find((o) => o.value === r.sns)?.label ?? r.sns}
-                              </span>
-                              <span className="event-dashboard-recent-title">{r.eventTitle || '（タイトルなし）'}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {eventDashboardStats.unpostedPresets.length > 0 && (
-                      <div className="event-dashboard-unposted">
-                        <p className="event-dashboard-section-label">未投稿イベント</p>
-                        <ul className="event-dashboard-unposted-list">
-                          {eventDashboardStats.unpostedPresets.map((p) => (
-                            <li key={p.id} className="event-dashboard-unposted-item">
-                              {p.name}
-                              {p.date && <span className="event-dashboard-unposted-date"> — {p.date}</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    <div className="event-dashboard-actions">
-                      <button
-                        className="btn-event-dashboard-action"
-                        onClick={exportEventPostRecordsCsv}
-                        disabled={filteredEventPostRecords.length === 0}
-                      >
-                        表示中のCSV出力
-                      </button>
-                      <button
-                        className="btn-event-dashboard-action"
-                        onClick={exportReelBackupJson}
-                      >
-                        JSONバックアップ
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Phase19-K: MMMイベント投稿記録 */}
-                {simpleTemplateId === 'mmm-event' && (
-                  <div className="event-post-record-panel">
-                    <div className="event-post-record-header">
-                      <p className="event-post-record-title">投稿記録を残す</p>
-                      <button
-                        className="btn-event-post-record-csv"
-                        onClick={exportEventPostRecordsCsv}
-                        disabled={filteredEventPostRecords.length === 0}
-                      >
-                        表示中のCSV出力
-                      </button>
-                    </div>
-
-                    {/* Phase19-M: 絞り込みUI */}
-                    {eventPostRecords.length > 0 && (
-                      <div className="event-post-filter">
-                        <div className="event-post-filter-row">
-                          <label className="event-post-filter-field">
-                            <span className="event-post-filter-label">SNS</span>
-                            <select
-                              className="event-post-filter-select"
-                              value={eventPostFilter.sns}
-                              onChange={(e) => setEventPostFilter((prev) => ({ ...prev, sns: e.target.value }))}
-                            >
-                              <option value="all">すべて</option>
-                              {EVENT_POST_RECORD_SNS_OPTIONS.map(({ value, label }) => (
-                                <option key={value} value={value}>{label}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="event-post-filter-field">
-                            <span className="event-post-filter-label">URL</span>
-                            <select
-                              className="event-post-filter-select"
-                              value={eventPostFilter.urlStatus}
-                              onChange={(e) => setEventPostFilter((prev) => ({ ...prev, urlStatus: e.target.value }))}
-                            >
-                              <option value="all">すべて</option>
-                              <option value="with">URLあり</option>
-                              <option value="without">URLなし</option>
-                            </select>
-                          </label>
-                        </div>
-                        <div className="event-post-filter-row">
-                          <label className="event-post-filter-field event-post-filter-field--grow">
-                            <span className="event-post-filter-label">イベント名・メモ検索</span>
-                            <input
-                              type="text"
-                              className="event-post-filter-input"
-                              value={eventPostFilter.keyword}
-                              onChange={(e) => setEventPostFilter((prev) => ({ ...prev, keyword: e.target.value }))}
-                              placeholder="キーワード"
-                            />
-                          </label>
-                          <label className="event-post-filter-field">
-                            <span className="event-post-filter-label">投稿日</span>
-                            <input
-                              type="date"
-                              className="event-post-filter-input"
-                              value={eventPostFilter.postDate}
-                              onChange={(e) => setEventPostFilter((prev) => ({ ...prev, postDate: e.target.value }))}
-                            />
-                          </label>
-                        </div>
-                        <div className="event-post-filter-footer">
-                          <span className="event-post-filter-count">
-                            表示中：{filteredEventPostRecords.length} / {eventPostRecords.length} 件
-                          </span>
-                          {isEventPostFilterActive && (
-                            <button
-                              className="btn-event-post-filter-reset"
-                              onClick={() => setEventPostFilter({ sns: 'all', keyword: '', postDate: '', urlStatus: 'all' })}
-                            >
-                              絞り込み解除
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* レポート */}
-                    {eventPostReport.total > 0 && (
-                      <div className="event-post-record-report">
-                        <p className="event-post-record-report-total">イベント告知投稿数：{eventPostReport.total}件</p>
-                        <div className="event-post-record-report-grid">
-                          {EVENT_POST_RECORD_SNS_OPTIONS.map(({ value, label }) =>
-                            eventPostReport.counts[value] > 0 ? (
-                              <span key={value} className="event-post-record-report-item">
-                                {label}：{eventPostReport.counts[value]}件
-                              </span>
-                            ) : null
-                          )}
-                          {eventPostReport.urlCount > 0 && (
-                            <span className="event-post-record-report-item event-post-record-report-item--url">
-                              URL付き：{eventPostReport.urlCount}件
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* フォーム */}
-                    <div className="event-post-record-form">
-                      <div className="event-post-record-field">
-                        <span className="event-post-record-label">イベント名</span>
-                        <span className="event-post-record-event-name">
-                          {mmmEventForm.title || aiTheme || '未設定イベント'}
-                        </span>
-                      </div>
-                      <label className="event-post-record-field">
-                        <span className="event-post-record-label">SNS</span>
-                        <select
-                          className="event-post-record-select"
-                          value={eventPostRecordForm.sns}
-                          onChange={(e) => setEventPostRecordForm((prev) => ({ ...prev, sns: e.target.value as EventPostRecord['sns'] }))}
-                        >
-                          {EVENT_POST_RECORD_SNS_OPTIONS.map(({ value, label }) => (
-                            <option key={value} value={value}>{label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="event-post-record-field">
-                        <span className="event-post-record-label">投稿日</span>
-                        <input
-                          type="date"
-                          className="event-post-record-input"
-                          value={eventPostRecordForm.postDate}
-                          onChange={(e) => setEventPostRecordForm((prev) => ({ ...prev, postDate: e.target.value }))}
-                        />
-                      </label>
-                      <label className="event-post-record-field event-post-record-field--wide">
-                        <span className="event-post-record-label">投稿URL</span>
-                        <input
-                          type="text"
-                          className="event-post-record-input"
-                          value={eventPostRecordForm.postUrl}
-                          onChange={(e) => setEventPostRecordForm((prev) => ({ ...prev, postUrl: e.target.value }))}
-                          placeholder="https://..."
-                        />
-                      </label>
-                      <label className="event-post-record-field event-post-record-field--wide">
-                        <span className="event-post-record-label">メモ</span>
-                        <textarea
-                          className="event-post-record-textarea"
-                          value={eventPostRecordForm.memo}
-                          onChange={(e) => setEventPostRecordForm((prev) => ({ ...prev, memo: e.target.value }))}
-                          placeholder="反応や投稿時のメモ"
-                          rows={2}
-                        />
-                      </label>
-                      <button
-                        className="btn-event-post-record-save"
-                        onClick={saveEventPostRecord}
-                        disabled={!eventPostRecordForm.sns || !eventPostRecordForm.postDate}
-                      >
-                        投稿記録を保存
-                      </button>
-                    </div>
-
-                    {/* 一覧（最大5件・フィルター済み） */}
-                    {filteredEventPostRecords.length > 0 && (
-                      <ul className="event-post-record-list">
-                        {filteredEventPostRecords.slice(0, 5).map((record) => (
-                          <li key={record.id} className="event-post-record-item">
-                            <div className="event-post-record-item-main">
-                              <p className="event-post-record-item-header">
-                                {record.postDate} / {EVENT_POST_RECORD_SNS_OPTIONS.find((o) => o.value === record.sns)?.label ?? record.sns} / {record.eventTitle}
-                              </p>
-                              {record.postUrl && (
-                                <a
-                                  className="event-post-record-item-url"
-                                  href={record.postUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {record.postUrl}
-                                </a>
-                              )}
-                              {record.memo && (
-                                <p className="event-post-record-item-memo">メモ：{record.memo}</p>
-                              )}
-                            </div>
-                            <button
-                              className="btn-event-post-record-delete"
-                              onClick={() => deleteEventPostRecord(record.id)}
-                            >
-                              削除
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-
-                <div className="posted-records-panel">
-                  <div className="posted-records-header">
-                    <p className="posted-records-title">投稿済み管理</p>
-                    <div className="posted-records-header-actions">
-                      <button
-                        className="btn-posted-records-export"
-                        onClick={exportPostedRecordsCsv}
-                        disabled={postedRecords.length === 0}
-                      >
-                        CSVエクスポート
-                      </button>
-                      <button
-                        className="btn-posted-records-export"
-                        onClick={exportPostedRecordsJson}
-                      >
-                        JSONバックアップ
-                      </button>
-                      <label className="btn-posted-records-export btn-posted-records-import">
-                        JSONインポート
-                        <input
-                          type="file"
-                          accept="application/json,.json"
-                          onChange={handleImportPostedRecordsJson}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                  {postedRecordsImportMessage && (
-                    <p className="posted-records-import-message">{postedRecordsImportMessage}</p>
-                  )}
-                  {postedRecordsImportError && (
-                    <p className="posted-records-import-error">{postedRecordsImportError}</p>
-                  )}
-                  <div className="post-report">
-                    <p className="post-report-title">投稿レポート</p>
-                    {postedReport.total === 0 ? (
-                      <p className="post-report-empty">
-                        まだ投稿記録はありません。投稿したら、投稿日やURLを記録できます。
-                      </p>
-                    ) : (
-                      <>
-                        <div className="post-report-grid">
-                          <div className="post-report-card">
-                            <span className="post-report-label">総投稿数</span>
-                            <strong className="post-report-value">{postedReport.total}件</strong>
-                          </div>
-                          <div className="post-report-card">
-                            <span className="post-report-label">Instagram</span>
-                            <strong className="post-report-value">{postedReport.counts.instagram}件</strong>
-                          </div>
-                          <div className="post-report-card">
-                            <span className="post-report-label">TikTok</span>
-                            <strong className="post-report-value">{postedReport.counts.tiktok}件</strong>
-                          </div>
-                          <div className="post-report-card">
-                            <span className="post-report-label">YouTube</span>
-                            <strong className="post-report-value">{postedReport.counts.youtube}件</strong>
-                          </div>
-                          <div className="post-report-card">
-                            <span className="post-report-label">X</span>
-                            <strong className="post-report-value">{postedReport.counts.x}件</strong>
-                          </div>
-                          <div className="post-report-card">
-                            <span className="post-report-label">URL登録済み</span>
-                            <strong className="post-report-value">{postedReport.urlCount}件</strong>
-                          </div>
-                        </div>
-                        {postedReport.latest && (
-                          <p className="post-report-latest">
-                            最新投稿：{postedReport.latest.postedAt} / {POSTED_SNS_LABELS[postedReport.latest.sns]}
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  <div className="posted-records-form">
-                    <label className="posted-records-field">
-                      <span>投稿先SNS</span>
-                      <select
-                        value={postedForm.sns}
-                        onChange={(e) => setPostedForm((prev) => ({ ...prev, sns: e.target.value as PostedSns }))}
-                      >
-                        <option value="instagram">Instagram</option>
-                        <option value="tiktok">TikTok</option>
-                        <option value="youtube">YouTube</option>
-                        <option value="x">X</option>
-                      </select>
-                    </label>
-                    <label className="posted-records-field">
-                      <span>投稿日</span>
-                      <input
-                        type="date"
-                        value={postedForm.postedAt}
-                        onChange={(e) => setPostedForm((prev) => ({ ...prev, postedAt: e.target.value }))}
-                      />
-                    </label>
-                    <label className="posted-records-field posted-records-field--wide">
-                      <span>投稿URL</span>
-                      <input
-                        type="text"
-                        value={postedForm.url}
-                        onChange={(e) => setPostedForm((prev) => ({ ...prev, url: e.target.value }))}
-                        placeholder="https://..."
-                      />
-                    </label>
-                    <label className="posted-records-field posted-records-field--wide">
-                      <span>メモ</span>
-                      <input
-                        type="text"
-                        value={postedForm.memo}
-                        onChange={(e) => setPostedForm((prev) => ({ ...prev, memo: e.target.value }))}
-                        placeholder="反応や投稿時のメモ"
-                      />
-                    </label>
-                    <button
-                      className="btn-posted-record-add"
-                      onClick={addPostedRecord}
-                      disabled={!postedForm.postedAt}
-                    >
-                      投稿記録を追加
-                    </button>
-                  </div>
-
-                  {postedRecords.length > 0 && (
-                    <ul className="posted-records-list">
-                      {postedRecords.map((record, index) => (
-                        <li className="posted-record-item" key={`${record.sns}-${record.postedAt}-${index}`}>
-                          <div className="posted-record-item-main">
-                            <p className="posted-record-item-title">
-                              {POSTED_SNS_LABELS[record.sns]} / {record.postedAt}
-                            </p>
-                            {record.url && (
-                              <a
-                                className="posted-record-item-url"
-                                href={record.url}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {record.url}
-                              </a>
-                            )}
-                            {record.memo && (
-                              <p className="posted-record-item-memo">メモ：{record.memo}</p>
-                            )}
-                          </div>
-                          <button
-                            className="btn-posted-record-delete"
-                            onClick={() => deletePostedRecord(index)}
-                          >
-                            削除
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                {/* Phase19-N: 全データバックアップ */}
-                <div className="reel-backup-panel">
-                  <p className="reel-backup-title">JSONバックアップ</p>
-                  <div className="reel-backup-actions">
-                    <button
-                      className="btn-reel-backup"
-                      onClick={exportReelBackupJson}
-                    >
-                      バックアップ出力
-                    </button>
-                    <label className="btn-reel-backup btn-reel-backup--import">
-                      ファイルを選択して復元
-                      <input
-                        type="file"
-                        accept="application/json,.json"
-                        onChange={handleImportReelBackupJson}
-                      />
-                    </label>
-                  </div>
-                  {backupImportMessage && (
-                    <p className="reel-backup-message">{backupImportMessage}</p>
-                  )}
-                  {backupImportError && (
-                    <p className="reel-backup-error">{backupImportError}</p>
-                  )}
-                </div>
-                </>)}
-                {/* Phase19-P: 投稿タブ — SNS投稿文生成ボタン */}
-                {showInTab('post') && (<>
-                <button
-                  className="btn-sns-caption"
-                  onClick={generateSnsCaption}
-                  disabled={isGeneratingSnsCaption}
-                >
-                  {isGeneratingSnsCaption ? '⏳ 生成中...' : 'SNS投稿文を作成'}
-                </button>
-                {snsCaptionError && (
-                  <p className="sns-caption-error">{snsCaptionError}</p>
-                )}
-                </>)}
+                <EventPostManagementPanel
+                  eventPosting={{
+                    isVisible: showInTab('manage'),
+                    simpleTemplateId,
+                    aiTheme,
+                    mmmEventForm,
+                    eventPostRecords,
+                    eventPostRecordForm,
+                    eventPostFilter,
+                    eventPostReport,
+                    eventDashboardStats,
+                    filteredEventPostRecords,
+                    isEventPostFilterActive,
+                  }}
+                  postingRecords={{
+                    records: postedRecords,
+                    form: postedForm,
+                    importMessage: postedRecordsImportMessage,
+                    importError: postedRecordsImportError,
+                    report: postedReport,
+                  }}
+                  backup={{
+                    importMessage: backupImportMessage,
+                    importError: backupImportError,
+                    onExportJson: exportReelBackupJson,
+                    onImportJson: handleImportReelBackupJson,
+                  }}
+                  actions={{
+                    onChangeEventPostRecordForm: setEventPostRecordForm,
+                    onChangeEventPostFilter: setEventPostFilter,
+                    onSaveEventPostRecord: saveEventPostRecord,
+                    onDeleteEventPostRecord: deleteEventPostRecord,
+                    onExportEventPostRecordsCsv: exportEventPostRecordsCsv,
+                    onChangePostedForm: setPostedForm,
+                    onAddPostedRecord: addPostedRecord,
+                    onDeletePostedRecord: deletePostedRecord,
+                    onExportPostedRecordsCsv: exportPostedRecordsCsv,
+                    onExportPostedRecordsJson: exportPostedRecordsJson,
+                    onImportPostedRecordsJson: handleImportPostedRecordsJson,
+                  }}
+                />
               </div>
             )}
             {/* Phase19-P: 編集タブパネル */}
             {simpleMode && simpleStep === 3 && activeSimpleTab === 'edit' && (
               renderStatus === 'completed' ? (
                 <div className="simple-edit-tab-panel">
-                  <div className="post-edit-panel">
-                    <button
-                      className="post-edit-panel-toggle"
-                      onClick={() => setSlideEditorOpen((v) => !v)}
-                    >
-                      {slideEditorOpen ? '▲ 編集パネルを閉じる' : '✏ 文字・画像・BGMを修正する'}
-                    </button>
-
-                    {slideEditorOpen && (
-                      <div className="post-edit-panel-body">
-                        <div className="post-edit-section">
-                          <p className="post-edit-section-title">BGM差し替え</p>
-                          <label className="bgm-upload-label">
-                            {bgmUploading ? 'アップロード中...' : bgmFileName ? `現在：${bgmFileName}` : 'mp3 / wav / m4a を選択'}
-                            <input type="file" accept=".mp3,.wav,.m4a,audio/*" disabled={bgmUploading} onChange={handleBgmUpload} />
-                          </label>
-                          {bgmUploadError && <p className="post-edit-error">{bgmUploadError}</p>}
-                          {bgmFileName && !bgmUploadError && <p className="post-edit-success">BGMを「{bgmFileName}」に設定しました</p>}
-                        </div>
-
-                        <div className="post-edit-section">
-                          <p className="post-edit-section-title">QRコード差し替え（14枚目）</p>
-                          <label className="bgm-upload-label">
-                            {qrUploading ? 'アップロード中...' : qrFileName ? `現在：${qrFileName}` : 'QR画像を選択（PNG / JPG）'}
-                            <input type="file" accept="image/*" disabled={qrUploading} onChange={handleQrUpload} />
-                          </label>
-                          {qrUploadError && <p className="post-edit-error">{qrUploadError}</p>}
-                          {qrFileName && !qrUploadError && <p className="post-edit-success">QRコードを「{qrFileName}」に変更しました。再生成で反映されます。</p>}
-                        </div>
-
-                        <div className="post-edit-section">
-                          <p className="post-edit-section-title">スライド文字を修正</p>
-                          <div className="slide-text-editor">
-                            {slides.map((slide, idx) => (
-                              <div key={slide.id} className="slide-text-editor-item">
-                                <p className="slide-text-editor-index">Slide {idx + 1}</p>
-                                <label className="slide-text-field">
-                                  <span>見出し</span>
-                                  <input type="text" value={slide.headline} onChange={(e) => handleSlideTextChange(slide.id, 'headline', e.target.value)} />
-                                </label>
-                                <label className="slide-text-field">
-                                  <span>サブ</span>
-                                  <input type="text" value={slide.subline ?? ''} onChange={(e) => handleSlideTextChange(slide.id, 'subline', e.target.value)} />
-                                </label>
-                                <label className="slide-text-field">
-                                  <span>強調</span>
-                                  <input type="text" value={slide.emphasis ?? ''} onChange={(e) => handleSlideTextChange(slide.id, 'emphasis', e.target.value)} />
-                                </label>
-                                <div className="slide-image-replace">
-                                  <label className="slide-image-replace-label">
-                                    {slideImageReplacing === slide.id ? '差し替え中...' : '画像を差し替え'}
-                                    <input type="file" accept="image/*" disabled={slideImageReplacing === slide.id} onChange={(e) => handleSlideImageReplace(slide.id, e)} />
-                                  </label>
-                                  {slideImageReplaceError[slide.id] && <p className="post-edit-error">{slideImageReplaceError[slide.id]}</p>}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <button
-                          className="btn-rerender-after-edit"
-                          onClick={async () => { setSlideEditorOpen(false); await saveToServer(); startRender() }}
-                          disabled={isRendering || isPreparingRender}
-                        >
-                          修正内容で動画を再生成
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  {postEditPanel}
                 </div>
               ) : (
                 <p className="simple-tab-empty">まず動画を作成すると、この機能が使えます。</p>
@@ -7828,383 +2426,30 @@ export default function App() {
             )}
 
             {(!simpleMode || simpleStep === 3) && snsCaption && renderStatus === 'completed' && showInTab('post') && (
-              <div className="sns-caption-panel">
-                <div className="sns-caption-panel-header">
-                  <div className="sns-caption-panel-title-group">
-                    <p className="sns-caption-panel-title">SNS投稿文</p>
-                    <span className="sns-caption-template-type">
-                      投稿文タイプ：{
-                        (selectedTemplateId || simpleTemplateId)
-                          ? (templates.find((t) => t.id === (selectedTemplateId || simpleTemplateId))?.name ?? (selectedTemplateId || simpleTemplateId))
-                          : '汎用'
-                      }
-                    </span>
-                  </div>
-                  <button
-                    className="btn-sns-copy-all"
-                    onClick={() => copyAllCaptions(snsCaption)}
-                  >
-                    {copiedAllCaption ? '✓ コピー済み' : '📋 投稿文をコピー'}
-                  </button>
-                </div>
-                {copiedAllCaption && (
-                  <p className="sns-copy-toast">投稿文をコピーしました</p>
-                )}
-                <div className="sns-copy-actions">
-                  <button
-                    className="btn-sns-copy-platform"
-                    onClick={() => copyCaptionText('YouTube', formatYouTubeCaption(snsCaption))}
-                  >
-                    📋 YouTube用をコピー
-                  </button>
-                  <button
-                    className="btn-sns-copy-platform"
-                    onClick={() => copyCaptionText('Instagram', formatInstagramCaption(snsCaption))}
-                  >
-                    📋 Instagram用をコピー
-                  </button>
-                  <button
-                    className="btn-sns-copy-platform"
-                    onClick={() => copyCaptionText('TikTok', formatTikTokCaption(snsCaption))}
-                  >
-                    📋 TikTok用をコピー
-                  </button>
-                  <button
-                    className="btn-sns-copy-platform"
-                    onClick={() => copyCaptionText('X', formatXCaption(snsCaption))}
-                  >
-                    📋 X用をコピー
-                  </button>
-                </div>
-                {copiedCaptionLabel && (
-                  <p className="sns-copy-toast">{copiedCaptionLabel}用をコピーしました</p>
-                )}
-                {snsCaptionError && (
-                  <p className="sns-caption-error">{snsCaptionError}</p>
-                )}
-
-                <div className="sns-caption-field">
-                  <div className="sns-caption-field-header">
-                    <span className="sns-caption-field-label">YouTube Shorts タイトル</span>
-                    <div className="sns-caption-field-actions">
-                      {editingCaptionKey === 'youtubeTitle' ? (
-                        <>
-                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
-                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('youtubeTitle')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'youtubeTitle' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => copySnsText('ytTitle', snsCaption.youtubeTitle)}
-                          >
-                            {copiedSnsField === 'ytTitle' ? '✓ コピー済み' : 'コピー'}
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => startCaptionEdit('youtubeTitle', snsCaption.youtubeTitle)}
-                          >
-                            編集
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('youtubeTitle')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'youtubeTitle' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {editingCaptionKey === 'youtubeTitle' ? (
-                    <textarea
-                      className="sns-caption-edit-input sns-caption-edit-input--title"
-                      value={editingCaptionText}
-                      onChange={(e) => setEditingCaptionText(e.target.value)}
-                    />
-                  ) : (
-                    <p className="sns-caption-text sns-caption-text--title">{snsCaption.youtubeTitle}</p>
-                  )}
-                </div>
-
-                <div className="sns-caption-field">
-                  <div className="sns-caption-field-header">
-                    <span className="sns-caption-field-label">YouTube 説明文</span>
-                    <div className="sns-caption-field-actions">
-                      {editingCaptionKey === 'youtubeDescription' ? (
-                        <>
-                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
-                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('youtubeDescription')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'youtubeDescription' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => copySnsText('ytDesc', snsCaption.youtubeDescription)}
-                          >
-                            {copiedSnsField === 'ytDesc' ? '✓ コピー済み' : 'コピー'}
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => startCaptionEdit('youtubeDescription', snsCaption.youtubeDescription)}
-                          >
-                            編集
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('youtubeDescription')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'youtubeDescription' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {editingCaptionKey === 'youtubeDescription' ? (
-                    <textarea
-                      className="sns-caption-edit-input"
-                      value={editingCaptionText}
-                      onChange={(e) => setEditingCaptionText(e.target.value)}
-                    />
-                  ) : (
-                    <p className="sns-caption-text">{snsCaption.youtubeDescription}</p>
-                  )}
-                </div>
-
-                <div className="sns-caption-field">
-                  <div className="sns-caption-field-header">
-                    <span className="sns-caption-field-label">Instagram 投稿文</span>
-                    <div className="sns-caption-field-actions">
-                      {editingCaptionKey === 'instagramCaption' ? (
-                        <>
-                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
-                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('instagramCaption')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'instagramCaption' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => copySnsText('ig', snsCaption.instagramCaption)}
-                          >
-                            {copiedSnsField === 'ig' ? '✓ コピー済み' : 'コピー'}
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => startCaptionEdit('instagramCaption', snsCaption.instagramCaption)}
-                          >
-                            編集
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('instagramCaption')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'instagramCaption' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {editingCaptionKey === 'instagramCaption' ? (
-                    <textarea
-                      className="sns-caption-edit-input"
-                      value={editingCaptionText}
-                      onChange={(e) => setEditingCaptionText(e.target.value)}
-                    />
-                  ) : (
-                    <p className="sns-caption-text">{snsCaption.instagramCaption}</p>
-                  )}
-                </div>
-
-                <div className="sns-caption-field">
-                  <div className="sns-caption-field-header">
-                    <span className="sns-caption-field-label">TikTok 用</span>
-                    <div className="sns-caption-field-actions">
-                      {editingCaptionKey === 'tiktokCaption' ? (
-                        <>
-                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
-                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('tiktokCaption')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'tiktokCaption' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => copySnsText('tiktok', snsCaption.tiktokCaption || snsCaption.instagramCaption)}
-                          >
-                            {copiedSnsField === 'tiktok' ? '✓ コピー済み' : 'コピー'}
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => startCaptionEdit('tiktokCaption', snsCaption.tiktokCaption || snsCaption.instagramCaption)}
-                          >
-                            編集
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('tiktokCaption')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'tiktokCaption' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {editingCaptionKey === 'tiktokCaption' ? (
-                    <textarea
-                      className="sns-caption-edit-input"
-                      value={editingCaptionText}
-                      onChange={(e) => setEditingCaptionText(e.target.value)}
-                    />
-                  ) : (
-                    <p className="sns-caption-text">{snsCaption.tiktokCaption || snsCaption.instagramCaption}</p>
-                  )}
-                </div>
-
-                <div className="sns-caption-field">
-                  <div className="sns-caption-field-header">
-                    <span className="sns-caption-field-label">X 用</span>
-                    <div className="sns-caption-field-actions">
-                      {editingCaptionKey === 'xCaption' ? (
-                        <>
-                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
-                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('xCaption')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'xCaption' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => copySnsText('x', snsCaption.xCaption || snsCaption.instagramCaption)}
-                          >
-                            {copiedSnsField === 'x' ? '✓ コピー済み' : 'コピー'}
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => startCaptionEdit('xCaption', snsCaption.xCaption || snsCaption.instagramCaption)}
-                          >
-                            編集
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('xCaption')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'xCaption' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {editingCaptionKey === 'xCaption' ? (
-                    <textarea
-                      className="sns-caption-edit-input"
-                      value={editingCaptionText}
-                      onChange={(e) => setEditingCaptionText(e.target.value)}
-                    />
-                  ) : (
-                    <p className="sns-caption-text">{snsCaption.xCaption || snsCaption.instagramCaption}</p>
-                  )}
-                </div>
-
-                <div className="sns-caption-field">
-                  <div className="sns-caption-field-header">
-                    <span className="sns-caption-field-label">ハッシュタグ</span>
-                    <div className="sns-caption-field-actions">
-                      {editingCaptionKey === 'hashtags' ? (
-                        <>
-                          <button className="btn-sns-copy" onClick={saveCaptionEdit}>保存</button>
-                          <button className="btn-sns-copy" onClick={cancelCaptionEdit}>キャンセル</button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('hashtags')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'hashtags' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => copySnsText('tags', formatCaptionHashtags(snsCaption))}
-                          >
-                            {copiedSnsField === 'tags' ? '✓ コピー済み' : 'コピー'}
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => startCaptionEdit('hashtags', formatCaptionHashtags(snsCaption))}
-                          >
-                            編集
-                          </button>
-                          <button
-                            className="btn-sns-copy"
-                            onClick={() => regenerateCaptionPart('hashtags')}
-                            disabled={!!regeneratingCaptionKey}
-                          >
-                            {regeneratingCaptionKey === 'hashtags' ? '再生成中...' : '再生成'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {editingCaptionKey === 'hashtags' ? (
-                    <textarea
-                      className="sns-caption-edit-input sns-caption-edit-input--tags"
-                      value={editingCaptionText}
-                      onChange={(e) => setEditingCaptionText(e.target.value)}
-                    />
-                  ) : (
-                    <p className="sns-caption-text sns-caption-text--tags">
-                      {formatCaptionHashtags(snsCaption).split(' ').join('　')}
-                    </p>
-                  )}
-                </div>
-
-                <button
-                  className="btn-sns-caption btn-sns-caption--regen"
-                  onClick={generateSnsCaption}
-                  disabled={isGeneratingSnsCaption || !!regeneratingCaptionKey}
-                >
-                  {isGeneratingSnsCaption ? '⏳ 生成中...' : 'SNS投稿文を再生成'}
-                </button>
-              </div>
+              <SnsCaptionPanel
+                snsCaption={snsCaption}
+                selectedTemplateId={selectedTemplateId}
+                simpleTemplateId={simpleTemplateId}
+                templates={templates}
+                copiedAllCaption={copiedAllCaption}
+                copiedCaptionLabel={copiedCaptionLabel}
+                snsCaptionError={snsCaptionError}
+                copiedSnsField={copiedSnsField}
+                editingCaptionKey={editingCaptionKey}
+                editingCaptionText={editingCaptionText}
+                regeneratingCaptionKey={regeneratingCaptionKey}
+                isGeneratingSnsCaption={isGeneratingSnsCaption}
+                onCopyAllCaptions={copyAllCaptions}
+                onCopyCaptionText={copyCaptionText}
+                onCopySnsText={copySnsText}
+                onStartCaptionEdit={startCaptionEdit}
+                onChangeEditingCaptionText={setEditingCaptionText}
+                onCancelCaptionEdit={cancelCaptionEdit}
+                onSaveCaptionEdit={saveCaptionEdit}
+                onRegenerateCaptionPart={regenerateCaptionPart}
+                onGenerateSnsCaption={generateSnsCaption}
+                onGoToManageTab={simpleMode && simpleStep === 3 ? () => selectSimpleTab('manage') : undefined}
+              />
             )}
 
             {/* 📚 AI自動作成履歴 (かんたんモード Step3 のみ・完成動画の後に表示) */}
@@ -8231,7 +2476,7 @@ export default function App() {
             {simpleMode && simpleStep === 3 && !factoryRunning && activeSimpleTab === 'create' && (
               <button
                 className="btn-simple-new"
-                onClick={() => { setSimpleStep(1); setFactoryWarning(''); setFactoryNotice(''); resetPostChecklist(); resetPostedRecords() }}
+                onClick={() => { goToSimpleStep(1); clearFactoryMessages(); resetPostChecklist(); resetPostedRecords() }}
               >
                 新しく作る
               </button>
@@ -8240,437 +2485,76 @@ export default function App() {
             {!simpleMode && (<>
             {/* Render Queue (Phase13-H/K / Phase14-C) */}
             <div className="render-queue-section">
-              {/* ── 上級者向け機能パネル ── */}
-              <details className="advanced-panel">
-                <summary className="advanced-panel-summary">🔧 上級者向け機能</summary>
-                <div className="advanced-panel-body">
-              {/* 🚀 Auto Render Pipeline (Phase14-C) */}
-              <button
-                className="btn-auto-pipeline"
-                onClick={handleAutoRenderPipeline}
-                disabled={isPipelineDisabled || !aiTheme.trim()}
-              >
-                {isAutoPipelineRunning ? '🚀 パイプライン実行中...' : '🚀 自動レンダーパイプライン'}
-              </button>
+              <AdvancedControlsPanel
+                aiTheme={aiTheme}
+                isPipelineDisabled={isPipelineDisabled}
+                autoPipeline={{
+                  isRunning: isAutoPipelineRunning,
+                  step: pipelineStep,
+                  status: pipelineStatus,
+                  warning: factoryWarning,
+                  error: factoryError,
+                  lastPipeline,
+                  onRun: handleAutoRenderPipeline,
+                }}
+                smartPipeline={{
+                  aiTheme,
+                  isPipelineDisabled,
+                  isSmartPipelineRunning,
+                  smartPipelineStep,
+                  smartPipelineStatus,
+                  smartPipelineError,
+                  lastSmartPipeline,
+                  onRunSmartPipeline: handleSmartPipeline,
+                  isSmartRewritePipelineRunning,
+                  smartRewritePipelineStep,
+                  smartRewritePipelineStatus,
+                  smartRewritePipelineError,
+                  lastSmartRewritePipeline,
+                  onRunSmartRewritePipeline: handleSmartRewritePipeline,
+                  isMultiRewriteQueueRunning,
+                  multiRewriteQueueStep,
+                  multiRewriteQueueStatus,
+                  multiRewriteQueueError,
+                  lastMultiRewriteQueue,
+                  onRunMultiRewriteQueue: handleMultiRewriteQueue,
+                }}
+                variantGenerator={{
+                  aiTheme,
+                  slideCount,
+                  isPipelineDisabled,
+                  generatedVariants,
+                  isGeneratingVariants,
+                  variantGenerateError,
+                  variantScores,
+                  isScoringVariants,
+                  variantScoreError,
+                  smartQueueMessage,
+                  renderQueue,
+                  rewrittenStories,
+                  isRewritingStory,
+                  rewriteStoryError,
+                  onGenerateVariants: generateAIVariants,
+                  onScoreVariants: scoreVariants,
+                  onAddAllVariantsToQueue: addAllVariantsToQueue,
+                  onAddSmartQueue: addSmartQueue,
+                  onAddVariantToQueue: addVariantToQueue,
+                  onRewriteStory: rewriteStory,
+                  onApplyRewrittenStory: applyRewrittenStory,
+                }}
+              />
 
-              {/* 🧠⚡ Smart Pipeline (Phase14-I) */}
-              <button
-                className="btn-smart-pipeline"
-                onClick={handleSmartPipeline}
-                disabled={isPipelineDisabled || !aiTheme.trim()}
-              >
-                {isSmartPipelineRunning ? '🧠⚡ スマートパイプライン実行中...' : '🧠⚡ スマートパイプライン'}
-              </button>
-
-              {/* Smart Pipeline Progress Card */}
-              {isSmartPipelineRunning && (
-                <div className="smart-pipeline-card smart-pipeline-card--running">
-                  <p className="smart-pipeline-card-title">🧠⚡ スマートパイプライン実行中</p>
-                  <div className="smart-pipeline-steps">
-                    {[
-                      { num: 1, label: 'AI生成' },
-                      { num: 2, label: 'スコアリング' },
-                      { num: 3, label: 'キュー投入' },
-                      { num: 4, label: 'レンダリング' },
-                      { num: 5, label: '比較' },
-                    ].map(({ num, label }) => (
-                      <div key={num} className={`smart-pipeline-step${smartPipelineStep >= num ? ' smart-pipeline-step--active' : ''}`}>
-                        <span className="smart-pipeline-step-num">ステップ {num}/5</span>
-                        <span className="smart-pipeline-step-label">{label}</span>
-                        {smartPipelineStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
-                        {smartPipelineStep > num && <span className="smart-pipeline-step-done">✅</span>}
-                      </div>
-                    ))}
-                  </div>
-                  <p className="smart-pipeline-status-text">{smartPipelineStatus}</p>
-                </div>
-              )}
-
-              {/* Smart Pipeline Complete Card */}
-              {!isSmartPipelineRunning && smartPipelineStatus === '比較ダッシュボード準備完了' && lastSmartPipeline && (
-                <div className="smart-pipeline-card smart-pipeline-card--complete">
-                  <p className="smart-pipeline-card-title">✅ スマートパイプライン完了</p>
-                  <div className="smart-pipeline-stats">
-                    <span>生成: <strong>{lastSmartPipeline.generatedCount}</strong></span>
-                    <span>推奨: <strong>{lastSmartPipeline.recommendedCount}</strong></span>
-                    <span>レンダリング: <strong>{lastSmartPipeline.renderedCount}</strong></span>
-                    {lastSmartPipeline.failedCount > 0 && (
-                      <span className="smart-pipeline-stat--fail">失敗: <strong>{lastSmartPipeline.failedCount}</strong></span>
-                    )}
-                  </div>
-                  {smartPipelineError && <p className="smart-pipeline-notice">{smartPipelineError}</p>}
-                </div>
-              )}
-
-              {/* Smart Pipeline Failed Card */}
-              {!isSmartPipelineRunning && smartPipelineStatus === 'スマートパイプライン失敗' && (
-                <div className="smart-pipeline-card smart-pipeline-card--failed">
-                  <p className="smart-pipeline-card-title">❌ スマートパイプライン失敗</p>
-                  <p className="smart-pipeline-error-text">{smartPipelineError}</p>
-                </div>
-              )}
-
-              {/* 🪄⚡ Smart Rewrite Pipeline (Phase14-K) */}
-              <button
-                className="btn-smart-pipeline"
-                onClick={handleSmartRewritePipeline}
-                disabled={isPipelineDisabled || !aiTheme.trim()}
-              >
-                {isSmartRewritePipelineRunning ? '🪄⚡ スマートリライト実行中...' : '🪄⚡ スマートリライト'}
-              </button>
-
-              {/* Smart Rewrite Pipeline Progress Card */}
-              {isSmartRewritePipelineRunning && (
-                <div className="smart-pipeline-card smart-pipeline-card--running">
-                  <p className="smart-pipeline-card-title">🪄⚡ スマートリライト実行中</p>
-                  <div className="smart-pipeline-steps">
-                    {[
-                      { num: 1, label: 'AI生成' },
-                      { num: 2, label: 'スコアリング' },
-                      { num: 3, label: 'トップ選定' },
-                      { num: 4, label: 'ストーリーリライト' },
-                      { num: 5, label: 'ストーリー適用' },
-                      { num: 6, label: 'キュー投入' },
-                      { num: 7, label: 'レンダリング' },
-                      { num: 8, label: '比較' },
-                    ].map(({ num, label }) => (
-                      <div key={num} className={`smart-pipeline-step${smartRewritePipelineStep >= num ? ' smart-pipeline-step--active' : ''}`}>
-                        <span className="smart-pipeline-step-num">ステップ {num}/8</span>
-                        <span className="smart-pipeline-step-label">{label}</span>
-                        {smartRewritePipelineStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
-                        {smartRewritePipelineStep > num && <span className="smart-pipeline-step-done">✅</span>}
-                      </div>
-                    ))}
-                  </div>
-                  <p className="smart-pipeline-status-text">{smartRewritePipelineStatus}</p>
-                </div>
-              )}
-
-              {/* Smart Rewrite Pipeline Complete Card */}
-              {!isSmartRewritePipelineRunning && smartRewritePipelineStatus === 'スマートリライト完了' && lastSmartRewritePipeline && (
-                <div className="smart-pipeline-card smart-pipeline-card--complete">
-                  <p className="smart-pipeline-card-title">✅ スマートリライト完了</p>
-                  <div className="smart-pipeline-stats">
-                    {lastSmartRewritePipeline.selectedVariantName ? (
-                      <>
-                        <span>選定: <strong>{lastSmartRewritePipeline.selectedVariantName}</strong></span>
-                        <span>推奨度: <strong>{lastSmartRewritePipeline.recommendation}/5</strong></span>
-                        <span>レンダリング: <strong>{lastSmartRewritePipeline.renderedCount}</strong></span>
-                        {lastSmartRewritePipeline.failedCount > 0 && (
-                          <span className="smart-pipeline-stat--fail">失敗: <strong>{lastSmartRewritePipeline.failedCount}</strong></span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="smart-pipeline-notice">{smartRewritePipelineError}</span>
-                    )}
-                  </div>
-                  {smartRewritePipelineError && lastSmartRewritePipeline.selectedVariantName && (
-                    <p className="smart-pipeline-notice">{smartRewritePipelineError}</p>
-                  )}
-                </div>
-              )}
-
-              {/* Smart Rewrite Pipeline Failed Card */}
-              {!isSmartRewritePipelineRunning && smartRewritePipelineStatus === 'スマートリライト失敗' && (
-                <div className="smart-pipeline-card smart-pipeline-card--failed">
-                  <p className="smart-pipeline-card-title">❌ スマートリライト失敗</p>
-                  <p className="smart-pipeline-error-text">{smartRewritePipelineError}</p>
-                </div>
-              )}
-
-              {/* 🪄🧩 Multi Rewrite Queue (Phase14-L) */}
-              <button
-                className="btn-smart-pipeline"
-                onClick={handleMultiRewriteQueue}
-                disabled={isPipelineDisabled || !aiTheme.trim()}
-              >
-                {isMultiRewriteQueueRunning ? '🪄🧩 マルチリライトキュー実行中...' : '🪄🧩 マルチリライトキュー'}
-              </button>
-
-              {/* Multi Rewrite Queue Progress Card */}
-              {isMultiRewriteQueueRunning && (
-                <div className="smart-pipeline-card smart-pipeline-card--running">
-                  <p className="smart-pipeline-card-title">🪄🧩 マルチリライトキュー実行中</p>
-                  <div className="smart-pipeline-steps">
-                    {[
-                      { num: 1, label: 'AI生成' },
-                      { num: 2, label: 'スコアリング' },
-                      { num: 3, label: 'トップ3選定' },
-                      { num: 4, label: 'バリアントリライト' },
-                      { num: 5, label: '最初のリライト適用' },
-                      { num: 6, label: 'リライトキュー投入' },
-                      { num: 7, label: 'レンダリング' },
-                      { num: 8, label: '比較' },
-                    ].map(({ num, label }) => (
-                      <div key={num} className={`smart-pipeline-step${multiRewriteQueueStep >= num ? ' smart-pipeline-step--active' : ''}`}>
-                        <span className="smart-pipeline-step-num">ステップ {num}/8</span>
-                        <span className="smart-pipeline-step-label">{label}</span>
-                        {multiRewriteQueueStep === num && <span className="smart-pipeline-step-spinner">⏳</span>}
-                        {multiRewriteQueueStep > num && <span className="smart-pipeline-step-done">✅</span>}
-                      </div>
-                    ))}
-                  </div>
-                  <p className="smart-pipeline-status-text">{multiRewriteQueueStatus}</p>
-                </div>
-              )}
-
-              {/* Multi Rewrite Queue Complete Card */}
-              {!isMultiRewriteQueueRunning && multiRewriteQueueStatus === 'マルチリライトキュー完了' && lastMultiRewriteQueue && (
-                <div className="smart-pipeline-card smart-pipeline-card--complete">
-                  <p className="smart-pipeline-card-title">✅ マルチリライトキュー完了</p>
-                  <div className="smart-pipeline-stats">
-                    {lastMultiRewriteQueue.selectedVariants.length > 0 ? (
-                      <>
-                        <span>リライト: <strong>{lastMultiRewriteQueue.rewrittenCount}</strong></span>
-                        <span>キュー投入: <strong>{lastMultiRewriteQueue.queuedCount}</strong></span>
-                        <span>レンダリング: <strong>{lastMultiRewriteQueue.renderedCount}</strong></span>
-                        {lastMultiRewriteQueue.failedCount > 0 && (
-                          <span className="smart-pipeline-stat--fail">失敗: <strong>{lastMultiRewriteQueue.failedCount}</strong></span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="smart-pipeline-notice">{multiRewriteQueueError}</span>
-                    )}
-                  </div>
-                  {lastMultiRewriteQueue.selectedVariants.length > 0 && (
-                    <div className="smart-pipeline-selected-variants">
-                      <p className="smart-pipeline-selected-label">選定:</p>
-                      {lastMultiRewriteQueue.selectedVariants.map((name) => (
-                        <span key={name} className="smart-pipeline-variant-tag">{name}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Multi Rewrite Queue Failed Card */}
-              {!isMultiRewriteQueueRunning && multiRewriteQueueStatus === 'マルチリライトキュー失敗' && (
-                <div className="smart-pipeline-card smart-pipeline-card--failed">
-                  <p className="smart-pipeline-card-title">❌ マルチリライトキュー失敗</p>
-                  <p className="smart-pipeline-error-text">{multiRewriteQueueError}</p>
-                </div>
-              )}
-
-              {/* Pipeline Progress Card */}
-              {isAutoPipelineRunning && (
-                <div className="pipeline-progress-card">
-                  <p className="pipeline-progress-title">🚀 自動パイプライン実行中</p>
-                  <div className="pipeline-steps">
-                    <div className={`pipeline-step${pipelineStep >= 1 ? ' pipeline-step--active' : ''}`}>
-                      <span className="pipeline-step-num">Step 1/3</span>
-                      <span className="pipeline-step-label">バリアント生成</span>
-                      {pipelineStep === 1 && <span className="pipeline-step-spinner">⏳</span>}
-                      {pipelineStep > 1 && <span className="pipeline-step-done">✅</span>}
-                    </div>
-                    <div className={`pipeline-step${pipelineStep >= 2 ? ' pipeline-step--active' : ''}`}>
-                      <span className="pipeline-step-num">Step 2/3</span>
-                      <span className="pipeline-step-label">レンダリング</span>
-                      {pipelineStep === 2 && <span className="pipeline-step-spinner">⏳</span>}
-                      {pipelineStep > 2 && <span className="pipeline-step-done">✅</span>}
-                    </div>
-                    <div className={`pipeline-step${pipelineStep >= 3 ? ' pipeline-step--active' : ''}`}>
-                      <span className="pipeline-step-num">Step 3/3</span>
-                      <span className="pipeline-step-label">比較ダッシュボード準備</span>
-                      {pipelineStep === 3 && <span className="pipeline-step-spinner">⏳</span>}
-                    </div>
-                  </div>
-                  <p className="pipeline-status-text">{pipelineStatus}</p>
-                </div>
-              )}
-
-              {/* Pipeline Complete Card */}
-              {!isAutoPipelineRunning && pipelineStatus === '比較ダッシュボード準備完了' && lastPipeline && (
-                <div className="pipeline-complete-card">
-                  <p className="pipeline-complete-title">✅ パイプライン完了</p>
-                  <p className="pipeline-complete-stat">{lastPipeline.completedCount} バリアントをレンダリング</p>
-                  <p className="pipeline-complete-sub">比較できます</p>
-                </div>
-              )}
-
-              {/* Pipeline Failed Card */}
-              {!isAutoPipelineRunning && pipelineStatus === 'パイプライン失敗' && (
-                <div className="pipeline-failed-card">
-                  <p className="pipeline-failed-title">❌ パイプライン失敗</p>
-                  <p className="pipeline-failed-sub">レンダーログを確認してください</p>
-                </div>
-              )}
-
-              {/* 🧠 AI Variant Generator (Phase14-D) */}
-              <div className="ai-variant-generator">
-                <button
-                  className="btn-ai-generate-variants"
-                  onClick={generateAIVariants}
-                  disabled={isPipelineDisabled || isGeneratingVariants || !aiTheme.trim()}
-                >
-                  {isGeneratingVariants ? '🧠 生成中...' : '🧠 AIバリアント生成'}
-                </button>
-                {variantGenerateError && (
-                  <p className="variant-generate-error">{variantGenerateError}</p>
-                )}
-                {generatedVariants.length > 0 && (
-                  <div className="generated-variants-panel">
-                    <div className="generated-variants-header">
-                      <p className="generated-variants-title">生成済みバリアント</p>
-                      <div className="generated-variants-header-actions">
-                        <button
-                          className="btn-score-variants"
-                          onClick={scoreVariants}
-                          disabled={isPipelineDisabled || isScoringVariants || !aiTheme.trim()}
-                        >
-                          {isScoringVariants ? '📊 スコアリング中...' : '📊 スコアリング'}
-                        </button>
-                        <button
-                          className="btn-add-all-variants"
-                          onClick={addAllVariantsToQueue}
-                          disabled={isPipelineDisabled}
-                        >
-                          ＋ 全てキューに追加
-                        </button>
-                        <button
-                          className="btn-smart-queue"
-                          onClick={addSmartQueue}
-                          disabled={isPipelineDisabled || variantScores.length === 0}
-                        >
-                          ⚡ スマートキュー
-                        </button>
-                      </div>
-                    </div>
-                    {(() => {
-                      const candidateCount = variantScores.filter((s) => s.recommendation >= 4).length
-                      return variantScores.length > 0 ? (
-                        <div className="smart-queue-summary">
-                          <span>スマートキュー候補: <strong>{candidateCount}</strong></span>
-                          <span className="smart-queue-threshold">基準: 推奨度4以上</span>
-                        </div>
-                      ) : null
-                    })()}
-                    {smartQueueMessage && (
-                      <p className="smart-queue-message">{smartQueueMessage}</p>
-                    )}
-                    {variantScoreError && (
-                      <p className="variant-score-error">{variantScoreError}</p>
-                    )}
-                    <ul className="generated-variants-list">
-                      {generatedVariants.map((v, i) => {
-                        const sc = variantScores.find((s) => s.variantName === v.name || s.angle === v.angle)
-                        const isRecommended = sc ? sc.recommendation >= 4 : false
-                        return (
-                        <li key={i} className={`generated-variant-card${isRecommended ? ' generated-variant-card--recommended' : ''}`}>
-                          <div className="generated-variant-info">
-                            <span className="generated-variant-name">🧠 {v.name}</span>
-                            {isRecommended && <span className="variant-recommended-badge">⚡ 推奨</span>}
-                            <span className="generated-variant-desc">{v.description}</span>
-                          </div>
-                          {sc && (
-                              <div className="variant-score-panel">
-                                <p className="variant-score-title">AIスコア</p>
-                                <div className="variant-score-grid">
-                                  <span className="vs-label">推奨度</span><span className="vs-value">{sc.recommendation}/5</span>
-                                  <span className="vs-label">再生数</span><span className="vs-value">{sc.predictedViews}/5</span>
-                                  <span className="vs-label">保存率</span><span className="vs-value">{sc.savePotential}/5</span>
-                                  <span className="vs-label">CTA</span><span className="vs-value">{sc.ctaStrength}/5</span>
-                                </div>
-                                <p className="vs-reason">{sc.reason}</p>
-                              </div>
-                          )}
-                          <div className="generated-variant-actions">
-                            <button
-                              className="btn-add-variant-queue"
-                              onClick={() => addVariantToQueue(v.name)}
-                              disabled={isPipelineDisabled || renderQueue.some((q) => q.variantName === v.name)}
-                            >
-                              {renderQueue.some((q) => q.variantName === v.name) ? '✓' : '＋ キューに追加'}
-                            </button>
-                            {rewrittenStories[v.angle] ? (
-                              <button
-                                className="btn-rewrite-story btn-rewrite-story--regen"
-                                onClick={() => rewriteStory(v.angle)}
-                                disabled={isRewritingStory[v.angle] || isPipelineDisabled}
-                              >
-                                {isRewritingStory[v.angle] ? '🪄 リライト中...' : '🔄 再生成'}
-                              </button>
-                            ) : (
-                              <button
-                                className="btn-rewrite-story"
-                                onClick={() => rewriteStory(v.angle)}
-                                disabled={isRewritingStory[v.angle] || isPipelineDisabled || slides.length === 0}
-                              >
-                                {isRewritingStory[v.angle] ? '🪄 リライト中...' : '🪄 ストーリーリライト'}
-                              </button>
-                            )}
-                          </div>
-                          {rewriteStoryError[v.angle] && (
-                            <p className="rewrite-story-error">{rewriteStoryError[v.angle]}</p>
-                          )}
-                          {rewrittenStories[v.angle] && (
-                            <div className="story-preview">
-                              <div className="story-preview-header">
-                                <span className="story-preview-title">ストーリープレビュー</span>
-                                <button
-                                  className="btn-apply-story"
-                                  onClick={() => applyRewrittenStory(v.angle)}
-                                >
-                                  スライドに適用
-                                </button>
-                              </div>
-                              {rewrittenStories[v.angle].slice(0, 3).map((s, si) => (
-                                <div key={si} className="story-preview-slide">
-                                  {s.headline && <p className="sps-headline">{s.headline}</p>}
-                                  {s.subline   && <p className="sps-subline">{s.subline}</p>}
-                                  {s.emphasis  && <p className="sps-emphasis">{s.emphasis}</p>}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </li>
-                        )
-                      })}
-                    </ul>
-                  </div>
-                )}
-              </div>
-                </div>{/* advanced-panel-body */}
-              </details>
-
-              <div className="render-queue-top-actions">
-                <button
-                  className="btn-auto-generate"
-                  onClick={autoGenerateVariants}
-                  disabled={isPipelineDisabled}
-                >
-                  ✨ 自動生成
-                </button>
-                <button
-                  className="btn-add-queue"
-                  onClick={addToQueue}
-                  disabled={isPipelineDisabled}
-                >
-                  ＋ 追加
-                </button>
-              </div>
-              {autoGenerateNotice && (
-                <p className="auto-generate-notice">{autoGenerateNotice}</p>
-              )}
+              <RenderQueueTopActions
+                aiTheme={aiTheme}
+                renderQueueLength={renderQueue.length}
+                isPipelineDisabled={isPipelineDisabled}
+                autoGenerateNotice={autoGenerateNotice}
+                onAutoGenerateVariants={autoGenerateVariants}
+                onAddToQueue={addToQueue}
+              />
 
               <RenderQueuePanel
-                renderQueue={renderQueue}
-                expandedSnapshotIds={expandedSnapshotIds}
-                expandedDiffIds={expandedDiffIds}
-                rewriteExplainResults={rewriteExplainResults}
-                rewriteExplainLoadingIds={rewriteExplainLoadingIds}
-                rewriteExplainErrors={rewriteExplainErrors}
-                isBatchRendering={isBatchRendering}
-                isAutoPipelineRunning={isAutoPipelineRunning}
-                isPipelineDisabled={isPipelineDisabled}
-                canRender={renderPrecheck.canRender}
-                slides={slides}
-                onToggleSnapshotPreview={toggleSnapshotPreview}
-                onToggleDiffView={toggleDiffView}
-                onExplainRewrite={(item) => handleExplainRewrite(item, rewriteExplainResults[item.id] ? { force: true } : undefined)}
-                onRemoveFromQueue={removeFromQueue}
-                onBatchRender={batchRender}
-                onClearQueue={clearQueue}
-                renderDiffPanel={renderDiffPanel}
+                {...panelProps.renderQueuePanelProps}
               />
             </div>
             </>)}
@@ -8678,26 +2562,7 @@ export default function App() {
 
           {!simpleMode && (
           <div className="compare-dashboard" ref={compareDashboardRef}>
-            <CompareDashboardPanel
-              completedVariants={completedVariants}
-              lastPipeline={lastPipeline}
-              bestVariantId={bestVariantId}
-              bestVariantAnalysis={bestVariantAnalysis}
-              bestVariantAnalysisLoading={isAnalyzingBestVariant}
-              bestVariantAnalysisError={bestVariantAnalysisError}
-              expandedSnapshotIds={expandedSnapshotIds}
-              expandedDiffIds={expandedDiffIds}
-              rewriteExplainResults={rewriteExplainResults}
-              rewriteExplainLoadingIds={rewriteExplainLoadingIds}
-              rewriteExplainErrors={rewriteExplainErrors}
-              slides={slides}
-              onSelectBestVariant={selectBestVariant}
-              onAnalyzeBestVariant={analyzeBestVariant}
-              onToggleSnapshotPreview={toggleSnapshotPreview}
-              onToggleDiffView={toggleDiffView}
-              onExplainRewrite={(item) => handleExplainRewrite(item, rewriteExplainResults[item.id] ? { force: true } : undefined)}
-              renderDiffPanel={renderDiffPanel}
-            />
+            <CompareDashboardPanel {...panelProps.comparePanelProps} />
           </div>
           )}
 
@@ -8705,96 +2570,28 @@ export default function App() {
           <details className="advanced-panel">
             <summary className="advanced-panel-summary">📚 バリアント学習</summary>
             <div className="advanced-panel-body">
-          <div className="variant-learning-section">
-            <div className="variant-learning-header">
-              <p className="variant-learning-title">バリアント学習</p>
-              {variantLearningSummary.totalEvents > 0 && (
-                <button className="btn-clear-learning" onClick={clearLearningData}>
-                  学習データをリセット
-                </button>
-              )}
-            </div>
-            {variantLearningSummary.totalEvents === 0 ? (
-              <p className="variant-learning-empty">
-                スライドに適用 または ベスト選択を行うと学習データが蓄積されます。
-              </p>
-            ) : (
-              <>
-                <div className="vl-stats">
-                  <span className="vl-stat">合計: {variantLearningSummary.totalEvents}</span>
-                  <span className="vl-stat">適用: {variantLearningSummary.appliedCount}</span>
-                  <span className="vl-stat">ベスト選択: {variantLearningSummary.selectedBestCount}</span>
-                </div>
-                {variantLearningSummary.topAngles.length > 0 && (
-                  <div className="vl-top-angles">
-                    <p className="vl-subsection-title">よく選ばれたアングル</p>
-                    <ol className="vl-rank-list">
-                      {variantLearningSummary.topAngles.map((a, i) => (
-                        <li key={a.angle} className="vl-rank-item">
-                          <span className="vl-rank-num">{i + 1}.</span>
-                          <span className="vl-rank-label">{a.angle}</span>
-                          <span className="vl-rank-count">{a.count}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-                {variantLearningSummary.recentEvents.length > 0 && (
-                  <div className="vl-recent">
-                    <p className="vl-subsection-title">最近の学習</p>
-                    <ul className="vl-recent-list">
-                      {variantLearningSummary.recentEvents.map((e) => (
-                        <li key={e.id} className="vl-recent-item">
-                          <span className="vl-recent-date">
-                            {new Date(e.createdAt).toLocaleDateString('ja-JP')}
-                          </span>
-                          <span className="vl-recent-angle">{e.angle}</span>
-                          <span className="vl-recent-action">{e.action}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+              <VariantLearningPanel
+                variantLearningSummary={variantLearningSummary}
+                onClearLearningData={clearLearningData}
+              />
             </div>{/* advanced-panel-body */}
           </details>
           )}
 
-          {/* 生成履歴 */}
-          <div className="history-area" ref={historyAreaRef}>
-            <p className="history-title">生成履歴</p>
-            {historyError ? (
-              <p className="history-empty history-empty--error">生成履歴を取得できませんでした</p>
-            ) : history.length === 0 ? (
-              <p className="history-empty">生成履歴はまだありません</p>
-            ) : (
-              <ul className="history-list">
-                {history.map((item, i) => (
-                  <li key={item.filename} className="history-item">
-                    {i === 0 && <span className="history-newest-badge">最新</span>}
-                    <span className="history-date">{formatHistoryDate(item.createdAt)}</span>
-                    <span className="history-size">{formatSize(item.size)}</span>
-                    <a className="history-dl" href={item.downloadUrl} download={item.filename}>DL</a>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <GenerationHistoryPanel
+            ref={historyAreaRef}
+            history={history}
+            historyError={historyError}
+            formatHistoryDate={formatHistoryDate}
+            formatSize={formatSize}
+          />
 
           {!simpleMode && (
           <>
           <button
             className="btn-save-template"
-            onClick={() => {
-              setSaveTemplateName('')
-              setSaveTemplateCategory('other')
-              setSaveTemplateDescription('')
-              setSaveTemplateStatus('idle')
-              setSaveTemplateModal(true)
-            }}
-            disabled={isRendering || slides.length === 0}
+            onClick={openSaveTemplateModal}
+            disabled={isRendering || slideCount === 0}
           >
             テンプレートとして保存
           </button>
@@ -8815,70 +2612,26 @@ export default function App() {
       </div>
 
       {/* ── 中央パネル: プレビュー ── */}
-      <div className="panel panel-center">
-        <div className="panel-header">
-          <span className="panel-title">プレビュー</span>
-          {selectedSlide && (
-            <div className="preview-nav">
-              <button
-                className="nav-btn"
-                disabled={selectedIdx <= 0}
-                onClick={() => setSelectedId(slides[selectedIdx - 1].id)}
-              >
-                ←
-              </button>
-              <span className="nav-label">{selectedIdx + 1} / {slides.length}</span>
-              <button
-                className="nav-btn"
-                disabled={selectedIdx >= slides.length - 1}
-                onClick={() => setSelectedId(slides[selectedIdx + 1].id)}
-              >
-                →
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="preview-area">
-          {selectedSlide ? (
-            <SlidePreview slide={selectedSlide} ctaConfig={ctaConfig} />
-          ) : (
-            <div className="empty-state">スライドを選択してください</div>
-          )}
-        </div>
-      </div>
+      <PreviewWorkspace
+        selectedSlide={selectedSlide}
+        selectedSlideIndex={selectedSlideIndex}
+        slideCount={slideCount}
+        ctaConfig={ctaConfig}
+        slides={slides}
+        onSelectSlide={setSelectedId}
+      />
 
       {/* ── 右パネル: 編集フォーム ── */}
-      <div className="panel panel-right">
-        <div className="panel-header">
-          <span className="panel-title">
-            {selectedSlide?.layout === 'cta' ? 'CTA スライド編集' : '編集フォーム'}
-          </span>
-          {selectedSlide && (
-            <span className="panel-badge">#{selectedSlide.id}</span>
-          )}
-        </div>
-        {selectedSlide ? (
-          <>
-            {isRendering && (
-              <div className="render-lock-notice">
-                ⏳ 動画生成中のため、編集はロックされています。完了までお待ちください。
-              </div>
-            )}
-            <SlideForm
-              slide={selectedSlide}
-              onChange={(changes) => updateSlide(selectedSlide.id, changes)}
-              ctaConfig={ctaConfig}
-              onCtaChange={handleCtaChange}
-              disabled={isRendering}
-              onGenerateImage={selectedSlide.imagePrompt ? () => handleGenerateImage(selectedSlide.id, selectedSlide.imagePrompt!) : undefined}
-              isGeneratingImage={imageGeneratingId === selectedSlide.id}
-              generateImageError={imageGenerateErrors[selectedSlide.id]}
-            />
-          </>
-        ) : (
-          <div className="empty-state">スライドを選択してください</div>
-        )}
-      </div>
+      <SlideEditPanel
+        selectedSlide={selectedSlide}
+        ctaConfig={ctaConfig}
+        isRendering={isRendering}
+        imageGeneratingId={imageGeneratingId}
+        imageGenerateErrors={imageGenerateErrors}
+        onUpdateSlide={updateSlide}
+        onCtaChange={handleCtaChange}
+        onGenerateImage={handleGenerateImage}
+      />
     </div>
   )
 }

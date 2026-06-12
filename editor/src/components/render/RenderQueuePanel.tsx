@@ -23,50 +23,48 @@ type RewriteExplainResult = {
 }
 
 type RenderQueuePanelProps = {
-  renderQueue: RenderQueueItem[]
-  expandedSnapshotIds: string[]
-  expandedDiffIds: string[]
-  rewriteExplainResults: Record<string, RewriteExplainResult>
-  rewriteExplainLoadingIds: string[]
-  rewriteExplainErrors: Record<string, string>
-  isBatchRendering: boolean
-  isAutoPipelineRunning: boolean
-  isPipelineDisabled: boolean
-  canRender: boolean
-  slides: Slide[]
-  onToggleSnapshotPreview: (id: string) => void
-  onToggleDiffView: (id: string) => void
-  onExplainRewrite: (item: RenderQueueItem) => void
-  onRemoveFromQueue: (id: string) => void
-  onBatchRender: () => void
-  onClearQueue: () => void
-  renderDiffPanel: (currentSlides: Slide[], snapshotSlides: Slide[]) => React.ReactNode
+  queue: RenderQueueItem[]
+  runner: {
+    batchRender: () => void
+    isBatchRendering: boolean
+  }
+  actions: {
+    toggleSnapshotPreview: (id: string) => void
+    toggleDiffView: (id: string) => void
+    explainRewrite: (item: RenderQueueItem) => void
+    removeFromQueue: (id: string) => void
+    clearQueue: () => void
+  }
+  rewrite: {
+    results: Record<string, RewriteExplainResult>
+    loadingIds: string[]
+    errors: Record<string, string>
+  }
+  viewState: {
+    expandedSnapshotIds: string[]
+    expandedDiffIds: string[]
+  }
+  context: {
+    isAutoPipelineRunning: boolean
+    isPipelineDisabled: boolean
+    canRender: boolean
+    slides: Slide[]
+    renderDiffPanel: (currentSlides: Slide[], snapshotSlides: Slide[]) => React.ReactNode
+  }
 }
 
 export function RenderQueuePanel({
-  renderQueue,
-  expandedSnapshotIds,
-  expandedDiffIds,
-  rewriteExplainResults,
-  rewriteExplainLoadingIds,
-  rewriteExplainErrors,
-  isBatchRendering,
-  isAutoPipelineRunning,
-  isPipelineDisabled,
-  canRender,
-  slides,
-  onToggleSnapshotPreview,
-  onToggleDiffView,
-  onExplainRewrite,
-  onRemoveFromQueue,
-  onBatchRender,
-  onClearQueue,
-  renderDiffPanel,
+  queue,
+  runner,
+  actions,
+  rewrite,
+  viewState,
+  context,
 }: RenderQueuePanelProps) {
-  const canBatchRender = !isPipelineDisabled && canRender && renderQueue.some((q) => q.status === 'pending')
-  const canClearQueue = !isBatchRendering && !isAutoPipelineRunning && !renderQueue.every((q) => q.status === 'rendering')
+  const canBatchRender = !context.isPipelineDisabled && context.canRender && queue.some((q) => q.status === 'pending')
+  const canClearQueue = !runner.isBatchRendering && !context.isAutoPipelineRunning && !queue.every((q) => q.status === 'rendering')
 
-  if (renderQueue.length === 0) {
+  if (queue.length === 0) {
     return (
       <div className="render-queue-empty">
         <p className="render-queue-empty-title">生成待ちの動画はありません</p>
@@ -77,34 +75,34 @@ export function RenderQueuePanel({
 
   return (
     <>
-      <RenderQueueHeader renderQueue={renderQueue} />
+      <RenderQueueHeader renderQueue={queue} />
       <ul className="render-queue-list">
-        {renderQueue.map((q) => (
+        {queue.map((q) => (
           <RenderQueueItemCard
             key={q.id}
             item={q}
-            snapshotExpanded={expandedSnapshotIds.includes(q.id)}
-            diffExpanded={expandedDiffIds.includes(q.id)}
-            rewriteExplainResult={rewriteExplainResults[q.id]}
-            rewriteExplainLoading={rewriteExplainLoadingIds.includes(q.id)}
-            rewriteExplainError={rewriteExplainErrors[q.id]}
-            isBatchRendering={isBatchRendering}
-            isAutoPipelineRunning={isAutoPipelineRunning}
-            slides={slides}
-            onToggleSnapshot={() => onToggleSnapshotPreview(q.id)}
-            onToggleDiff={() => onToggleDiffView(q.id)}
-            onExplainRewrite={() => onExplainRewrite(q)}
-            onRemove={() => onRemoveFromQueue(q.id)}
-            renderDiffPanel={renderDiffPanel}
+            snapshotExpanded={viewState.expandedSnapshotIds.includes(q.id)}
+            diffExpanded={viewState.expandedDiffIds.includes(q.id)}
+            rewriteExplainResult={rewrite.results[q.id]}
+            rewriteExplainLoading={rewrite.loadingIds.includes(q.id)}
+            rewriteExplainError={rewrite.errors[q.id]}
+            isBatchRendering={runner.isBatchRendering}
+            isAutoPipelineRunning={context.isAutoPipelineRunning}
+            slides={context.slides}
+            onToggleSnapshot={() => actions.toggleSnapshotPreview(q.id)}
+            onToggleDiff={() => actions.toggleDiffView(q.id)}
+            onExplainRewrite={() => actions.explainRewrite(q)}
+            onRemove={() => actions.removeFromQueue(q.id)}
+            renderDiffPanel={context.renderDiffPanel}
           />
         ))}
       </ul>
       <RenderQueueActions
         canBatchRender={canBatchRender}
         canClearQueue={canClearQueue}
-        isBatchRendering={isBatchRendering}
-        onBatchRender={onBatchRender}
-        onClearQueue={onClearQueue}
+        isBatchRendering={runner.isBatchRendering}
+        onBatchRender={runner.batchRender}
+        onClearQueue={actions.clearQueue}
       />
     </>
   )

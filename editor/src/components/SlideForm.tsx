@@ -89,6 +89,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 const LAYOUTS: [SlideLayout, string][] = [
+  ['top', '上配置'],
   ['center', '中央配置'],
   ['bottom', '下配置'],
   ['cta', 'CTA'],

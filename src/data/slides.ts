@@ -1,6 +1,6 @@
 import slidesJson from "../../public/data/slides.json";
 
-export type SlideLayout = "center" | "bottom" | "cta";
+export type SlideLayout = "top" | "center" | "bottom" | "cta";
 
 export interface SlideData {
   id: number;
@@ -22,4 +22,5 @@ export interface SlideData {
 
 export const SLIDES: SlideData[] = slidesJson.slides as SlideData[];
 
-export const CTA_CONFIG: { qrImage: string } = (slidesJson as { cta?: { qrImage?: string } }).cta as { qrImage: string } ?? { qrImage: 'qr-singing.png' };
+const _ctaRaw = (slidesJson as { cta?: { qrImage?: string } }).cta;
+export const CTA_CONFIG: { qrImage: string } = { qrImage: _ctaRaw?.qrImage ?? 'qr-singing.png' };

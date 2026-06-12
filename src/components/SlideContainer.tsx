@@ -44,6 +44,7 @@ export const SlideContainer: React.FC<Props> = ({
   const bgScale = kenBurns(frame, durationInFrames, 1.07);
 
   // レイアウト別の縦位置
+  const isTop = slide.layout === "top";
   const isBottom = slide.layout === "bottom";
   const isCTA = slide.layout === "cta";
 
@@ -204,8 +205,9 @@ export const SlideContainer: React.FC<Props> = ({
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            justifyContent: isBottom ? "flex-end" : "center",
+            justifyContent: isBottom ? "flex-end" : isTop ? "flex-start" : "center",
             paddingBottom: isBottom ? 160 : 0,
+            paddingTop: isTop ? 220 : 0,
           }}
         >
           {slide.showRadar && <RadarChart frame={frame} size={360} />}

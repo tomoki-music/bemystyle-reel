@@ -13,6 +13,7 @@ type FactoryRunSectionProps = {
   factoryWarning?: string
   isPipelineDisabled: boolean
   hasTheme: boolean
+  reuseImageMode?: boolean
 
   onRunFactory: () => void
 }
@@ -52,6 +53,7 @@ export function FactoryRunSection({
   factoryWarning,
   isPipelineDisabled,
   hasTheme,
+  reuseImageMode,
   onRunFactory,
 }: FactoryRunSectionProps) {
   const remainingSec = (factoryCurrentImageIndex != null && factoryTotalImageCount != null)
@@ -65,13 +67,13 @@ export function FactoryRunSection({
 
   return (
     <>
-      <p className="factory-panel-desc">テーマ入力から Story → 画像生成 → Variant → Score → Rewrite → Queue を一括実行します。</p>
+      <p className="factory-panel-desc">テーマからStoryを生成し、動画を自動作成します。画像はアップロード済みのものを使用します。</p>
       <div className="factory-preconditions">
         <p className={`factory-precondition-item${hasTheme ? ' factory-precondition-item--ok' : ' factory-precondition-item--warn'}`}>
           {hasTheme ? '✅' : '⚠️'} テーマ入力済み
         </p>
         <p className="factory-precondition-item factory-precondition-item--info">
-          ℹ️ ストーリー・画像生成は自動実行（手動での事前操作不要）
+          ℹ️ Story生成は自動実行。画像は事前にアップロードしておくと反映されます。
         </p>
       </div>
       <button
@@ -111,8 +113,13 @@ export function FactoryRunSection({
             </div>
           )}
 
+          {/* Reuse cache mode message */}
+          {factoryStepNum === 2 && factoryStep.includes('キャッシュ') && (
+            <p className="factory-reuse-skip-note">🚀 画像生成をスキップ中 — 前回の画像を再利用しています</p>
+          )}
+
           {/* Image progress (AI mode only) */}
-          {factoryStepNum === 2 && !uploadMode && factoryCurrentImageIndex != null && factoryTotalImageCount != null && (
+          {factoryStepNum === 2 && !uploadMode && !factoryStep.includes('キャッシュ') && factoryCurrentImageIndex != null && factoryTotalImageCount != null && (
             <div className="factory-image-progress">
               <p className="factory-image-progress-count">
                 現在 <strong>{factoryCurrentImageIndex}</strong> / {factoryTotalImageCount} 枚目を生成しています
@@ -164,6 +171,9 @@ export function FactoryRunSection({
         <div className="factory-card factory-card--complete">
           <p className="factory-card-title">✅ 動画生成完了</p>
           <p className="factory-complete-sub">MP4の準備ができました</p>
+          {reuseImageMode && (
+            <p className="reuse-image-complete-note">⚡ 画像再利用で作成しました</p>
+          )}
           {factoryError && <p className="factory-notice">{factoryError}</p>}
         </div>
       )}

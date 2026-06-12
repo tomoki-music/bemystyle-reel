@@ -99,6 +99,7 @@ function SublineText({ text }: { text: string }) {
 export const SlidePreview: React.FC<Props> = ({ slide, ctaConfig }) => {
   const isCTA = slide.layout === 'cta'
   const isBottom = slide.layout === 'bottom'
+  const isTop = slide.layout === 'top'
 
   return (
     <div
@@ -248,8 +249,9 @@ export const SlidePreview: React.FC<Props> = ({ slide, ctaConfig }) => {
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              justifyContent: isBottom ? 'flex-end' : 'center',
+              justifyContent: isBottom ? 'flex-end' : isTop ? 'flex-start' : 'center',
               paddingBottom: isBottom ? 160 : 0,
+              paddingTop: isTop ? 220 : 0,
             }}
           >
             <HeadlineText text={slide.headline} emphasis={slide.emphasis} />

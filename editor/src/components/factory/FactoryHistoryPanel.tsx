@@ -248,7 +248,11 @@ export function FactoryHistoryPanel({
         onSelectedTagChange={(tag) => setSelectedTag((prev) => (prev === tag ? '' : tag))}
       />
       {factoryHistory.length === 0 ? (
-        <p className="factory-history-empty">AI自動作成の履歴がありません</p>
+        <div className="factory-history-empty-state">
+          <p className="factory-history-empty">まだテーマがありません。</p>
+          <p className="factory-history-empty-hint">まずは作りたい動画のテーマを1つ入れてみましょう。</p>
+          <p className="factory-history-empty-example">例：6月のMMMセッション会を紹介</p>
+        </div>
       ) : visibleFactoryHistory.length === 0 ? (
         <p className="factory-history-empty">該当する履歴がありません</p>
       ) : (

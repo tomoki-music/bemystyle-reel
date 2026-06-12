@@ -1,176 +1,174 @@
 {
-  "title": "小川町1DAYワーケーション",
+  "title": "MMMイベント告知",
   "slides": [
     {
       "id": 1,
+      "headline": "あなたは準備できてる？",
+      "subline": "特別な瞬間が待っている",
+      "image": "/assets/uploads/87370c0d-94aa-46a4-bae6-dc5fd61c2c07.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "あなたの歌声は？",
-      "subline": "自分を知るチャンス",
-      "emphasis": "歌声",
-      "image": "generated/ai-20260607-225524-ac0a1f5a.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style singer contemplating in a serene setting, cinematic lighting, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 2,
+      "headline": "新しい音楽の旅へ",
+      "subline": "心を動かすメロディ",
+      "image": "/assets/uploads/eba18b76-472c-4d3b-8601-f2fff68ccd52.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "才能を見つけよう",
-      "subline": "隠れた可能性がここに",
-      "emphasis": "才能",
-      "image": "generated/ai-20260607-225619-6c92afeb.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style musician discovering new notes, vibrant colors, cinematic lighting, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 3,
+      "headline": "仲間と共に",
+      "subline": "絆を深める瞬間",
+      "image": "/assets/uploads/5e1a424e-d980-464f-a2af-8254b07b558b.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "無料診断の魅力",
-      "subline": "気軽に試せる",
-      "emphasis": "無料",
-      "image": "generated/ai-20260607-225708-c2595606.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style character with a joyful expression holding a microphone, warm lighting, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 4,
+      "headline": "特別ゲストが登場！",
+      "subline": "期待が高まる",
+      "image": "/assets/uploads/efa0f9d8-9e32-48ff-96a0-83be72814692.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "あなたの未来が変わる",
-      "subline": "新たな挑戦を",
-      "emphasis": "未来",
-      "image": "generated/ai-20260607-225756-d969fe32.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style figure standing on a stage with a bright spotlight, hopeful atmosphere, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 5,
+      "headline": "感動のライブパフォーマンス",
+      "subline": "心に響く音楽",
+      "image": "/assets/uploads/d11cbe9b-7535-418e-a18c-88c9e5281c38.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "自信を持って歌おう",
-      "subline": "心の声を届けて",
-      "emphasis": "自信",
-      "image": "generated/ai-20260607-225848-ad14db3f.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style singer performing passionately on stage, vibrant colors, cinematic lighting, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 6,
+      "headline": "体験を共有しよう",
+      "subline": "SNSに投稿しよう",
+      "image": "/assets/uploads/747afd4a-bc86-4a31-a621-7144dfa5f3c1.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "仲間と共有しよう",
-      "subline": "共に成長する喜び",
-      "emphasis": "共に",
-      "image": "generated/ai-20260607-225944-159f7b53.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style group of friends singing together, joyful atmosphere, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 7,
+      "headline": "次のアーティストは誰？",
+      "subline": "サプライズが待っている",
+      "image": "/assets/uploads/37bf3426-f2b8-4dc2-ba4d-e80b0f6a77b8.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "フィードバックを受け取ろう",
-      "subline": "次のステップへ",
-      "emphasis": "フィードバック",
-      "image": "generated/ai-20260607-230047-35c417cd.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style character receiving advice from a mentor, warm lighting, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 8,
+      "headline": "思い出を作ろう",
+      "subline": "一生の宝物に",
+      "image": "/assets/uploads/e7dc7970-8e16-41df-a424-a30299288ea7.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "新しい自分を発見",
-      "subline": "驚きの体験",
-      "emphasis": "発見",
-      "image": "generated/ai-20260607-230133-9d6a426f.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style figure standing in front of a mirror with a confident smile, cinematic lighting, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 9,
+      "headline": "この瞬間を楽しもう",
+      "subline": "全力で楽しむ",
+      "image": "/assets/uploads/9e3bfeea-229e-44d5-99af-6285412734d7.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "楽しむことが大事",
-      "subline": "音楽で心を開こう",
-      "emphasis": "楽しむ",
-      "image": "generated/ai-20260607-230232-cd538724.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style character enjoying music in a colorful environment, vibrant colors, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 10,
+      "headline": "日時をお忘れなく！",
+      "subline": "特別な日が来る",
+      "image": "/assets/uploads/86625590-80e8-490d-a674-48cd2fa682c1.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "夢に向かって進もう",
-      "subline": "一歩を踏み出す",
-      "emphasis": "夢",
-      "image": "generated/ai-20260607-230254-02668bab.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style figure looking towards a bright horizon, hopeful atmosphere, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 11,
+      "headline": "参加登録はお早めに",
+      "subline": "席に限りあり",
+      "image": "/assets/uploads/1cd97d39-b5c7-4702-830c-7b45ad04866b.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "今がチャンス！",
-      "subline": "行動する時",
-      "emphasis": "チャンス",
-      "image": "generated/ai-20260607-230347-ec21ec30.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style character ready to step onto the stage with determination, cinematic lighting, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 12,
+      "headline": "友達を誘おう！",
+      "subline": "もっと楽しもう",
+      "image": "/assets/uploads/4a72205c-9737-44a7-b9a7-41edd6ff19ea.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "参加は簡単",
-      "subline": "リンクをチェック",
-      "emphasis": "簡単",
-      "image": "generated/ai-20260607-230437-34909181.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style character pointing towards a glowing link, warm lighting, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 13,
+      "headline": "音楽の魔法にかかる",
+      "subline": "心を一つに",
+      "image": "/assets/uploads/b26a40a0-f244-44f8-addb-093686129005.png",
       "durationSec": 3,
       "visible": true,
-      "headline": "あなたの声を届けよう",
-      "subline": "新しい扉が開く",
-      "emphasis": "声",
-      "image": "generated/ai-20260607-230528-b25bfb92.png",
       "layout": "bottom",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style figure singing with passion, colorful audience in the background, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     },
     {
       "id": 14,
-      "durationSec": 5,
+      "headline": "続きはプロフィールへ",
+      "subline": "",
+      "image": "/assets/uploads/c2645bd4-0172-42fd-adb3-15892545a986.png",
+      "durationSec": 3,
       "visible": true,
-      "headline": "成長の旅が始まる",
-      "subline": "一緒に歩もう",
-      "emphasis": "旅",
-      "image": "generated/ai-20260607-230623-7e4ea197.png",
       "layout": "cta",
       "showParticles": false,
-      "imagePrompt": "Elegant anime-style character walking on a path lined with musical notes, hopeful atmosphere, vertical 9:16 composition, no text"
+      "emphasis": "",
+      "imagePrompt": ""
     }
   ],
-  "cta": {
-    "qrImage": "qr-singing.png"
-  }
+  "cta": { "qrImage": "qr-singing.png" }
 }

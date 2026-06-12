@@ -26,31 +26,28 @@ function loadViewMode(): 'grid' | 'list' {
 
 // ── Props ───────────────────────────────────────────────────────────────────
 interface TemplateGalleryPanelProps {
-  templates: TemplateInfo[]
-  selectedTemplateId: string
-  isRendering: boolean
-  recentTemplateIds: string[]
-  usageMap: Record<string, number>
-  onConfirmLoadTemplate: (id: string) => void
-  onDuplicateTemplate: (id: string) => void
-  onToggleFavorite: (id: string, fav: boolean) => void
-  onDeleteTemplate: (id: string) => Promise<void>
-  onRenameTemplate: (id: string, name: string) => Promise<void>
+  gallery: {
+    templates: TemplateInfo[]
+    selectedTemplateId: string
+    isRendering: boolean
+    recentTemplateIds: string[]
+    usageMap: Record<string, number>
+  }
+  actions: {
+    confirmLoadTemplate: (id: string) => void
+    duplicateTemplate: (id: string) => void
+    toggleFavorite: (id: string, fav: boolean) => void
+    deleteTemplate: (id: string) => Promise<void>
+    renameTemplate: (id: string, name: string) => Promise<void>
+  }
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
 export function TemplateGalleryPanel({
-  templates,
-  selectedTemplateId,
-  isRendering,
-  recentTemplateIds,
-  usageMap,
-  onConfirmLoadTemplate,
-  onDuplicateTemplate,
-  onToggleFavorite,
-  onDeleteTemplate,
-  onRenameTemplate,
+  gallery,
+  actions,
 }: TemplateGalleryPanelProps) {
+  const { templates, selectedTemplateId, isRendering, recentTemplateIds, usageMap } = gallery
   const [templateSearch, setTemplateSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => loadViewMode())
@@ -70,7 +67,7 @@ export function TemplateGalleryPanel({
     if (!renameTemplateId || !renameTemplateName.trim()) return
     setRenameTemplateStatus('saving')
     try {
-      await onRenameTemplate(renameTemplateId, renameTemplateName.trim())
+      await actions.renameTemplate(renameTemplateId, renameTemplateName.trim())
       setRenameTemplateStatus('ok')
       setTimeout(() => {
         setRenameTemplateStatus('idle')
@@ -86,7 +83,7 @@ export function TemplateGalleryPanel({
   const handleDelete = async (id: string) => {
     setDeleteStatus('deleting')
     try {
-      await onDeleteTemplate(id)
+      await actions.deleteTemplate(id)
       setDeleteConfirmId(null)
       setDeleteStatus('idle')
     } catch {
@@ -249,7 +246,7 @@ export function TemplateGalleryPanel({
               <button
                 key={t.id}
                 className={`template-recent-btn${t.id === selectedTemplateId ? ' template-recent-btn--active' : ''}`}
-                onClick={() => !isRendering && onConfirmLoadTemplate(t.id)}
+                onClick={() => !isRendering && actions.confirmLoadTemplate(t.id)}
                 disabled={isRendering}
                 title={t.name}
               >
@@ -267,7 +264,7 @@ export function TemplateGalleryPanel({
               <button
                 key={t.id}
                 className="template-popular-item"
-                onClick={() => !isRendering && onConfirmLoadTemplate(t.id)}
+                onClick={() => !isRendering && actions.confirmLoadTemplate(t.id)}
                 disabled={isRendering}
               >
                 <span className="template-popular-rank">{i + 1}位</span>
@@ -309,7 +306,7 @@ export function TemplateGalleryPanel({
             <div key={t.id} className={`template-card${isLoaded ? ' template-card--active' : ''}`}>
               <button
                 className="template-card-thumb-btn"
-                onClick={() => !isRendering && onConfirmLoadTemplate(t.id)}
+                onClick={() => !isRendering && actions.confirmLoadTemplate(t.id)}
                 disabled={isRendering}
                 title={`${t.name} を読み込む`}
               >
@@ -323,7 +320,7 @@ export function TemplateGalleryPanel({
                 <div className="template-item-row">
                   <button
                     className={`template-fav-btn${t.favorite ? ' template-fav-btn--active' : ''}`}
-                    onClick={() => onToggleFavorite(t.id, !!t.favorite)}
+                    onClick={() => actions.toggleFavorite(t.id, !!t.favorite)}
                     disabled={isRendering}
                     title="お気に入り"
                   >
@@ -331,7 +328,7 @@ export function TemplateGalleryPanel({
                   </button>
                   <button
                     className="template-name-btn"
-                    onClick={() => !isRendering && onConfirmLoadTemplate(t.id)}
+                    onClick={() => !isRendering && actions.confirmLoadTemplate(t.id)}
                     disabled={isRendering}
                     title={t.name}
                   >
@@ -339,7 +336,7 @@ export function TemplateGalleryPanel({
                   </button>
                   <button
                     className="template-action-btn"
-                    onClick={() => onDuplicateTemplate(t.id)}
+                    onClick={() => actions.duplicateTemplate(t.id)}
                     disabled={isRendering}
                     title="複製"
                   >
