@@ -199,7 +199,7 @@ export function useStoryGenerator({
       const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId)
       const effectivePresetKey = simpleTemplateId === 'mmm-event' ? 'mmm_event' : selectedPresetKey
       const story = await generateStory(
-        aiTheme.trim(),
+        { theme: aiTheme.trim(), sourceType: 'theme' },
         effectivePresetKey,
         selectedCustomPreset
           ? {

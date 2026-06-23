@@ -367,7 +367,7 @@ export function useFactoryPipeline({
       addLog('[1/7] Story Generate 開始')
       const selectedCustomPreset = customPresets.find((p) => p.id === selectedCustomPresetId)
       const story = await generateStory(
-        themeForRun,
+        { theme: themeForRun, sourceType: 'theme' },
         selectedPresetKey,
         selectedCustomPreset
           ? {

@@ -165,7 +165,7 @@ export function useMassMode({ addToRenderQueue }: UseMassModeOptions) {
       setMassThemes(prev => prev.map(i => i.id === item.id ? { ...i, status: 'running', resultMessage: 'Story生成中...' } : i))
       let story: GeneratedStory
       try {
-        story = await generateStory(buildMassThemeText(item), getMassPresetKey(item.templateType), null)
+        story = await generateStory({ theme: buildMassThemeText(item), sourceType: 'theme' }, getMassPresetKey(item.templateType), null)
       } catch (err) {
         setMassThemes(prev => prev.map(i => i.id === item.id ? {
           ...i, status: 'failed', resultMessage: err instanceof Error ? err.message : 'Story生成エラー',
@@ -268,7 +268,7 @@ export function useMassMode({ addToRenderQueue }: UseMassModeOptions) {
     setMassStoryPreviewId(null)
     setMassThemes(prev => prev.map(i => i.id === id ? { ...i, status: 'running', resultMessage: undefined, storyResult: undefined } : i))
     try {
-      const story = await generateStory(buildMassThemeText(item), getMassPresetKey(item.templateType), null)
+      const story = await generateStory({ theme: buildMassThemeText(item), sourceType: 'theme' }, getMassPresetKey(item.templateType), null)
       setMassThemes(prev => prev.map(i => i.id === id ? { ...i, status: 'completed', resultMessage: 'Story生成完了', storyResult: story } : i))
     } catch (err) {
       setMassThemes(prev => prev.map(i => i.id === id ? { ...i, status: 'failed', resultMessage: err instanceof Error ? err.message : '不明なエラー' } : i))
