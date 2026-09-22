@@ -1,0 +1,160 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { EventEmitter } from 'events'
+import { runFfprobe, extractAudio, burnCaptions } from './ffmpegRunner.mjs'
+
+// vi.mock による child_process の丸ごと差し替えは、このプロジェクトの
+// vitest/vite-node 環境では組み込みモジュールに対して確実に効かないことが
+// 確認できたため（実際の ffmpeg/ffprobe が起動してしまう）、各関数が受け付ける
+// `spawnFn` 依存性注入を使ってフェイクを渡す方式でテストする。
+
+const mockSpawn = vi.fn()
+
+class FakeChild extends EventEmitter {
+  constructor() {
+    super()
+    this.stdout = new EventEmitter()
+    this.stderr = new EventEmitter()
+    this.killed = false
+  }
+  kill(signal) {
+    this.killed = true
+    this.lastSignal = signal
+  }
+}
+
+beforeEach(() => {
+  mockSpawn.mockReset()
+})
+
+describe('runFfprobe', () => {
+  it('正常終了時にメタデータを解決する', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockImplementation((cmd, args) => {
+      expect(cmd).toBe('ffprobe')
+      expect(args).toContain('/videos/in.mp4')
+      // shell:true を使っていないことの確認（argv配列であること）
+      expect(Array.isArray(args)).toBe(true)
+      return child
+    })
+
+    const promise = runFfprobe('/videos/in.mp4', { spawnFn: mockSpawn })
+    const json = JSON.stringify({
+      format: { duration: '10', format_name: 'mp4' },
+      streams: [{ codec_type: 'video', codec_name: 'h264', width: 100, height: 200, duration: '10' }],
+    })
+    child.stdout.emit('data', Buffer.from(json))
+    child.emit('close', 0)
+
+    const result = await promise
+    expect(result.width).toBe(100)
+    expect(result.height).toBe(200)
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('非ゼロ終了コードで失敗する', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockReturnValue(child)
+    const promise = runFfprobe('/videos/in.mp4', { spawnFn: mockSpawn })
+    child.stderr.emit('data', Buffer.from('boom'))
+    child.emit('close', 1)
+    await expect(promise).rejects.toThrow(/ffprobeが終了コード1.*boom/)
+  })
+
+  it('spawn自体が失敗した場合も拒否する', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockReturnValue(child)
+    const promise = runFfprobe('/videos/in.mp4', { spawnFn: mockSpawn })
+    child.emit('error', new Error('not found'))
+    await expect(promise).rejects.toThrow(/ffprobe起動エラー/)
+  })
+})
+
+describe('extractAudio', () => {
+  it('argv形式でffmpegを呼び、成功時にresolveする', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockImplementation((cmd, args) => {
+      expect(cmd).toBe('ffmpeg')
+      expect(args).toEqual([
+        '-y', '-i', '/videos/in.mp4', '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k', '-f', 'mp3', '/tmp/out.mp3',
+      ])
+      return child
+    })
+    const promise = extractAudio('/videos/in.mp4', '/tmp/out.mp3', { spawnFn: mockSpawn })
+    child.emit('close', 0)
+    await expect(promise).resolves.toBeUndefined()
+  })
+
+  it('失敗時にreject する', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockReturnValue(child)
+    const promise = extractAudio('/videos/in.mp4', '/tmp/out.mp3', { spawnFn: mockSpawn })
+    child.emit('close', 1)
+    await expect(promise).rejects.toThrow(/音声抽出に失敗/)
+  })
+})
+
+describe('burnCaptions', () => {
+  it('progressコールバックが呼ばれ、成功時にresolveする', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockImplementation((cmd, args) => {
+      expect(cmd).toBe('ffmpeg')
+      expect(args).toContain('-vf')
+      const vfIndex = args.indexOf('-vf')
+      expect(args[vfIndex + 1]).toMatch(/^ass=/)
+      // 独自のtranspose/rotateフィルタを追加していないこと
+      expect(args[vfIndex + 1]).not.toMatch(/transpose|rotate/)
+      return child
+    })
+    const progresses = []
+    let spawnedChild = null
+    const promise = burnCaptions({
+      sourceRealPath: '/videos/in.mp4',
+      assPath: '/tmp/x.ass',
+      outputPath: '/out/result.mp4',
+      durationSec: 10,
+      onProgress: (p) => progresses.push(p),
+      onSpawn: (c) => { spawnedChild = c },
+      spawnFn: mockSpawn,
+    })
+    expect(spawnedChild).toBe(child)
+    child.stdout.emit('data', Buffer.from('out_time=00:00:05.000000\n'))
+    child.emit('close', 0)
+    await promise
+    expect(progresses).toContain(50)
+    expect(progresses[progresses.length - 1]).toBe(100)
+  })
+
+  it('SIGTERMでキャンセルされた場合はcanceled=trueのエラーでrejectする', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockReturnValue(child)
+    const promise = burnCaptions({
+      sourceRealPath: '/videos/in.mp4',
+      assPath: '/tmp/x.ass',
+      outputPath: '/out/result.mp4',
+      durationSec: 10,
+      spawnFn: mockSpawn,
+    })
+    child.emit('close', null, 'SIGTERM')
+    await expect(promise).rejects.toMatchObject({ canceled: true })
+  })
+
+  it('失敗時（シグナルなし）はcanceledフラグを立てずにrejectする', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockReturnValue(child)
+    const promise = burnCaptions({
+      sourceRealPath: '/videos/in.mp4',
+      assPath: '/tmp/x.ass',
+      outputPath: '/out/result.mp4',
+      durationSec: 10,
+      spawnFn: mockSpawn,
+    })
+    child.emit('close', 1, null)
+    await expect(promise).rejects.toThrow(/レンダーに失敗しました/)
+    try {
+      await promise
+      expect.unreachable()
+    } catch (err) {
+      expect(err.canceled).toBeFalsy()
+    }
+  })
+})

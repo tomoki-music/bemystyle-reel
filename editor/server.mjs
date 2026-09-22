@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url'
 import multer from 'multer'
 import { randomUUID } from 'crypto'
 import { spawn } from 'child_process'
+import { createLocalCaptionVideoRouter } from './server/localCaptionVideoRoutes.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SLIDES_PATH = resolve(__dirname, '../public/data/slides.json')
@@ -17,6 +18,8 @@ const AUDIO_DIR = resolve(__dirname, '../public/assets/audio')
 const BGM_PATH = resolve(AUDIO_DIR, 'bgm.mp3')
 const OUT_DIR = resolve(__dirname, '../out')
 const REELS_DIR = resolve(OUT_DIR, 'reels')
+// ローカルAIテロップ動画機能: ジョブは1件1JSONファイルでここに永続化する（DBは使わない）
+const LOCAL_CAPTION_VIDEOS_DIR = resolve(__dirname, 'data/local_caption_videos')
 const LATEST_FILE = resolve(OUT_DIR, 'reel.mp4')
 const ROOT_DIR = resolve(__dirname, '..')
 const REEL_AI_MODE = process.env.REEL_AI_MODE || 'real'
@@ -62,6 +65,7 @@ mkdirSync(GENERATED_DIR, { recursive: true })
 mkdirSync(REELS_DIR, { recursive: true })
 mkdirSync(TEMPLATES_DIR, { recursive: true })
 mkdirSync(AUDIO_DIR, { recursive: true })
+mkdirSync(LOCAL_CAPTION_VIDEOS_DIR, { recursive: true })
 
 function ensureMockImage() {
   if (existsSync(MOCK_IMAGE_PATH)) return
@@ -251,6 +255,10 @@ app.use(express.json({ limit: '10mb' }))
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, message: 'editor api server is running' })
 })
+
+// ── ローカルAIテロップ動画機能（追加機能・既存ロジックには影響しない） ──
+// 実装本体は server/localCaptionVideoRoutes.mjs と server/lib/*.mjs に分離。
+app.use('/api/local-caption-videos', createLocalCaptionVideoRouter({ jobsDir: LOCAL_CAPTION_VIDEOS_DIR }))
 
 app.get('/api/reel-ai-config', (_req, res) => {
   res.json({

@@ -53,6 +53,7 @@ import { SnsCaptionPanel } from './components/posting/SnsCaptionPanel'
 import { EventPostManagementPanel } from './components/posting/EventPostManagementPanel'
 import { useEventPosting } from './components/factory/useEventPosting'
 import { PostEditPanel } from './components/editor/PostEditPanel'
+import { LocalCaptionVideoMode } from './components/localCaption/LocalCaptionVideoMode'
 
 type AIPreset = {
   key: AIPresetKey
@@ -64,6 +65,14 @@ type AIPreset = {
 type RenderStatus = "none" | "completed" | "failed"
 
 const USE_WIZARD_MODE = true
+
+// ローカルAIテロップ動画（β・追加機能）: ?mode=local-caption で既存UIをバイパスして表示する。
+// 既存のwizard/factoryロジックには一切手を入れず、完全に独立した画面を差し込むだけ。
+const LOCAL_CAPTION_VIDEO_MODE_PARAM = 'local-caption'
+function isLocalCaptionVideoModeRequested(): boolean {
+  if (typeof window === 'undefined') return false
+  return new URLSearchParams(window.location.search).get('mode') === LOCAL_CAPTION_VIDEO_MODE_PARAM
+}
 
 
 function renderInlineDiff(
@@ -1371,6 +1380,11 @@ export default function App() {
       </div>
     </div>
   )
+
+  // ローカルAIテロップ動画モード（追加機能）。既存の読み込み状態より優先して表示する。
+  if (isLocalCaptionVideoModeRequested()) {
+    return <LocalCaptionVideoMode />
+  }
 
   if (loading) {
     return (
