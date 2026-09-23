@@ -12,6 +12,19 @@ import { statSync } from 'fs'
 import { parseFfprobeOutput } from './ffprobeParser.mjs'
 import { escapePathForFfmpegFilter } from './assText.mjs'
 
+// 環境によっては標準の `ffmpeg` に libass (ass字幕フィルタ) が組み込まれていない
+// ことがある（例: Homebrewの通常ffmpeg formulaはlibassを含まない）。その場合、
+// FFMPEG_BIN / FFPROBE_BIN 環境変数で libass 入りのビルド（例: ffmpeg-full）への
+// 絶対パスを指定できるようにする。未指定時は従来どおりPATH上の `ffmpeg`/`ffprobe`。
+function getFfmpegBin() {
+  const v = process.env.FFMPEG_BIN
+  return typeof v === 'string' && v.trim() ? v.trim() : 'ffmpeg'
+}
+function getFfprobeBin() {
+  const v = process.env.FFPROBE_BIN
+  return typeof v === 'string' && v.trim() ? v.trim() : 'ffprobe'
+}
+
 /**
  * ffprobe を実行し、正規化済みメタデータを返す。
  * @param {string} sourceRealPath 検証済み・realpath 済みの動画パス
@@ -20,7 +33,7 @@ import { escapePathForFfmpegFilter } from './assText.mjs'
 export function runFfprobe(sourceRealPath, deps = {}) {
   const spawnFn = deps.spawnFn ?? realSpawn
   return new Promise((resolvePromise, reject) => {
-    const child = spawnFn('ffprobe', [
+    const child = spawnFn(getFfprobeBin(), [
       '-v', 'error',
       '-print_format', 'json',
       '-show_format',
@@ -57,7 +70,7 @@ export function runFfprobe(sourceRealPath, deps = {}) {
 export function extractAudio(sourceRealPath, outAudioPath, deps = {}) {
   const spawnFn = deps.spawnFn ?? realSpawn
   return new Promise((resolvePromise, reject) => {
-    const child = spawnFn('ffmpeg', [
+    const child = spawnFn(getFfmpegBin(), [
       '-y',
       '-i', sourceRealPath,
       '-vn',
@@ -103,7 +116,7 @@ export function burnCaptions({ sourceRealPath, assPath, outputPath, durationSec,
   const doSpawn = spawnFn ?? realSpawn
   return new Promise((resolvePromise, reject) => {
     const escapedAssPath = escapePathForFfmpegFilter(assPath)
-    const child = doSpawn('ffmpeg', [
+    const child = doSpawn(getFfmpegBin(), [
       '-y',
       '-i', sourceRealPath,
       '-vf', `ass=${escapedAssPath}`,
@@ -151,6 +164,60 @@ export function burnCaptions({ sourceRealPath, assPath, outputPath, durationSec,
         return
       }
       if (typeof onProgress === 'function') onProgress(100)
+      resolvePromise()
+    })
+  })
+}
+
+/**
+ * 短時間プレビュー用: 元動画の一部区間だけを字幕焼き込みしてレンダリングする。
+ * 元動画ファイルは一切変更しない（ffmpegには読み取り専用で渡す）。
+ * `-ss` を `-i` の前に置く高速シークを使うため、出力先の映像は startSec を
+ * 0秒として書き出される（渡す ASS 側の時刻もそれに合わせて0基準へシフト
+ * 済みであることが前提）。
+ *
+ * @param {{
+ *   sourceRealPath: string,
+ *   assPath: string,
+ *   outputPath: string,
+ *   startSec: number,
+ *   clipDurationSec: number,
+ *   onSpawn?: (child: import('child_process').ChildProcess) => void,
+ *   spawnFn?: typeof realSpawn,
+ * }} params
+ * @returns {Promise<void>}
+ */
+export function renderPreviewClip({ sourceRealPath, assPath, outputPath, startSec, clipDurationSec, onSpawn, spawnFn }) {
+  const doSpawn = spawnFn ?? realSpawn
+  return new Promise((resolvePromise, reject) => {
+    const escapedAssPath = escapePathForFfmpegFilter(assPath)
+    const child = doSpawn(getFfmpegBin(), [
+      '-y',
+      '-ss', String(Math.max(0, startSec)),
+      '-i', sourceRealPath,
+      '-t', String(Math.max(0.1, clipDurationSec)),
+      '-vf', `ass=${escapedAssPath}`,
+      '-c:v', 'libx264',
+      '-c:a', 'aac',
+      '-movflags', '+faststart',
+      '-nostats',
+      outputPath,
+    ])
+
+    if (typeof onSpawn === 'function') onSpawn(child)
+
+    let stderr = ''
+    child.stderr.on('data', (d) => { stderr += d.toString() })
+    child.on('error', (err) => reject(new Error(`ffmpeg(プレビュー)起動エラー: ${err.message}`)))
+    child.on('close', (code, signal) => {
+      if (signal) {
+        reject(Object.assign(new Error(`プレビューがシグナル${signal}で中断されました`), { canceled: true }))
+        return
+      }
+      if (code !== 0) {
+        reject(new Error(`プレビューの生成に失敗しました（ffmpeg終了コード${code}）: ${stderr.slice(0, 500)}`))
+        return
+      }
       resolvePromise()
     })
   })

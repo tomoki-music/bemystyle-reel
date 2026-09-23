@@ -9,7 +9,7 @@ import {
   realpathSync,
 } from 'fs'
 import { tmpdir } from 'os'
-import { join, resolve } from 'path'
+import { join, resolve, basename } from 'path'
 import fetch from 'node-fetch'
 import { JobStore } from './lib/jobStore.mjs'
 
@@ -17,10 +17,12 @@ import { JobStore } from './lib/jobStore.mjs'
 const mockRunFfprobe = vi.fn()
 const mockExtractAudio = vi.fn()
 const mockBurnCaptions = vi.fn()
+const mockRenderPreviewClip = vi.fn()
 vi.mock('./lib/ffmpegRunner.mjs', () => ({
   runFfprobe: (...a) => mockRunFfprobe(...a),
   extractAudio: (...a) => mockExtractAudio(...a),
   burnCaptions: (...a) => mockBurnCaptions(...a),
+  renderPreviewClip: (...a) => mockRenderPreviewClip(...a),
   getFileSize: () => 1000,
 }))
 
@@ -30,6 +32,15 @@ vi.mock('./lib/openaiTranscription.mjs', async (importOriginal) => {
   return {
     ...actual,
     transcribeAudioFile: (...a) => mockTranscribeAudioFile(...a),
+  }
+})
+
+const mockClassifyJobCaptions = vi.fn()
+vi.mock('./lib/captionClassifier.mjs', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    classifyJobCaptions: (...a) => mockClassifyJobCaptions(...a),
   }
 })
 
@@ -95,11 +106,34 @@ afterAll(async () => {
   rmSync(base, { recursive: true, force: true })
 })
 
+async function createReadyJob(filename = 'sample.mp4') {
+  writeFileSync(resolve(inputRoot, filename), 'dummy-bytes-not-a-real-video')
+  const createRes = await fetch(baseUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourcePath: resolve(inputRoot, filename) }),
+  })
+  const { job } = await createRes.json()
+  return waitForJob(job.id, (j) => j.status === 'ready_for_edit')
+}
+
+async function addCaption(jobId, { startSec, endSec, text, captionType }) {
+  const res = await fetch(`${baseUrl}/${jobId}/captions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ startSec, endSec, text, captionType }),
+  })
+  const data = await res.json()
+  return data.job
+}
+
 beforeEach(() => {
   mockRunFfprobe.mockReset()
   mockExtractAudio.mockReset()
   mockBurnCaptions.mockReset()
+  mockRenderPreviewClip.mockReset()
   mockTranscribeAudioFile.mockReset()
+  mockClassifyJobCaptions.mockReset()
   mockRunFfprobe.mockResolvedValue({
     durationSec: 10,
     width: 1080,
@@ -394,5 +428,204 @@ describe('POST /api/local-caption-videos/:id/start-processing (Whisper文字起�
     } finally {
       saveSpy.mockRestore()
     }
+  })
+})
+
+describe('POST /api/local-caption-videos/:id/classify-captions (AI自動分類)', () => {
+  it('字幕が1件も無ければ400、classifyJobCaptionsは呼ばれない', async () => {
+    const job = await createReadyJob('classify-empty.mp4')
+    const res = await fetch(`${baseUrl}/${job.id}/classify-captions`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect(mockClassifyJobCaptions).not.toHaveBeenCalled()
+  })
+
+  it('成功時: captionTypeとcaptionClassificationがジョブへ保存される', async () => {
+    const job = await createReadyJob('classify-ok.mp4')
+    const c1 = await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+    const capId = c1.captions[0].id
+    await addCaption(job.id, { startSec: 2, endSec: 4, text: 'b', captionType: 'normal' })
+
+    mockClassifyJobCaptions.mockResolvedValue({
+      ok: true,
+      captions: [
+        { id: capId, startSec: 0, endSec: 2, text: 'a', captionType: 'main', emphasisText: null, displayOrder: 0 },
+        { id: 'irrelevant', startSec: 2, endSec: 4, text: 'b', captionType: 'sub', emphasisText: null, displayOrder: 1 },
+      ],
+      classification: { model: 'gpt-4o-mini', classifiedAt: '2026-01-01T00:00:00Z', version: 1, batchCount: 1, requestCount: 1, batchSize: 42 },
+      typeCounts: { normal: 0, main: 1, sub: 1, emphasis: 0, heading: 0, annotation: 0 },
+      requestCount: 1,
+      totalBatches: 1,
+    })
+
+    const res = await fetch(`${baseUrl}/${job.id}/classify-captions`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.ok).toBe(true)
+    expect(data.requestCount).toBe(1)
+    expect(data.job.captionClassification.model).toBe('gpt-4o-mini')
+
+    const reloaded = await (await fetch(`${baseUrl}/${job.id}`)).json()
+    expect(reloaded.job.captionClassification).toBeTruthy()
+  })
+
+  it('batchSizeを指定するとclassifyJobCaptionsへ転送される(問題のあるバッチサイズを避けて再実行できる)', async () => {
+    const job = await createReadyJob('classify-batchsize.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+
+    mockClassifyJobCaptions.mockResolvedValue({
+      ok: true,
+      captions: [],
+      classification: { model: 'gpt-4o-mini', classifiedAt: '2026-01-01T00:00:00Z', version: 1, batchCount: 1, requestCount: 1, batchSize: 29 },
+      typeCounts: {},
+      requestCount: 1,
+      totalBatches: 1,
+    })
+
+    await fetch(`${baseUrl}/${job.id}/classify-captions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batchSize: 29 }),
+    })
+    expect(mockClassifyJobCaptions).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ batchSize: 29 })
+    )
+  })
+
+  it('範囲外のbatchSize指定は無視され既定値が使われる', async () => {
+    const job = await createReadyJob('classify-batchsize-invalid.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+
+    mockClassifyJobCaptions.mockResolvedValue({ ok: true, captions: [], classification: {}, typeCounts: {}, requestCount: 0, totalBatches: 0 })
+
+    await fetch(`${baseUrl}/${job.id}/classify-captions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batchSize: 99999 }),
+    })
+    const passedOptions = mockClassifyJobCaptions.mock.calls[mockClassifyJobCaptions.mock.calls.length - 1][2]
+    expect(passedOptions.batchSize).toBeUndefined()
+  })
+
+  it('既に分類済み・forceなしの場合は409を返しAPIは呼ばれた形跡だけ記録される(再課金確認なしで進めない)', async () => {
+    const job = await createReadyJob('classify-already.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+
+    mockClassifyJobCaptions.mockResolvedValue({
+      ok: false,
+      reason: 'already_classified',
+      classification: { model: 'gpt-4o-mini', classifiedAt: '2026-01-01T00:00:00Z', version: 1 },
+    })
+
+    const res = await fetch(`${baseUrl}/${job.id}/classify-captions`, { method: 'POST' })
+    expect(res.status).toBe(409)
+    const data = await res.json()
+    expect(data.reason).toBe('already_classified')
+
+    // ジョブJSON自体は書き換わっていない(captionClassificationが新規保存されていない)
+    const reloaded = await (await fetch(`${baseUrl}/${job.id}`)).json()
+    expect(reloaded.job.captionClassification).toBeUndefined()
+  })
+
+  it('検証エラー時は502を返し、既存captionTypeは変更されない', async () => {
+    const job = await createReadyJob('classify-invalid.mp4')
+    const before = await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+
+    mockClassifyJobCaptions.mockResolvedValue({
+      ok: false,
+      reason: 'validation_error',
+      failedBatchIndex: 0,
+      totalBatches: 1,
+      requestCount: 1,
+      missingCount: 1,
+      unknownCount: 2,
+      duplicateCount: 3,
+      invalidTypeCount: 4,
+    })
+
+    const res = await fetch(`${baseUrl}/${job.id}/classify-captions`, { method: 'POST' })
+    expect(res.status).toBe(502)
+    const errData = await res.clone().json()
+    // 検証エラーの内訳がレスポンスへ転送されること(診断のために必須)
+    expect(errData.missingCount).toBe(1)
+    expect(errData.unknownCount).toBe(2)
+    expect(errData.duplicateCount).toBe(3)
+    expect(errData.invalidTypeCount).toBe(4)
+
+    const reloaded = await (await fetch(`${baseUrl}/${job.id}`)).json()
+    expect(reloaded.job.captions[0].captionType).toBe(before.captions[0].captionType)
+    expect(reloaded.job.captionClassification).toBeUndefined()
+  })
+})
+
+describe('POST /api/local-caption-videos/:id/preview-render (短時間プレビュー)', () => {
+  it('字幕が1件も無ければ400', async () => {
+    const job = await createReadyJob('preview-empty.mp4')
+    const res = await fetch(`${baseUrl}/${job.id}/preview-render`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect(mockRenderPreviewClip).not.toHaveBeenCalled()
+  })
+
+  it('main/sub/emphasisを含む区間が無い場合はsynthetic(ダミー)データにフォールバックして生成する', async () => {
+    const job = await createReadyJob('preview-fallback.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'normal only', captionType: 'normal' })
+
+    mockRenderPreviewClip.mockImplementation(async ({ outputPath }) => {
+      writeFileSync(outputPath, 'fake-preview-bytes')
+    })
+
+    const res = await fetch(`${baseUrl}/${job.id}/preview-render`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.ok).toBe(true)
+    expect(data.previewWindow.synthetic).toBe(true)
+    expect(data.previewWindow.durationSec).toBeGreaterThanOrEqual(30)
+    expect(data.sourceUnchanged).toBe(true)
+    expect(data.job.previewOutputPath).toBeTruthy()
+    // 出力ファイル名に元動画名を含まない
+    expect(basename(data.job.previewOutputPath)).not.toMatch(/preview-fallback/)
+  })
+
+  it('出力先は VIDEO_OUTPUT_ROOT 配下で、-ss/-t のargvがrenderPreviewClipへ渡る', async () => {
+    // このジョブは実際の動画長を40秒として扱う(captionは32秒までしか無いが、
+    // 動画自体はcaptionの最後より後まで続くのが普通なので、その分も候補に含める)。
+    mockRunFfprobe.mockResolvedValueOnce({
+      durationSec: 40,
+      width: 1080,
+      height: 1920,
+      rotation: 0,
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+      container: 'mp4',
+      hasAudio: true,
+    })
+    const job = await createReadyJob('preview-args.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 10, text: 'main', captionType: 'main' })
+    await addCaption(job.id, { startSec: 10, endSec: 20, text: 'sub', captionType: 'sub' })
+    await addCaption(job.id, { startSec: 20, endSec: 32, text: 'emphasis', captionType: 'emphasis' })
+
+    mockRenderPreviewClip.mockImplementation(async ({ outputPath, startSec, clipDurationSec }) => {
+      expect(startSec).toBe(0)
+      expect(clipDurationSec).toBeGreaterThanOrEqual(30)
+      writeFileSync(outputPath, 'fake-preview-bytes')
+    })
+
+    const res = await fetch(`${baseUrl}/${job.id}/preview-render`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(resolve(data.job.previewOutputPath, '..')).toBe(outputRoot)
+    expect(data.previewWindow.synthetic).toBe(false)
+  })
+
+  it('レンダー失敗時は元動画・ジョブcaptionsに影響を与えず502を返す', async () => {
+    const job = await createReadyJob('preview-fail.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'normal only', captionType: 'normal' })
+    mockRenderPreviewClip.mockRejectedValue(new Error('boom'))
+
+    const res = await fetch(`${baseUrl}/${job.id}/preview-render`, { method: 'POST' })
+    expect(res.status).toBe(502)
+    const reloaded = await (await fetch(`${baseUrl}/${job.id}`)).json()
+    expect(reloaded.job.previewOutputPath).toBeFalsy()
   })
 })

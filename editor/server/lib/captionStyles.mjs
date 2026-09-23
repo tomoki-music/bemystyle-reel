@@ -21,10 +21,12 @@ export function getFontFamily() {
 // ASS カラーは &HAABBGGRR& 形式（アルファ, 青, 緑, 赤）。
 const COLOR = {
   white: '&H00FFFFFF&',
+  paleGray: '&H00D9D9D9&', // sub用の白〜淡いグレー
   black: '&H00000000&',
   yellow: '&H0000FFFF&', // R255 G255 B0
-  highlight: '&H0000A5FF&', // オレンジ (R255 G165 B0)
+  highlight: '&H0000A5FF&', // オレンジ (R255 G165 B0) - emphasisのアクセント色
   transparentBlack60: '&H60000000&',
+  brand: '&H00FC84C0&', // エディタUIのアクセント色 #c084fc を流用 (main用ブランドカラー)
 }
 
 /**
@@ -63,13 +65,14 @@ function buildStyleDefs(displayWidth, displayHeight) {
     },
     main: {
       name: 'Main',
-      fontsize: Math.max(22, Math.round(shortSide * 0.068)),
-      primaryColour: COLOR.yellow,
-      outlineColour: COLOR.black,
-      backColour: COLOR.black,
+      // normalより少し大きい程度に留め、画面を覆いすぎないようにする。
+      fontsize: Math.max(22, Math.round(shortSide * 0.062)),
+      primaryColour: COLOR.white,
+      outlineColour: COLOR.brand,
+      backColour: COLOR.brand,
       bold: 1,
-      borderStyle: 1,
-      outline: 3,
+      borderStyle: 3, // ブランドカラーの不透明ボックス（中心メッセージとして目立たせる）
+      outline: 4,
       shadow: 0,
       alignment: ALIGNMENT.bottomCenter,
       marginL: safeMarginH,
@@ -78,8 +81,9 @@ function buildStyleDefs(displayWidth, displayHeight) {
     },
     sub: {
       name: 'Sub',
-      fontsize: Math.max(14, Math.round(shortSide * 0.038)),
-      primaryColour: COLOR.white,
+      // mainより明確に小さく、説明文として読みやすい控えめなデザイン。
+      fontsize: Math.max(13, Math.round(shortSide * 0.036)),
+      primaryColour: COLOR.paleGray,
       outlineColour: COLOR.black,
       backColour: COLOR.black,
       bold: 0,
@@ -93,20 +97,21 @@ function buildStyleDefs(displayWidth, displayHeight) {
     },
     emphasis: {
       name: 'Emphasis',
-      fontsize: Math.max(18, Math.round(shortSide * 0.052)),
-      primaryColour: COLOR.white,
+      fontsize: Math.max(20, Math.round(shortSide * 0.058)),
+      // emphasisType全体をアクセント色・太字・強めの縁取りにし、一目で強調と分かるようにする。
+      primaryColour: COLOR.highlight,
       outlineColour: COLOR.black,
       backColour: COLOR.black,
       bold: 1,
       borderStyle: 1,
-      outline: 2,
+      outline: 4,
       shadow: 0,
       alignment: ALIGNMENT.bottomCenter,
       marginL: safeMarginH,
       marginR: safeMarginH,
       marginV: safeMarginV,
-      // このスタイル自体は Normal と同じ見た目。強調部分だけは Dialogue 側で
-      // \c カラーオーバーライドタグを差し込んで表現する（emphasisText 参照）。
+      // emphasisType以外のcaptionでも、部分文字列だけをこの色で強調したい場合に
+      // Dialogue側で \c カラーオーバーライドタグを差し込む（emphasisText参照）。
       highlightColour: COLOR.highlight,
     },
     heading: {

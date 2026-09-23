@@ -32,6 +32,22 @@ export interface RawSegment {
   text: string
 }
 
+// captionTypeのAI自動分類が実行済みかどうかのメタ情報。
+export interface CaptionClassification {
+  model: string
+  classifiedAt: string
+  version: number
+  batchCount: number
+  requestCount: number
+  batchSize: number
+}
+
+export interface PreviewWindow {
+  startSec: number
+  endSec: number
+  synthetic: boolean
+}
+
 export interface LocalCaptionJob {
   id: string
   title: string
@@ -59,6 +75,12 @@ export interface LocalCaptionJob {
   renderedAt: string | null
   // レンダー進捗（0-100）。レンダー中以外はnull。バックエンドの追加フィールド。
   renderProgress?: number | null
+  // captionTypeのAI自動分類が未実行ならundefined。
+  captionClassification?: CaptionClassification
+  // 短時間プレビュー(30〜60秒)の生成結果。フル動画のoutputPathとは別管理。
+  previewOutputPath?: string | null
+  previewRenderedAt?: string | null
+  previewWindow?: PreviewWindow | null
 }
 
 export interface BrowseEntry {

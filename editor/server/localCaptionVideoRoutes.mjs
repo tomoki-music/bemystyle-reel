@@ -36,7 +36,7 @@ import {
   PathValidationError,
 } from './lib/pathValidator.mjs'
 import { JobStore, recoverIncompleteJobsOnStartup, IN_PROGRESS_STATUSES } from './lib/jobStore.mjs'
-import { runFfprobe, extractAudio, burnCaptions, getFileSize } from './lib/ffmpegRunner.mjs'
+import { runFfprobe, extractAudio, burnCaptions, renderPreviewClip, getFileSize } from './lib/ffmpegRunner.mjs'
 import {
   transcribeAudioFile,
   TranscriptionTimeoutError,
@@ -44,9 +44,11 @@ import {
 } from './lib/openaiTranscription.mjs'
 import { buildAssContent, CAPTION_TYPES } from './lib/captionStyles.mjs'
 import { buildDisplayCaptionsFromSegments } from './lib/captionSegmenter.mjs'
+import { classifyJobCaptions } from './lib/captionClassifier.mjs'
+import { selectPreviewWindow, buildSyntheticPreviewWindow, buildPreviewAssView, PREVIEW_MIN_SEC, PREVIEW_MAX_SEC } from './lib/previewClip.mjs'
 import { checkDiskSpace } from './lib/diskSpace.mjs'
 import { checkJapaneseFontAvailable } from './lib/fontCheck.mjs'
-import { buildUniqueOutputPath } from './lib/outputNaming.mjs'
+import { buildUniqueOutputPath, buildPreviewOutputPath } from './lib/outputNaming.mjs'
 
 export const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v'])
 export const MAX_AUDIO_BYTES = 24 * 1024 * 1024
@@ -578,6 +580,78 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
     res.json({ ok: true, job })
   })
 
+  // ── captionType のAI自動分類 ──────────────────────
+
+  router.post('/:id/classify-captions', async (req, res) => {
+    let job = loadJobOr404(req, res)
+    if (!job) return
+    if (!assertEditable(job, res)) return
+    if (!Array.isArray(job.captions) || job.captions.length === 0) {
+      return res.status(400).json({ ok: false, message: '字幕が1件もありません' })
+    }
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey || apiKey.length === 0) {
+      return res.status(500).json({ ok: false, message: 'OPENAI_API_KEY が設定されていません' })
+    }
+    const force = req.body?.force === true
+    // バッチサイズは既定(DEFAULT_BATCH_SIZE)を使うのが基本だが、特定バッチサイズで
+    // 応答が不安定な場合に手動で調整できるよう任意指定を許可する(30〜50の目安の範囲内のみ)。
+    const rawBatchSize = Number(req.body?.batchSize)
+    const batchSize = Number.isFinite(rawBatchSize) && rawBatchSize >= 10 && rawBatchSize <= 100 ? rawBatchSize : undefined
+    if (!store.acquireLock(job.id)) {
+      return res.status(409).json({ ok: false, message: 'このジョブはすでに処理中です' })
+    }
+
+    try {
+      const result = await classifyJobCaptions(job, apiKey, { force, ...(batchSize ? { batchSize } : {}) })
+
+      if (!result.ok) {
+        if (result.reason === 'already_classified') {
+          return res.status(409).json({
+            ok: false,
+            reason: 'already_classified',
+            classification: result.classification,
+            message: 'このジョブは分類済みです。再実行するには確認のうえ force を指定してください。',
+          })
+        }
+        logSafe(
+          'caption classification failed',
+          job.id,
+          `reason=${result.reason} batch=${result.failedBatchIndex ?? '-'}/${result.totalBatches ?? '-'} requests=${result.requestCount ?? 0} ` +
+            `missing=${result.missingCount ?? 0} unknown=${result.unknownCount ?? 0} duplicate=${result.duplicateCount ?? 0} invalidType=${result.invalidTypeCount ?? 0}`
+        )
+        return res.status(502).json({
+          ok: false,
+          reason: result.reason,
+          message: result.message || '分類に失敗しました。既存のcaptionTypeは変更されていません。',
+          failedBatchIndex: result.failedBatchIndex,
+          totalBatches: result.totalBatches,
+          requestCount: result.requestCount,
+          missingCount: result.missingCount,
+          unknownCount: result.unknownCount,
+          duplicateCount: result.duplicateCount,
+          invalidTypeCount: result.invalidTypeCount,
+        })
+      }
+
+      const updated = store.save({ ...job, captions: result.captions, captionClassification: result.classification })
+      logSafe(
+        'caption classification complete',
+        job.id,
+        `batches=${result.totalBatches} requests=${result.requestCount}`
+      )
+      res.json({
+        ok: true,
+        job: updated,
+        typeCounts: result.typeCounts,
+        requestCount: result.requestCount,
+        totalBatches: result.totalBatches,
+      })
+    } finally {
+      store.releaseLock(job.id)
+    }
+  })
+
   // ── レンダー（字幕焼き込み） ──────────────────────
 
   router.post('/:id/render', async (req, res) => {
@@ -722,6 +796,173 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
     child.once('close', () => clearTimeout(killTimer))
     logSafe('render cancel requested', job.id)
     res.json({ ok: true, message: 'キャンセルを要求しました' })
+  })
+
+  // ── 短時間プレビュー（captionType別デザイン確認用、30〜60秒） ──────────────────────
+
+  router.post('/:id/preview-render', async (req, res) => {
+    let job = loadJobOr404(req, res)
+    if (!job) return
+    if (!Array.isArray(job.captions) || job.captions.length === 0) {
+      return res.status(400).json({ ok: false, message: '字幕が1件もありません' })
+    }
+    if (activeRenderJobId && activeRenderJobId !== job.id) {
+      return res.status(409).json({ ok: false, message: '他のジョブのレンダーが進行中です。完了までお待ちください。' })
+    }
+    if (!store.acquireLock(job.id)) {
+      return res.status(409).json({ ok: false, message: 'このジョブはすでに処理中です' })
+    }
+
+    let outputRootReal
+    try {
+      outputRootReal = validateOutputRoot(getOutputRoot())
+    } catch (err) {
+      store.releaseLock(job.id)
+      return res.status(500).json({ ok: false, message: err.message })
+    }
+
+    let sourceRealPath
+    try {
+      sourceRealPath = validateSourcePath(job.sourcePath, getAllowedInputRoots()).realPath
+    } catch (err) {
+      store.releaseLock(job.id)
+      const message = err instanceof PathValidationError ? err.message : '元動画への安全なアクセスを確認できませんでした'
+      return res.status(403).json({ ok: false, message })
+    }
+
+    // レンダー前後で元動画のサイズ・mtimeが変わっていないことを検証できるよう記録しておく。
+    let sourceStatBefore
+    try {
+      sourceStatBefore = statSync(sourceRealPath)
+    } catch (err) {
+      store.releaseLock(job.id)
+      return res.status(500).json({ ok: false, message: `元動画の情報取得に失敗しました: ${err.message}` })
+    }
+
+    let window = selectPreviewWindow(job.captions, { totalDurationSec: job.durationSec })
+    let usedSynthetic = false
+    if (!window) {
+      window = buildSyntheticPreviewWindow()
+      usedSynthetic = true
+    }
+
+    const clipDurationSec = window.endSec - window.startSec
+    const estimatedNeeded = 300 * 1024 * 1024 // プレビューは短尺のため固定の見積もりで十分
+    const diskBefore = await checkDiskSpace(outputRootReal, estimatedNeeded)
+    if (!diskBefore.ok) {
+      store.releaseLock(job.id)
+      const freeGb = diskBefore.freeBytes ? (diskBefore.freeBytes / 1024 / 1024 / 1024).toFixed(1) : '不明'
+      return res.status(507).json({ ok: false, message: `出力先の空き容量が不足している可能性があります（空き: ${freeGb}GB）` })
+    }
+
+    let outputPath
+    try {
+      outputPath = buildPreviewOutputPath(job.id, outputRootReal, sourceRealPath)
+    } catch (err) {
+      store.releaseLock(job.id)
+      return res.status(500).json({ ok: false, message: err.message })
+    }
+
+    const fontStatus = await checkJapaneseFontAvailable()
+
+    const tmpRoot = getTmpRoot()
+    mkdirSync(tmpRoot, { recursive: true })
+    const assPath = resolve(tmpRoot, `${job.id}-preview.ass`)
+    try {
+      const assView = buildPreviewAssView(job, window)
+      writeFileSync(assPath, buildAssContent(assView), 'utf-8')
+    } catch (err) {
+      store.releaseLock(job.id)
+      return res.status(500).json({ ok: false, message: `字幕ファイルの生成に失敗しました: ${err.message}` })
+    }
+
+    activeRenderJobId = job.id
+    logSafe('preview render start', job.id, `window=${window.startSec.toFixed(1)}-${window.endSec.toFixed(1)}s synthetic=${usedSynthetic}`)
+
+    try {
+      await renderPreviewClip({
+        sourceRealPath,
+        assPath,
+        outputPath,
+        startSec: window.startSec,
+        clipDurationSec,
+        onSpawn: (child) => {
+          activeRenderChildren.set(job.id, child)
+        },
+      })
+    } catch (err) {
+      try {
+        if (existsSync(outputPath)) unlinkSync(outputPath)
+      } catch {
+        // best effort
+      }
+      logSafe('preview render failed', job.id)
+      return res.status(502).json({ ok: false, message: `プレビュー生成に失敗しました: ${err.message}` })
+    } finally {
+      activeRenderChildren.delete(job.id)
+      if (activeRenderJobId === job.id) activeRenderJobId = null
+      store.releaseLock(job.id)
+      try {
+        if (existsSync(assPath)) unlinkSync(assPath)
+      } catch {
+        // best effort
+      }
+    }
+
+    // 元動画を一切変更していないことを確認する（サイズ・mtime不変）。
+    let sourceStatAfter
+    let sourceUnchanged = false
+    try {
+      sourceStatAfter = statSync(sourceRealPath)
+      sourceUnchanged = sourceStatAfter.size === sourceStatBefore.size && sourceStatAfter.mtimeMs === sourceStatBefore.mtimeMs
+    } catch {
+      sourceUnchanged = false
+    }
+
+    const diskAfter = await checkDiskSpace(outputRootReal, 0)
+
+    const latest = store.load(job.id)
+    if (!latest) {
+      return res.status(404).json({ ok: false, message: 'ジョブが見つかりません（プレビューファイルは生成済みです）' })
+    }
+    const updated = store.save({
+      ...latest,
+      previewOutputPath: outputPath,
+      previewRenderedAt: new Date().toISOString(),
+      previewWindow: { startSec: window.startSec, endSec: window.endSec, synthetic: usedSynthetic },
+    })
+    logSafe('preview render complete', job.id, `durationSec=${clipDurationSec.toFixed(1)} synthetic=${usedSynthetic}`)
+
+    res.json({
+      ok: true,
+      job: updated,
+      previewWindow: { startSec: window.startSec, endSec: window.endSec, durationSec: clipDurationSec, synthetic: usedSynthetic },
+      sourceUnchanged,
+      freeBytesBefore: diskBefore.freeBytes,
+      freeBytesAfter: diskAfter.freeBytes,
+      fontWarning: fontStatus.status !== 'available' ? fontStatus.detail : null,
+    })
+  })
+
+  router.get('/:id/preview-stream', (req, res) => {
+    const job = store.load(req.params.id)
+    if (!job || !job.previewOutputPath) return res.status(404).json({ ok: false, message: 'プレビューファイルがありません' })
+    let outRoot
+    try {
+      outRoot = validateOutputRoot(getOutputRoot())
+    } catch (err) {
+      return res.status(500).json({ ok: false, message: err.message })
+    }
+    let real
+    try {
+      real = realpathSync(job.previewOutputPath)
+    } catch {
+      return res.status(404).json({ ok: false, message: 'ファイルが見つかりません' })
+    }
+    if (!isInsideAnyRoot(real, [outRoot])) {
+      return res.status(403).json({ ok: false, message: 'アクセスが拒否されました' })
+    }
+    streamVideoFile(req, res, real)
   })
 
   // ── プレビュー用ストリーミング（Range対応） ──────────────────────

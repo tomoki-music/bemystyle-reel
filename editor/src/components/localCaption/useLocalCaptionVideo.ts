@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApiResult, BrowseEntry, CaptionType, LocalCaptionJob, RootInfo } from './types'
 
+export interface ClassifyCaptionsResult {
+  ok: boolean
+  reason?: string
+  message?: string
+  typeCounts?: Record<CaptionType, number>
+  requestCount?: number
+  totalBatches?: number
+}
+
+export interface RenderPreviewResult {
+  ok: boolean
+  message?: string
+  previewWindow?: { startSec: number; endSec: number; durationSec: number; synthetic: boolean }
+  sourceUnchanged?: boolean
+}
+
 const API_BASE = '/api/local-caption-videos'
 const POLL_INTERVAL_MS = 1500
 const IN_PROGRESS_STATUSES = new Set(['probing', 'extracting_audio', 'transcribing', 'rendering'])
@@ -20,6 +36,9 @@ export function useLocalCaptionVideo() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fontWarning, setFontWarning] = useState<string | null>(null)
+
+  const [classifying, setClassifying] = useState(false)
+  const [previewRendering, setPreviewRendering] = useState(false)
 
   const [inputRoots, setInputRoots] = useState<RootInfo[]>([])
   const [outputRoot, setOutputRoot] = useState<RootInfo | null>(null)
@@ -233,6 +252,62 @@ export function useLocalCaptionVideo() {
     return true
   }, [])
 
+  // AIでcaptionTypeを自動分類する。失敗時は既存のcaptionType(currentJob)を維持したまま
+  // エラーメッセージだけを表示する(部分的な書き換えはしない。サーバー側も同様)。
+  // 分類済みジョブへの再実行は force:true を明示したときだけAPIを呼ぶ
+  // (呼び出し側=UIで再実行確認ダイアログを出してから force:true を渡す想定)。
+  const classifyCaptions = useCallback(async (jobId: string, force = false): Promise<ClassifyCaptionsResult> => {
+    setError(null)
+    setClassifying(true)
+    try {
+      const data = await apiFetch<ApiResult<unknown>>(`/${jobId}/classify-captions`, {
+        method: 'POST',
+        body: JSON.stringify({ force }),
+      })
+      if (!data.ok) {
+        if (data.reason !== 'already_classified') {
+          setError(data.message ?? 'AI分類に失敗しました（既存の分類は変更されていません）')
+        }
+        return {
+          ok: false,
+          reason: data.reason as string | undefined,
+          message: data.message as string | undefined,
+        }
+      }
+      if (data.job) setCurrentJob(data.job)
+      return {
+        ok: true,
+        typeCounts: data.typeCounts as Record<CaptionType, number> | undefined,
+        requestCount: data.requestCount as number | undefined,
+        totalBatches: data.totalBatches as number | undefined,
+      }
+    } finally {
+      setClassifying(false)
+    }
+  }, [])
+
+  // captionType別デザインを確認するための30〜60秒の短時間プレビューを生成する。
+  // フル動画のレンダー状態(status/outputPath)とは別管理で、job.previewOutputPath等に入る。
+  const renderPreview = useCallback(async (jobId: string): Promise<RenderPreviewResult> => {
+    setError(null)
+    setPreviewRendering(true)
+    try {
+      const data = await apiFetch<ApiResult<unknown>>(`/${jobId}/preview-render`, { method: 'POST' })
+      if (!data.ok) {
+        setError(data.message ?? 'プレビューの生成に失敗しました')
+        return { ok: false, message: data.message as string | undefined }
+      }
+      if (data.job) setCurrentJob(data.job)
+      return {
+        ok: true,
+        previewWindow: data.previewWindow as RenderPreviewResult['previewWindow'],
+        sourceUnchanged: data.sourceUnchanged as boolean | undefined,
+      }
+    } finally {
+      setPreviewRendering(false)
+    }
+  }, [])
+
   return {
     jobs,
     currentJob,
@@ -259,5 +334,9 @@ export function useLocalCaptionVideo() {
     resetCaptionTypes,
     startRender,
     cancelRender,
+    classifying,
+    classifyCaptions,
+    previewRendering,
+    renderPreview,
   }
 }

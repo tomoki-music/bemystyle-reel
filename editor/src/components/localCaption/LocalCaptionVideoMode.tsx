@@ -64,6 +64,10 @@ export function LocalCaptionVideoMode() {
     resetCaptionTypes,
     startRender,
     cancelRender,
+    classifying,
+    classifyCaptions,
+    previewRendering,
+    renderPreview,
   } = useLocalCaptionVideo()
 
   const [manualPath, setManualPath] = useState('')
@@ -76,11 +80,23 @@ export function LocalCaptionVideoMode() {
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<{ startSec: string; endSec: string; text: string; captionType: CaptionType } | null>(null)
+  const [typeFilter, setTypeFilter] = useState<CaptionType | 'all'>('all')
 
   const sortedCaptions = useMemo(() => {
     if (!currentJob) return []
     return [...currentJob.captions].sort((a, b) => a.displayOrder - b.displayOrder)
   }, [currentJob])
+
+  const typeCounts = useMemo(() => {
+    const counts: Record<CaptionType, number> = { normal: 0, main: 0, sub: 0, emphasis: 0, heading: 0, annotation: 0 }
+    for (const c of sortedCaptions) counts[c.captionType] = (counts[c.captionType] ?? 0) + 1
+    return counts
+  }, [sortedCaptions])
+
+  const filteredCaptions = useMemo(() => {
+    if (typeFilter === 'all') return sortedCaptions
+    return sortedCaptions.filter((c) => c.captionType === typeFilter)
+  }, [sortedCaptions, typeFilter])
 
   const handleCreateJob = async () => {
     const path = manualPath.trim()
@@ -158,6 +174,29 @@ export function LocalCaptionVideoMode() {
     const next = [...ids]
     ;[next[index], next[target]] = [next[target], next[index]]
     await reorderCaptions(jobId, next)
+  }
+
+  const handleClassify = async () => {
+    if (!currentJob) return
+    const already = currentJob.captionClassification
+    const confirmMessage = already
+      ? `このジョブは既にAI分類済みです（モデル: ${already.model} / ${new Date(already.classifiedAt).toLocaleString()}）。\n再実行するとOpenAI APIに再度課金が発生し、既存の分類結果は上書きされます。続行しますか？`
+      : `${sortedCaptions.length}件の字幕をAIでcaptionType（通常/メイン/サブ/強調/見出し/注釈）に自動分類します。OpenAI APIが呼び出されます。続行しますか？`
+    if (!window.confirm(confirmMessage)) return
+
+    const result = await classifyCaptions(currentJob.id, Boolean(already))
+    if (result.ok) {
+      window.alert(`AI分類が完了しました（${result.totalBatches}バッチ / ${result.requestCount}リクエスト）`)
+    }
+    // 失敗時はclassifyCaptions内でエラー表示済み。既存のcaptionTypeはサーバー側で変更されていない。
+  }
+
+  const handlePreviewRender = async () => {
+    if (!currentJob) return
+    const result = await renderPreview(currentJob.id)
+    if (result.ok && result.previewWindow?.synthetic) {
+      window.alert('main/sub/emphasisを含む30〜60秒の区間が実データから見つからなかったため、プレビュー専用のダミーデータでレンダリングしました。')
+    }
   }
 
   const renderDisabledReason = (): string | null => {
@@ -338,12 +377,44 @@ export function LocalCaptionVideoMode() {
 
               <section className="lcv-panel">
                 <h2>字幕（{sortedCaptions.length}件）</h2>
-                <button type="button" onClick={() => resetCaptionTypes(currentJob.id)} disabled={sortedCaptions.length === 0}>
-                  全てを「通常」に戻す
-                </button>
+
+                <div className="lcv-classify-row">
+                  <button type="button" onClick={handleClassify} disabled={classifying || sortedCaptions.length === 0}>
+                    {classifying ? 'AI分類中…' : 'AIで自動分類'}
+                  </button>
+                  <button type="button" onClick={() => resetCaptionTypes(currentJob.id)} disabled={sortedCaptions.length === 0}>
+                    全てを「通常」に戻す
+                  </button>
+                  {currentJob.captionClassification && (
+                    <span className="lcv-muted">
+                      分類済み: {currentJob.captionClassification.model} / {new Date(currentJob.captionClassification.classifiedAt).toLocaleString()}
+                      （{currentJob.captionClassification.batchCount}バッチ）
+                    </span>
+                  )}
+                </div>
+
+                <div className="lcv-caption-typecounts">
+                  {(Object.keys(CAPTION_TYPE_LABELS) as CaptionType[]).map((type) => (
+                    <span key={type} className="lcv-caption-typecount">
+                      {CAPTION_TYPE_LABELS[type]}: {typeCounts[type]}
+                    </span>
+                  ))}
+                </div>
+
+                <label className="lcv-field lcv-field--inline">
+                  種別で絞り込み
+                  <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as CaptionType | 'all')}>
+                    <option value="all">すべて（{sortedCaptions.length}）</option>
+                    {(Object.keys(CAPTION_TYPE_LABELS) as CaptionType[]).map((type) => (
+                      <option key={type} value={type}>{CAPTION_TYPE_LABELS[type]}（{typeCounts[type]}）</option>
+                    ))}
+                  </select>
+                </label>
 
                 <ul className="lcv-caption-list">
-                  {sortedCaptions.map((c, index) => (
+                  {filteredCaptions.map((c) => {
+                    const index = sortedCaptions.findIndex((sc) => sc.id === c.id)
+                    return (
                     <li key={c.id} className="lcv-caption-item">
                       {editingId === c.id && editDraft ? (
                         <div className="lcv-caption-edit">
@@ -390,8 +461,9 @@ export function LocalCaptionVideoMode() {
                         </>
                       )}
                     </li>
-                  ))}
-                  {sortedCaptions.length === 0 && <li className="lcv-muted">字幕はまだありません</li>}
+                    )
+                  })}
+                  {filteredCaptions.length === 0 && <li className="lcv-muted">該当する字幕はありません</li>}
                 </ul>
 
                 <div className="lcv-caption-add">
@@ -413,6 +485,23 @@ export function LocalCaptionVideoMode() {
                   />
                   <button type="button" onClick={handleAddCaption}>追加</button>
                 </div>
+              </section>
+
+              <section className="lcv-panel">
+                <h2>短時間プレビュー（captionType別デザイン確認用）</h2>
+                <p className="lcv-muted">main/sub/emphasisを含む30〜60秒だけを字幕焼き込みして確認します（フル動画のレンダーとは別です）。</p>
+                <button type="button" onClick={handlePreviewRender} disabled={previewRendering || sortedCaptions.length === 0}>
+                  {previewRendering ? 'プレビュー生成中…' : '短時間プレビューを生成'}
+                </button>
+                {currentJob.previewOutputPath && currentJob.previewWindow && (
+                  <div className="lcv-output">
+                    <p>
+                      区間: {formatTime(currentJob.previewWindow.startSec)} - {formatTime(currentJob.previewWindow.endSec)}
+                      {currentJob.previewWindow.synthetic && '（該当区間が無かったためダミーデータを使用）'}
+                    </p>
+                    <video controls className="lcv-video" src={`/api/local-caption-videos/${currentJob.id}/preview-stream`} />
+                  </div>
+                )}
               </section>
 
               <section className="lcv-panel">

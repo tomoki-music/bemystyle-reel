@@ -52,3 +52,47 @@ export function buildUniqueOutputPath(sourceFilename, outputRootRealPath, source
 
   return candidatePath
 }
+
+/**
+ * 短時間プレビュー用の出力ファイル名を作る。要件により元動画名(sourceFilename)を
+ * 一切含めない（jobIdの先頭部分とタイムスタンプのみ使う）。
+ *
+ * @param {string} jobId
+ * @param {string} outputRootRealPath 検証済みの出力先ディレクトリ（realpath）
+ * @param {string} sourceRealPath 検証済みの元動画パス（衝突防止用）
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function buildPreviewOutputPath(jobId, outputRootRealPath, sourceRealPath, now = new Date()) {
+  const shortJobId = String(jobId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'job'
+  const timestamp = formatTimestamp(now)
+  let candidateName = `preview_${shortJobId}_${timestamp}.mp4`
+  let candidatePath = resolve(outputRootRealPath, candidateName)
+
+  const collides = (p) => {
+    if (existsSync(p)) return true
+    try {
+      if (existsSync(sourceRealPath) && realpathSync(p) === sourceRealPath) return true
+    } catch {
+      // pが存在しない場合はrealpathSyncが失敗するのでここに来て問題ない
+    }
+    return false
+  }
+
+  let guard = 0
+  while (collides(candidatePath) && guard < 20) {
+    const suffix = randomBytes(3).toString('hex')
+    candidateName = `preview_${shortJobId}_${timestamp}_${suffix}.mp4`
+    candidatePath = resolve(outputRootRealPath, candidateName)
+    guard += 1
+  }
+
+  if (collides(candidatePath)) {
+    throw new Error('プレビュー出力ファイル名の決定に失敗しました（衝突が解消できません）')
+  }
+  if (candidatePath === sourceRealPath) {
+    throw new Error('出力パスが入力パスと一致しています（安全のため拒否）')
+  }
+
+  return candidatePath
+}

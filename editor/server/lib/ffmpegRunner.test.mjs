@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
-import { runFfprobe, extractAudio, burnCaptions } from './ffmpegRunner.mjs'
+import { runFfprobe, extractAudio, burnCaptions, renderPreviewClip } from './ffmpegRunner.mjs'
 
 // vi.mock による child_process の丸ごと差し替えは、このプロジェクトの
 // vitest/vite-node 環境では組み込みモジュールに対して確実に効かないことが
@@ -24,6 +24,53 @@ class FakeChild extends EventEmitter {
 
 beforeEach(() => {
   mockSpawn.mockReset()
+  delete process.env.FFMPEG_BIN
+  delete process.env.FFPROBE_BIN
+})
+
+describe('FFMPEG_BIN / FFPROBE_BIN による実行バイナリの差し替え', () => {
+  it('環境変数が無ければ従来どおり "ffmpeg" / "ffprobe" を使う', async () => {
+    const child1 = new FakeChild()
+    mockSpawn.mockImplementation((cmd) => {
+      expect(cmd).toBe('ffprobe')
+      return child1
+    })
+    const p1 = runFfprobe('/videos/in.mp4', { spawnFn: mockSpawn })
+    child1.emit('close', 1)
+    await expect(p1).rejects.toThrow()
+
+    const child2 = new FakeChild()
+    mockSpawn.mockImplementation((cmd) => {
+      expect(cmd).toBe('ffmpeg')
+      return child2
+    })
+    const p2 = extractAudio('/videos/in.mp4', '/tmp/out.mp3', { spawnFn: mockSpawn })
+    child2.emit('close', 0)
+    await p2
+  })
+
+  it('FFMPEG_BIN / FFPROBE_BIN を設定すると、そのパスで実行される（libass入りビルドへの切り替え用）', async () => {
+    process.env.FFMPEG_BIN = '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg'
+    process.env.FFPROBE_BIN = '/opt/homebrew/opt/ffmpeg-full/bin/ffprobe'
+
+    const child1 = new FakeChild()
+    mockSpawn.mockImplementation((cmd) => {
+      expect(cmd).toBe('/opt/homebrew/opt/ffmpeg-full/bin/ffprobe')
+      return child1
+    })
+    const p1 = runFfprobe('/videos/in.mp4', { spawnFn: mockSpawn })
+    child1.emit('close', 1)
+    await expect(p1).rejects.toThrow()
+
+    const child2 = new FakeChild()
+    mockSpawn.mockImplementation((cmd) => {
+      expect(cmd).toBe('/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg')
+      return child2
+    })
+    const p2 = burnCaptions({ sourceRealPath: '/videos/in.mp4', assPath: '/tmp/x.ass', outputPath: '/out/o.mp4', durationSec: 10, spawnFn: mockSpawn })
+    child2.emit('close', 0)
+    await p2
+  })
 })
 
 describe('runFfprobe', () => {
@@ -156,5 +203,70 @@ describe('burnCaptions', () => {
     } catch (err) {
       expect(err.canceled).toBeFalsy()
     }
+  })
+})
+
+describe('renderPreviewClip', () => {
+  it('argvで -ss を -i より前に、-t で区間長を指定してffmpegを呼ぶ(shell文字列連結ではない)', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockImplementation((cmd, args) => {
+      expect(cmd).toBe('ffmpeg')
+      expect(Array.isArray(args)).toBe(true)
+      const ssIndex = args.indexOf('-ss')
+      const iIndex = args.indexOf('-i')
+      const tIndex = args.indexOf('-t')
+      expect(ssIndex).toBeGreaterThanOrEqual(0)
+      expect(iIndex).toBeGreaterThan(ssIndex) // -ss は -i より前(高速シーク)
+      expect(args[ssIndex + 1]).toBe('120')
+      expect(args[tIndex + 1]).toBe('45')
+      expect(args[iIndex + 1]).toBe('/videos/in.mp4')
+      const vfIndex = args.indexOf('-vf')
+      expect(args[vfIndex + 1]).toMatch(/^ass=/)
+      return child
+    })
+    const promise = renderPreviewClip({
+      sourceRealPath: '/videos/in.mp4',
+      assPath: '/tmp/preview.ass',
+      outputPath: '/out/preview.mp4',
+      startSec: 120,
+      clipDurationSec: 45,
+      spawnFn: mockSpawn,
+    })
+    child.emit('close', 0)
+    await expect(promise).resolves.toBeUndefined()
+  })
+
+  it('失敗時にrejectする', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockReturnValue(child)
+    const promise = renderPreviewClip({
+      sourceRealPath: '/videos/in.mp4',
+      assPath: '/tmp/preview.ass',
+      outputPath: '/out/preview.mp4',
+      startSec: 0,
+      clipDurationSec: 30,
+      spawnFn: mockSpawn,
+    })
+    child.emit('close', 1, null)
+    await expect(promise).rejects.toThrow(/プレビューの生成に失敗/)
+  })
+
+  it('負のstartSecは0にクランプする', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockImplementation((cmd, args) => {
+      const ssIndex = args.indexOf('-ss')
+      expect(args[ssIndex + 1]).toBe('0')
+      return child
+    })
+    const promise = renderPreviewClip({
+      sourceRealPath: '/videos/in.mp4',
+      assPath: '/tmp/preview.ass',
+      outputPath: '/out/preview.mp4',
+      startSec: -5,
+      clipDurationSec: 30,
+      spawnFn: mockSpawn,
+    })
+    child.emit('close', 0)
+    await promise
   })
 })
