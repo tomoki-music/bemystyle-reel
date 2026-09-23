@@ -1,7 +1,7 @@
 // ローカルAIテロップ動画ジョブの永続化（JSONファイル・1ジョブ1ファイル）と
 // ステータス状態遷移の管理。DBは使わず、ディスク上のJSONのみで完結させる。
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync, mkdirSync, renameSync } from 'fs'
 import { resolve, basename } from 'path'
 import { randomUUID } from 'crypto'
 
@@ -101,9 +101,15 @@ export class JobStore {
     }
   }
 
+  // 一時ファイルに書き込んでから rename する（同一ディレクトリ内なら POSIX 上 atomic）。
+  // 書き込み途中でプロセスが落ちても、ジョブJSONが壊れた状態や空の状態で
+  // 読み込まれることを防ぐ。
   save(job) {
     job.updatedAt = new Date().toISOString()
-    writeFileSync(this.filePathFor(job.id), JSON.stringify(job, null, 2), 'utf-8')
+    const target = this.filePathFor(job.id)
+    const tmpPath = resolve(this.dir, `.${basename(job.id)}.${randomUUID()}.tmp`)
+    writeFileSync(tmpPath, JSON.stringify(job, null, 2), 'utf-8')
+    renameSync(tmpPath, target)
     return job
   }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import {
@@ -52,6 +52,15 @@ describe('JobStore CRUD', () => {
 
   it('存在しないジョブはnullを返す', () => {
     expect(store.load('does-not-exist')).toBeNull()
+  })
+
+  it('保存は一時ファイル経由で行われ、ディレクトリに.tmpファイルが残らない（atomic rename）', () => {
+    const job = store.createInitial({ sourcePath: '/a.mp4', sourceFilename: 'a.mp4', sourceSize: 1 })
+    store.save(job)
+    const files = readdirSync(dir)
+    expect(files.some((f) => f.endsWith('.tmp'))).toBe(false)
+    expect(files).toContain(`${job.id}.json`)
+    expect(store.load(job.id).id).toBe(job.id)
   })
 
   it('transitionは不正な遷移を拒否する', () => {

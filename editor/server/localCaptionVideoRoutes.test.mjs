@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import fetch from 'node-fetch'
+import { JobStore } from './lib/jobStore.mjs'
 
 // ffmpeg/ffprobe/OpenAIは一切実プロセス起動・実APIコールしない。すべてモックする。
 const mockRunFfprobe = vi.fn()
@@ -39,8 +40,24 @@ let inputRoot
 let outputRoot
 let outsideRoot
 let jobsDir
+let tmpRoot
 let server
 let baseUrl
+
+// pipeline は fire-and-forget（HTTPレスポンス後に非同期実行）なので、
+// ジョブの状態が期待条件を満たすまでポーリングする。
+async function waitForJob(jobId, predicate, { timeoutMs = 5000, intervalMs = 20 } = {}) {
+  const start = Date.now()
+  let last
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(`${baseUrl}/${jobId}`)
+    const data = await res.json()
+    last = data.job
+    if (data.ok && predicate(data.job)) return data.job
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  throw new Error(`timeout waiting for job condition. last status=${last?.status}`)
+}
 
 beforeAll(async () => {
   // macOSでは /var が /private/var のシンボリックリンクのため、realpath済みのベースを使う
@@ -49,6 +66,7 @@ beforeAll(async () => {
   outputRoot = resolve(base, 'output')
   outsideRoot = resolve(base, 'outside')
   jobsDir = resolve(base, 'jobs')
+  tmpRoot = resolve(base, 'caption-tmp')
   mkdirSync(inputRoot, { recursive: true })
   mkdirSync(outputRoot, { recursive: true })
   mkdirSync(outsideRoot, { recursive: true })
@@ -56,6 +74,7 @@ beforeAll(async () => {
   process.env.VIDEO_INPUT_ROOTS = inputRoot
   process.env.VIDEO_OUTPUT_ROOT = outputRoot
   process.env.OPENAI_API_KEY = 'sk-test-dummy'
+  process.env.CAPTION_VIDEO_TMP_ROOT = tmpRoot
 
   writeFileSync(resolve(inputRoot, 'sample.mp4'), 'dummy-bytes-not-a-real-video')
   writeFileSync(resolve(outsideRoot, 'secret.mp4'), 'dummy')
@@ -90,6 +109,10 @@ beforeEach(() => {
     audioCodec: 'aac',
     container: 'mp4',
     hasAudio: true,
+  })
+  // 実際に一時音声ファイルを書き出すデフォルト実装（削除確認テストのため）
+  mockExtractAudio.mockImplementation(async (_sourceRealPath, audioPath) => {
+    writeFileSync(audioPath, 'fake-audio-bytes')
   })
 })
 
@@ -274,5 +297,102 @@ describe('GET /api/local-caption-videos/browse', () => {
     const data = await res.json()
     expect(data.ok).toBe(true)
     expect(data.entries.some((e) => e.name === 'sample.mp4' && e.isVideo)).toBe(true)
+  })
+})
+
+describe('POST /api/local-caption-videos/:id/start-processing (Whisper文字起こしパイプラインの永続化・冪等性)', () => {
+  it('全segmentが保存され、サーバー再起動相当の再読み込みができ、完了済みジョブの再実行ではWhisperを呼ばない', async () => {
+    const createRes = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourcePath: resolve(inputRoot, 'sample.mp4') }),
+    })
+    const { job } = await createRes.json()
+
+    mockTranscribeAudioFile.mockResolvedValueOnce([
+      { startSec: 0, endSec: 1.2, text: 'ひとつめ' },
+      { startSec: 1.2, endSec: 2.5, text: 'ふたつめ' },
+      { startSec: 2.5, endSec: 4.0, text: 'みっつめ' },
+    ])
+
+    const startRes = await fetch(`${baseUrl}/${job.id}/start-processing`, { method: 'POST' })
+    expect(startRes.status).toBe(200)
+
+    // (1) 全segmentがtext/startSec/endSecを保ったまま保存される
+    const done = await waitForJob(job.id, (j) => j.status === 'ready_for_edit' && Boolean(j.transcribedAt))
+    expect(done.captions.length).toBe(3)
+    expect(done.captions.map((c) => c.text)).toEqual(['ひとつめ', 'ふたつめ', 'みっつめ'])
+    expect(done.captions[0]).toMatchObject({ startSec: 0, endSec: 1.2, text: 'ひとつめ' })
+    expect(done.captions.every((c) => typeof c.id === 'string' && c.id.length > 0)).toBe(true)
+    expect(mockTranscribeAudioFile).toHaveBeenCalledTimes(1)
+
+    // 音声一時ファイルは処理後に削除されている
+    const audioPath = resolve(tmpRoot, `${job.id}.mp3`)
+    expect(existsSync(audioPath)).toBe(false)
+
+    // (2) サーバー再起動相当: 別インスタンスのJobStoreで同じディレクトリを読み直しても内容が一致する
+    const freshStore = new JobStore(jobsDir)
+    const reloaded = freshStore.load(job.id)
+    expect(reloaded.captions.length).toBe(3)
+    expect(reloaded.captions.map((c) => c.text)).toEqual(['ひとつめ', 'ふたつめ', 'みっつめ'])
+    expect(reloaded.transcribedAt).toBe(done.transcribedAt)
+
+    // (3) 完了済みジョブを再度start-processingしてもWhisper APIは呼ばれない
+    const secondStartRes = await fetch(`${baseUrl}/${job.id}/start-processing`, { method: 'POST' })
+    expect(secondStartRes.status).toBe(200)
+    const secondData = await secondStartRes.json()
+    expect(secondData.job.captions.length).toBe(3)
+    expect(mockTranscribeAudioFile).toHaveBeenCalledTimes(1) // 増えていない
+  })
+
+  it('Whisper API呼び出し自体が失敗した場合、captionsは保存されずジョブはfailedになる', async () => {
+    const createRes = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourcePath: resolve(inputRoot, 'sample.mp4') }),
+    })
+    const { job } = await createRes.json()
+
+    mockTranscribeAudioFile.mockRejectedValueOnce(new Error('OpenAI APIエラー: boom'))
+
+    await fetch(`${baseUrl}/${job.id}/start-processing`, { method: 'POST' })
+    const failed = await waitForJob(job.id, (j) => j.status === 'failed')
+    expect(failed.captions.length).toBe(0)
+    expect(failed.transcribedAt).toBeNull()
+
+    const audioPath = resolve(tmpRoot, `${job.id}.mp3`)
+    expect(existsSync(audioPath)).toBe(false)
+  })
+
+  it('Whisper成功後のジョブJSON保存が失敗した場合、完了扱い(ready_for_edit)にはならずfailedになる', async () => {
+    const createRes = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourcePath: resolve(inputRoot, 'sample.mp4') }),
+    })
+    const { job } = await createRes.json()
+
+    mockTranscribeAudioFile.mockResolvedValueOnce([{ startSec: 0, endSec: 1, text: 'テスト' }])
+
+    // 文字起こし成功直後の「保存」呼び出し1回だけをピンポイントで失敗させる
+    // （ディスクフル等、書き込みそのものが失敗するケースの再現）
+    const originalSave = JobStore.prototype.save
+    let triggered = false
+    const saveSpy = vi.spyOn(JobStore.prototype, 'save').mockImplementation(function (j) {
+      if (!triggered && j.transcribedAt) {
+        triggered = true
+        throw new Error('simulated disk full during save')
+      }
+      return originalSave.call(this, j)
+    })
+
+    try {
+      await fetch(`${baseUrl}/${job.id}/start-processing`, { method: 'POST' })
+      const failed = await waitForJob(job.id, (j) => j.status === 'failed')
+      expect(failed.captions.length).toBe(0)
+      expect(failed.transcribedAt).toBeNull()
+    } finally {
+      saveSpy.mockRestore()
+    }
   })
 })

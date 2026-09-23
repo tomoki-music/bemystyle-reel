@@ -11,5 +11,18 @@ out/
 *.webm
 !fixtures/*.mp4
 
+# Environment variables (may contain API keys / secrets - never commit)
+.env
+.env.*
+!.env.example
+!**/.env.example
+editor/.env
+editor/.env.*
+!editor/.env.example
+
+# Local AI caption video job data (per-job JSON with local absolute paths /
+# transcripts - local-only, never committed)
+editor/data/
+
 # OS
 .DS_Store

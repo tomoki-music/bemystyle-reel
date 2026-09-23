@@ -426,6 +426,13 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
     if (job.hasAudio !== true) {
       return res.status(409).json({ ok: false, message: job.transcriptionNote || 'この動画には音声がありません' })
     }
+    // 冪等性: 既に文字起こし済み（transcribedAtが保存済み）のジョブでは、
+    // 誤操作や二重クリックでWhisper APIを再度呼び出さない。
+    // 再文字起こしをしたい場合は明示的に別の手段（将来のUI）で行う想定。
+    if (job.transcribedAt) {
+      logSafe('start-processing skipped (already transcribed)', job.id)
+      return res.json({ ok: true, job, message: 'すでに文字起こし済みのため、Whisper APIは呼び出しませんでした' })
+    }
     const apiKey = process.env.OPENAI_API_KEY
     // .present? ではなく length で空文字トラップを検出する（本番障害知見と同様の注意点）
     if (!apiKey || apiKey.length === 0) {

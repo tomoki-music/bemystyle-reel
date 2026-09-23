@@ -1715,6 +1715,9 @@ app.use((err, _req, res, _next) => {
 })
 
 const PORT = Number(process.env.PORT || 3002)
-app.listen(PORT, () => {
+// ローカル単一オペレーター用ツールのため、意図せず0.0.0.0（全インターフェース）へ
+// 公開されないよう待受ホストを明示的に127.0.0.1へ固定する。
+const HOST = '127.0.0.1'
+app.listen(PORT, HOST, () => {
   console.log(`API server running at http://localhost:${PORT}`)
 })
