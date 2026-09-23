@@ -22,6 +22,7 @@ import {
   statSync,
   realpathSync,
   readdirSync,
+  renameSync,
 } from 'fs'
 import { resolve, extname, basename } from 'path'
 import os from 'os'
@@ -690,12 +691,22 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
       })
     }
 
-    let outputPath
+    // 出力ファイル名には元動画名を含めない（プレビュー出力と同じ方針）。
+    let finalOutputPath
     try {
-      outputPath = buildUniqueOutputPath(job.sourceFilename, outputRootReal, job.sourcePath)
+      finalOutputPath = buildUniqueOutputPath('video.mp4', outputRootReal, job.sourcePath)
     } catch (err) {
       store.releaseLock(job.id)
       return res.status(500).json({ ok: false, message: err.message })
+    }
+    // レンダー中は隠しファイル名の一時パスへ書き込み、完了後にのみ最終名へ
+    // rename する。途中でプロセスが落ちても、完成品として見える場所には
+    // 不完全なファイルが残らない。
+    const tempOutputPath = resolve(outputRootReal, `.rendering-${job.id}${extname(finalOutputPath)}`)
+    try {
+      if (existsSync(tempOutputPath)) unlinkSync(tempOutputPath)
+    } catch {
+      // best effort
     }
 
     const fontStatus = await checkJapaneseFontAvailable()
@@ -711,7 +722,7 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
     }
 
     activeRenderJobId = job.id
-    job = store.transition(job, 'rendering', { outputPath, renderProgress: 0 })
+    job = store.transition(job, 'rendering', { outputPath: tempOutputPath, renderProgress: 0 })
     logSafe('render start', job.id)
     res.json({
       ok: true,
@@ -722,7 +733,7 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
     burnCaptions({
       sourceRealPath: job.sourcePath,
       assPath,
-      outputPath,
+      outputPath: tempOutputPath,
       durationSec: job.durationSec,
       onProgress: (percent) => {
         const current = store.load(job.id)
@@ -736,16 +747,35 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
     })
       .then(() => {
         const current = store.load(job.id)
-        if (current) {
-          store.transition(current, 'completed', { renderedAt: new Date().toISOString(), renderProgress: 100 })
-          logSafe('render complete', job.id)
+        if (!current) return
+        try {
+          renameSync(tempOutputPath, finalOutputPath)
+        } catch (err) {
+          try {
+            if (existsSync(tempOutputPath)) unlinkSync(tempOutputPath)
+          } catch {
+            // best effort
+          }
+          store.transition(current, 'failed', {
+            errorMessage: `レンダー結果の確定に失敗しました: ${err.message}`,
+            outputPath: null,
+            renderProgress: null,
+          })
+          logSafe('render finalize failed', job.id)
+          return
         }
+        store.transition(current, 'completed', {
+          renderedAt: new Date().toISOString(),
+          renderProgress: 100,
+          outputPath: finalOutputPath,
+        })
+        logSafe('render complete', job.id)
       })
       .catch((err) => {
         const current = store.load(job.id)
         if (!current) return
         try {
-          if (existsSync(outputPath)) unlinkSync(outputPath)
+          if (existsSync(tempOutputPath)) unlinkSync(tempOutputPath)
         } catch {
           // best effort
         }

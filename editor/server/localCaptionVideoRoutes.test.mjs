@@ -294,6 +294,71 @@ describe('POST /api/local-caption-videos/:id/render', () => {
     const res = await fetch(`${baseUrl}/${job.id}/render`, { method: 'POST' })
     expect(res.status).toBe(400)
   })
+
+  it('成功時: 一時パスへ書き込み、完了後に元動画名を含まない最終ファイル名へrenameされる', async () => {
+    const job = await createReadyJob('render-success-なぜ社名.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+
+    let tempPathSeenDuringRender
+    mockBurnCaptions.mockImplementation(async ({ outputPath }) => {
+      tempPathSeenDuringRender = outputPath
+      // レンダー中は隠しファイル名の一時パスに存在し、最終ファイル名はまだ存在しない
+      expect(basename(outputPath)).toMatch(/^\.rendering-/)
+      expect(resolve(outputPath, '..')).toBe(outputRoot)
+      writeFileSync(outputPath, 'fake-rendered-bytes')
+    })
+
+    const res = await fetch(`${baseUrl}/${job.id}/render`, { method: 'POST' })
+    expect(res.status).toBe(200)
+
+    const completed = await waitForJob(job.id, (j) => j.status === 'completed')
+    expect(completed.outputPath).toBeTruthy()
+    expect(completed.outputPath).not.toBe(tempPathSeenDuringRender)
+    expect(existsSync(completed.outputPath)).toBe(true)
+    expect(existsSync(tempPathSeenDuringRender)).toBe(false)
+    // 出力ファイル名に元動画名を含まない
+    expect(basename(completed.outputPath)).not.toMatch(/render-success|なぜ社名/)
+    expect(resolve(completed.outputPath, '..')).toBe(outputRoot)
+  })
+
+  it('失敗時: 一時ファイルが削除され、完成品として最終ファイル名は作られない', async () => {
+    const job = await createReadyJob('render-fail.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+
+    let tempPathSeenDuringRender
+    mockBurnCaptions.mockImplementation(async ({ outputPath }) => {
+      tempPathSeenDuringRender = outputPath
+      writeFileSync(outputPath, 'partial-bytes')
+      throw new Error('boom')
+    })
+
+    const res = await fetch(`${baseUrl}/${job.id}/render`, { method: 'POST' })
+    expect(res.status).toBe(200)
+
+    const failed = await waitForJob(job.id, (j) => j.status === 'failed')
+    expect(failed.outputPath).toBeFalsy()
+    expect(existsSync(tempPathSeenDuringRender)).toBe(false)
+  })
+
+  it('同じジョブに対してレンダー中に二重でrenderを開始できない', async () => {
+    const job = await createReadyJob('render-double.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+
+    let resolveBurn
+    mockBurnCaptions.mockImplementation(({ outputPath }) => new Promise((r) => {
+      writeFileSync(outputPath, 'fake-rendered-bytes')
+      resolveBurn = r
+    }))
+
+    const firstRes = await fetch(`${baseUrl}/${job.id}/render`, { method: 'POST' })
+    expect(firstRes.status).toBe(200)
+
+    const secondRes = await fetch(`${baseUrl}/${job.id}/render`, { method: 'POST' })
+    expect(secondRes.status).toBe(409)
+
+    resolveBurn()
+    await waitForJob(job.id, (j) => j.status === 'completed')
+  })
 })
 
 describe('DELETE /api/local-caption-videos/:id', () => {
