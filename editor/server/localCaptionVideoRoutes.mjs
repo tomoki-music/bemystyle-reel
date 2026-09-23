@@ -1030,5 +1030,45 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
     streamVideoFile(req, res, real)
   })
 
+  // ── 出力/プレビューファイルの長さ・サイズ（UIの完成動画/プレビュー区別表示用） ──
+  // 絶対パスは返さない（durationSec と sizeBytes のみ）。
+
+  async function describeOutputFile(res, filePath, notFoundMessage) {
+    if (!filePath) return res.status(404).json({ ok: false, message: notFoundMessage })
+    let outRoot
+    try {
+      outRoot = validateOutputRoot(getOutputRoot())
+    } catch (err) {
+      return res.status(500).json({ ok: false, message: err.message })
+    }
+    let real
+    try {
+      real = realpathSync(filePath)
+    } catch {
+      return res.status(404).json({ ok: false, message: 'ファイルが見つかりません' })
+    }
+    if (!isInsideAnyRoot(real, [outRoot])) {
+      return res.status(403).json({ ok: false, message: 'アクセスが拒否されました' })
+    }
+    try {
+      const meta = await runFfprobe(real)
+      return res.json({ ok: true, durationSec: meta.durationSec, sizeBytes: statSync(real).size })
+    } catch {
+      return res.status(502).json({ ok: false, message: 'ファイル情報を取得できませんでした' })
+    }
+  }
+
+  router.get('/:id/output-info', async (req, res) => {
+    const job = store.load(req.params.id)
+    if (!job) return res.status(404).json({ ok: false, message: 'ジョブが見つかりません' })
+    await describeOutputFile(res, job.outputPath, '出力ファイルがありません')
+  })
+
+  router.get('/:id/preview-info', async (req, res) => {
+    const job = store.load(req.params.id)
+    if (!job) return res.status(404).json({ ok: false, message: 'ジョブが見つかりません' })
+    await describeOutputFile(res, job.previewOutputPath, 'プレビューファイルがありません')
+  })
+
   return router
 }

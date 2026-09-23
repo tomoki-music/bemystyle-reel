@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
-import { runFfprobe, extractAudio, burnCaptions, renderPreviewClip } from './ffmpegRunner.mjs'
+import { runFfprobe, extractAudio, extractAudioSegmentWav, burnCaptions, renderPreviewClip } from './ffmpegRunner.mjs'
 
 // vi.mock による child_process の丸ごと差し替えは、このプロジェクトの
 // vitest/vite-node 環境では組み込みモジュールに対して確実に効かないことが
@@ -268,5 +268,35 @@ describe('renderPreviewClip', () => {
     })
     child.emit('close', 0)
     await promise
+  })
+})
+
+describe('extractAudioSegmentWav (区間音声の抽出)', () => {
+  it('argv配列で -ss/-t/16kHz mono PCM を指定し、元動画は入力(-i)として読むだけ', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockReturnValue(child)
+    process.env.FFMPEG_BIN = '/opt/ffmpeg-full/bin/ffmpeg'
+    const p = extractAudioSegmentWav('/videos/in.mp4', '/tmp/x/clip.wav', 671.48, 60, { spawnFn: mockSpawn })
+    child.emit('close', 0)
+    await p
+    const [cmd, args, opts] = mockSpawn.mock.calls[0]
+    expect(cmd).toBe('/opt/ffmpeg-full/bin/ffmpeg')
+    expect(Array.isArray(args)).toBe(true)
+    expect(opts?.shell).toBeUndefined()
+    expect(args.slice(args.indexOf('-ss'), args.indexOf('-ss') + 2)).toEqual(['-ss', '671.48'])
+    expect(args.slice(args.indexOf('-t'), args.indexOf('-t') + 2)).toEqual(['-t', '60'])
+    expect(args).toEqual(expect.arrayContaining(['-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le']))
+    expect(args[args.indexOf('-i') + 1]).toBe('/videos/in.mp4')
+    expect(args[args.length - 1]).toBe('/tmp/x/clip.wav')
+    // 出力先は入力と別ファイル（元動画を書き換えない）
+    expect(args.filter((a) => a === '/videos/in.mp4')).toHaveLength(1)
+  })
+
+  it('ffmpegが失敗したらエラー', async () => {
+    const child = new FakeChild()
+    mockSpawn.mockReturnValue(child)
+    const p = extractAudioSegmentWav('/videos/in.mp4', '/tmp/x/clip.wav', 0, 60, { spawnFn: mockSpawn })
+    child.emit('close', 1)
+    await expect(p).rejects.toThrow('区間音声の抽出に失敗')
   })
 })

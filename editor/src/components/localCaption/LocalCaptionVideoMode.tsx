@@ -1,5 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { useLocalCaptionVideo } from './useLocalCaptionVideo'
+import { useOutputFileInfo } from './useOutputFileInfo'
+import { SourceVideoPanel, PreviewVideoPanel, FinalVideoPanel } from './VideoPanels'
 import type { Caption, CaptionType, LocalCaptionJob } from './types'
 import './LocalCaptionVideoMode.css'
 
@@ -211,6 +213,20 @@ export function LocalCaptionVideoMode() {
 
   const renderDisabled = renderDisabledReason()
 
+  // 実ファイルの長さ・サイズ（完成動画/プレビューの区別表示用）
+  const outputInfo = useOutputFileInfo(
+    currentJob?.id ?? null,
+    'output',
+    Boolean(currentJob && currentJob.status === 'completed' && currentJob.outputPath),
+    currentJob?.renderedAt,
+  )
+  const previewInfo = useOutputFileInfo(
+    currentJob?.id ?? null,
+    'preview',
+    Boolean(currentJob?.previewOutputPath),
+    currentJob?.previewRenderedAt,
+  )
+
   return (
     <div className="lcv-page">
       <header className="lcv-header">
@@ -353,27 +369,11 @@ export function LocalCaptionVideoMode() {
                 )}
               </section>
 
-              <section className="lcv-panel">
-                <h2>プレビュー</h2>
-                <video
-                  ref={videoRef}
-                  className="lcv-video"
-                  controls
-                  src={`/api/local-caption-videos/${currentJob.id}/source-stream`}
-                />
-                {currentJob.status === 'completed' && currentJob.outputPath && (
-                  <div className="lcv-output">
-                    <p>出力先: {currentJob.outputPath}</p>
-                    <a
-                      href={`/api/local-caption-videos/${currentJob.id}/output-stream`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      レンダー結果を再生/ダウンロード
-                    </a>
-                  </div>
-                )}
-              </section>
+              <SourceVideoPanel jobId={currentJob.id} videoRef={videoRef} />
+
+              {currentJob.status === 'completed' && currentJob.outputPath && (
+                <FinalVideoPanel jobId={currentJob.id} outputInfo={outputInfo} />
+              )}
 
               <section className="lcv-panel">
                 <h2>字幕（{sortedCaptions.length}件）</h2>
@@ -487,20 +487,17 @@ export function LocalCaptionVideoMode() {
                 </div>
               </section>
 
-              <section className="lcv-panel">
-                <h2>短時間プレビュー（captionType別デザイン確認用）</h2>
-                <p className="lcv-muted">main/sub/emphasisを含む30〜60秒だけを字幕焼き込みして確認します（フル動画のレンダーとは別です）。</p>
+              <section className="lcv-panel lcv-panel--preview">
+                <h2>
+                  <span className="lcv-badge lcv-badge--preview">プレビュー</span>
+                  短時間プレビュー（完成動画ではありません）
+                </h2>
+                <p className="lcv-muted">captionType別デザインの確認用に、main/sub/emphasisを含む30〜60秒だけを字幕焼き込みして確認します。動画全体ではなく、一部の区間だけです。</p>
                 <button type="button" onClick={handlePreviewRender} disabled={previewRendering || sortedCaptions.length === 0}>
                   {previewRendering ? 'プレビュー生成中…' : '短時間プレビューを生成'}
                 </button>
                 {currentJob.previewOutputPath && currentJob.previewWindow && (
-                  <div className="lcv-output">
-                    <p>
-                      区間: {formatTime(currentJob.previewWindow.startSec)} - {formatTime(currentJob.previewWindow.endSec)}
-                      {currentJob.previewWindow.synthetic && '（該当区間が無かったためダミーデータを使用）'}
-                    </p>
-                    <video controls className="lcv-video" src={`/api/local-caption-videos/${currentJob.id}/preview-stream`} />
-                  </div>
+                  <PreviewVideoPanel jobId={currentJob.id} previewWindow={currentJob.previewWindow} previewInfo={previewInfo} />
                 )}
               </section>
 

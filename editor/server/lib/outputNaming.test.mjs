@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
-import { buildUniqueOutputPath, buildPreviewOutputPath } from './outputNaming.mjs'
+import { buildUniqueOutputPath, buildPreviewOutputPath, buildComparisonOutputPath } from './outputNaming.mjs'
 
 let dir
 
@@ -70,5 +70,44 @@ describe('buildPreviewOutputPath', () => {
     writeFileSync(sourceReal, 'original video bytes')
     const outputPath = buildPreviewOutputPath('zzzzzzzz', dir, sourceReal, now)
     expect(outputPath).not.toBe(sourceReal)
+  })
+})
+
+describe('buildComparisonOutputPath (旧方式/新方式の比較動画)', () => {
+  const now = new Date('2026-09-23T22:00:00')
+
+  it('legacy と semantic は別ファイル名になり、元動画名を含まない', () => {
+    const sourceReal = resolve(dir, 'なぜ社名.mp4')
+    writeFileSync(sourceReal, 'x')
+    const legacy = buildComparisonOutputPath('legacy', dir, sourceReal, now)
+    const semantic = buildComparisonOutputPath('semantic', dir, sourceReal, now)
+    expect(legacy).toMatch(/comparison_legacy_20260923_220000\.mp4$/)
+    expect(semantic).toMatch(/comparison_semantic_20260923_220000\.mp4$/)
+    expect(legacy).not.toBe(semantic)
+    expect(legacy + semantic).not.toContain('なぜ社名')
+  })
+
+  it('既存の完成動画・プレビュー動画・比較動画を上書きしない（衝突時はサフィックス）', () => {
+    const sourceReal = resolve(dir, 'src.mp4')
+    writeFileSync(sourceReal, 'x')
+    const existing = [
+      'preview_e02f8191_20260923_223228.mp4',
+      'video_captioned_20260923_225401.mp4',
+      'comparison_legacy_20260923_220000.mp4',
+    ]
+    for (const name of existing) writeFileSync(resolve(dir, name), 'existing-bytes')
+    const out = buildComparisonOutputPath('legacy', dir, sourceReal, now)
+    expect(out).toMatch(/comparison_legacy_20260923_220000_[0-9a-f]{6}\.mp4$/)
+    expect(existing.map((n) => resolve(dir, n))).not.toContain(out)
+  })
+
+  it('出力先は指定した出力ルート直下', () => {
+    const sourceReal = resolve(dir, 'src.mp4')
+    writeFileSync(sourceReal, 'x')
+    expect(resolve(buildComparisonOutputPath('semantic', dir, sourceReal, now), '..')).toBe(dir)
+  })
+
+  it('不正な種別は拒否する', () => {
+    expect(() => buildComparisonOutputPath('other', dir, resolve(dir, 'src.mp4'), now)).toThrow()
   })
 })

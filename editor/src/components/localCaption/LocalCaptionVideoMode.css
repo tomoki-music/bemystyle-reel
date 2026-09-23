@@ -382,3 +382,34 @@ button:disabled {
   gap: 8px;
   margin-bottom: 8px;
 }
+
+/* ── 元動画 / 短時間プレビュー / 完成動画 の区別（誤認防止） ── */
+.lcv-badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  vertical-align: middle;
+  color: #fff;
+}
+.lcv-badge--source { background: #6b7280; }
+.lcv-badge--preview { background: #d97706; }
+.lcv-badge--final { background: #059669; }
+
+.lcv-panel--source { border: 2px solid #9ca3af; }
+.lcv-panel--preview { border: 2px dashed #d97706; background: #fffbeb; }
+.lcv-panel--final { border: 3px solid #059669; background: #ecfdf5; }
+.lcv-video--preview { outline: 3px dashed #d97706; }
+.lcv-video--final { outline: 3px solid #059669; }
+
+.lcv-download {
+  display: inline-block;
+  padding: 8px 14px;
+  background: #059669;
+  color: #fff;
+  border-radius: 6px;
+  font-weight: 700;
+  text-decoration: none;
+}

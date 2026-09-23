@@ -694,3 +694,47 @@ describe('POST /api/local-caption-videos/:id/preview-render (短時間プレビ�
     expect(reloaded.job.previewOutputPath).toBeFalsy()
   })
 })
+
+
+describe('GET /:id/output-info・preview-info (完成動画/プレビューの長さ・サイズ表示用)', () => {
+  it('完成動画: durationSec と sizeBytes のみを返し、絶対パスは返さない', async () => {
+    const job = await createReadyJob('info-output.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 2, text: 'a', captionType: 'normal' })
+    mockBurnCaptions.mockImplementation(async ({ outputPath }) => {
+      writeFileSync(outputPath, 'x'.repeat(1234))
+    })
+    await fetch(`${baseUrl}/${job.id}/render`, { method: 'POST' })
+    await waitForJob(job.id, (j) => j.status === 'completed')
+    mockRunFfprobe.mockResolvedValueOnce({ durationSec: 918.685, width: 1920, height: 1080, rotation: 0, videoCodec: 'h264', audioCodec: 'aac', container: 'mp4', hasAudio: true })
+
+    const res = await fetch(`${baseUrl}/${job.id}/output-info`)
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data).toEqual({ ok: true, durationSec: 918.685, sizeBytes: 1234 })
+    expect(JSON.stringify(data)).not.toContain(outputRoot)
+  })
+
+  it('完成動画が無ければ404', async () => {
+    const job = await createReadyJob('info-none.mp4')
+    expect((await fetch(`${baseUrl}/${job.id}/output-info`)).status).toBe(404)
+    expect((await fetch(`${baseUrl}/${job.id}/preview-info`)).status).toBe(404)
+  })
+
+  it('プレビュー: 実ファイルの長さ・サイズを返す（完成動画とは別エンドポイント）', async () => {
+    mockRunFfprobe.mockResolvedValueOnce({ durationSec: 40, width: 1080, height: 1920, rotation: 0, videoCodec: 'h264', audioCodec: 'aac', container: 'mp4', hasAudio: true })
+    const job = await createReadyJob('info-preview.mp4')
+    await addCaption(job.id, { startSec: 0, endSec: 10, text: 'main', captionType: 'main' })
+    await addCaption(job.id, { startSec: 10, endSec: 20, text: 'sub', captionType: 'sub' })
+    await addCaption(job.id, { startSec: 20, endSec: 32, text: 'emphasis', captionType: 'emphasis' })
+    mockRenderPreviewClip.mockImplementation(async ({ outputPath }) => {
+      writeFileSync(outputPath, 'y'.repeat(555))
+    })
+    expect((await fetch(`${baseUrl}/${job.id}/preview-render`, { method: 'POST' })).status).toBe(200)
+    mockRunFfprobe.mockResolvedValueOnce({ durationSec: 30.02, width: 1080, height: 1920, rotation: 0, videoCodec: 'h264', audioCodec: 'aac', container: 'mp4', hasAudio: true })
+
+    const data = await (await fetch(`${baseUrl}/${job.id}/preview-info`)).json()
+    expect(data).toEqual({ ok: true, durationSec: 30.02, sizeBytes: 555 })
+    // 完成動画はまだ無い
+    expect((await fetch(`${baseUrl}/${job.id}/output-info`)).status).toBe(404)
+  })
+})

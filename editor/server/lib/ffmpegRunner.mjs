@@ -94,6 +94,45 @@ export function extractAudio(sourceRealPath, outAudioPath, deps = {}) {
 }
 
 /**
+ * 動画の指定区間だけを、ローカルWhisper用の16kHz mono PCM WAVとして抽出する。
+ * 元動画は読み取りのみ（コピー・変更なし）。argv配列で実行しシェルを介さない。
+ *
+ * @param {string} sourceRealPath
+ * @param {string} outWavPath 一時ディレクトリ内の出力先
+ * @param {number} startSec
+ * @param {number} durationSec
+ * @param {{ spawnFn?: typeof realSpawn }} [deps]
+ */
+export function extractAudioSegmentWav(sourceRealPath, outWavPath, startSec, durationSec, deps = {}) {
+  const spawnFn = deps.spawnFn ?? realSpawn
+  return new Promise((resolvePromise, reject) => {
+    const child = spawnFn(getFfmpegBin(), [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-y',
+      '-ss', String(Math.max(0, startSec)),
+      '-i', sourceRealPath,
+      '-t', String(Math.max(0.1, durationSec)),
+      '-vn',
+      '-ac', '1',
+      '-ar', '16000',
+      '-c:a', 'pcm_s16le',
+      outWavPath,
+    ])
+    let stderr = ''
+    child.stderr.on('data', (d) => { stderr += d.toString() })
+    child.on('error', (err) => reject(new Error(`ffmpeg(区間音声抽出)起動エラー: ${err.message}`)))
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`区間音声の抽出に失敗しました（ffmpeg終了コード${code}）: ${stderr.slice(0, 300)}`))
+        return
+      }
+      resolvePromise()
+    })
+  })
+}
+
+/**
  * 字幕焼き込みレンダリングを開始する。ffmpeg プロセス自体を返すので、
  * 呼び出し側でキャンセル（SIGTERM/SIGKILL）できる。
  *

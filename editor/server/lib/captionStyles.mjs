@@ -198,7 +198,7 @@ function formatAssTime(seconds) {
  * 1キャプション分の Dialogue: 行テキスト（エスケープ・強調オーバーライド込み）を組み立てる。
  * emphasisText が text の部分文字列として実在する場合のみ、その部分にカラーオーバーライドを付与する。
  *
- * @param {{ text: string, emphasisText?: string | null }} caption
+ * @param {{ text: string, lines?: string[], emphasisText?: string | null }} caption
  * @param {string} highlightColour
  */
 export function buildDialogueText(caption, highlightColour) {
@@ -206,6 +206,11 @@ export function buildDialogueText(caption, highlightColour) {
   const emphasisText = typeof caption?.emphasisText === 'string' ? caption.emphasisText : ''
 
   if (!emphasisText || !text.includes(emphasisText)) {
+    // 表示用の改行位置(lines)が指定され、本文と完全一致する場合のみ、各行をエスケープした上で
+    // 明示的な ASS 改行 \N で連結する。本文(text)自体には \N を保存しない（レンダー時変換）。
+    if (Array.isArray(caption?.lines) && caption.lines.length > 1 && caption.lines.join('') === text) {
+      return caption.lines.map((line) => escapeAssText(line)).join('\\N')
+    }
     return escapeAssText(text)
   }
 

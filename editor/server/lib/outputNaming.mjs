@@ -96,3 +96,38 @@ export function buildPreviewOutputPath(jobId, outputRootRealPath, sourceRealPath
 
   return candidatePath
 }
+
+export const COMPARISON_KINDS = ['legacy', 'semantic']
+
+/**
+ * 旧方式/新方式の比較検証用動画の出力ファイル名を作る。
+ * `comparison_<kind>_<timestamp>.mp4`。元動画名は含めず、既存ファイルを上書きしない。
+ *
+ * @param {'legacy' | 'semantic'} kind
+ * @param {string} outputRootRealPath 検証済みの出力先ディレクトリ（realpath）
+ * @param {string} sourceRealPath 検証済みの元動画パス（衝突防止用）
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function buildComparisonOutputPath(kind, outputRootRealPath, sourceRealPath, now = new Date()) {
+  if (!COMPARISON_KINDS.includes(kind)) throw new Error('比較動画の種別が不正です')
+  const timestamp = formatTimestamp(now)
+  const collides = (p) => {
+    if (existsSync(p)) return true
+    try {
+      if (existsSync(sourceRealPath) && realpathSync(p) === sourceRealPath) return true
+    } catch {
+      // p が存在しない場合は realpathSync が失敗するのでここに来て問題ない
+    }
+    return false
+  }
+  let candidatePath = resolve(outputRootRealPath, `comparison_${kind}_${timestamp}.mp4`)
+  let guard = 0
+  while (collides(candidatePath) && guard < 20) {
+    candidatePath = resolve(outputRootRealPath, `comparison_${kind}_${timestamp}_${randomBytes(3).toString('hex')}.mp4`)
+    guard += 1
+  }
+  if (collides(candidatePath)) throw new Error('比較動画の出力ファイル名の決定に失敗しました（衝突が解消できません）')
+  if (candidatePath === sourceRealPath) throw new Error('出力パスが入力パスと一致しています（安全のため拒否）')
+  return candidatePath
+}
