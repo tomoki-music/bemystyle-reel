@@ -94,6 +94,10 @@ export class JobStore {
       errorMessage: null,
       transcriptionNote: null,
       captions: [],
+      // Whisperの生segment（分割前・編集不可のraw transcription）。
+      // captions は rawSegments から決定的に分割生成した編集用データで、
+      // rawSegments 自体は文字起こし完了後は上書きしない。
+      rawSegments: [],
       createdAt: now,
       updatedAt: now,
       transcribedAt: null,

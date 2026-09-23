@@ -19,9 +19,17 @@ export interface Caption {
   endSec: number
   text: string
   captionType: CaptionType
-  // Phase1のUIでは未使用（将来のemphasisハイライト機能向けに予約）。
+  // Phase1のUIでは未使用(将来のemphasisハイライト機能向けに予約)。
   emphasisText?: string | null
   displayOrder: number
+}
+
+// Whisperの生segment(分割前・読み取り専用のraw transcription)。
+// captions はここから決定的に分割生成した編集用データで、こちらは編集画面から変更しない。
+export interface RawSegment {
+  startSec: number
+  endSec: number
+  text: string
 }
 
 export interface LocalCaptionJob {
@@ -43,6 +51,8 @@ export interface LocalCaptionJob {
   errorMessage: string | null
   transcriptionNote: string | null
   captions: Caption[]
+  // 既存ジョブ(この機能追加前に作成されたもの)には無い場合があるためoptional。
+  rawSegments?: RawSegment[]
   createdAt: string
   updatedAt: string
   transcribedAt: string | null

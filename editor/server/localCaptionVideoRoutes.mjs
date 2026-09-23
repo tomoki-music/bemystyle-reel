@@ -43,6 +43,7 @@ import {
   TranscriptionApiError,
 } from './lib/openaiTranscription.mjs'
 import { buildAssContent, CAPTION_TYPES } from './lib/captionStyles.mjs'
+import { buildDisplayCaptionsFromSegments } from './lib/captionSegmenter.mjs'
 import { checkDiskSpace } from './lib/diskSpace.mjs'
 import { checkJapaneseFontAvailable } from './lib/fontCheck.mjs'
 import { buildUniqueOutputPath } from './lib/outputNaming.mjs'
@@ -388,21 +389,33 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
       const current = store.load(jobId)
       if (!current) return
       const existingCaptions = Array.isArray(current.captions) ? current.captions : []
-      let nextOrder = existingCaptions.length
-      const newCaptions = segments.map((seg) => ({
-        id: randomUUID(),
+      const existingRawSegments = Array.isArray(current.rawSegments) ? current.rawSegments : []
+
+      // Whisperの生segmentはそのまま rawSegments として保持し（編集用captionとは区別・
+      // 上書きしない）、表示用captionはそこから決定的に分割生成する。
+      const rawSegmentsToAdd = segments.map((seg) => ({
         startSec: seg.startSec,
         endSec: seg.endSec,
         text: seg.text,
+      }))
+      const displayChunks = buildDisplayCaptionsFromSegments(rawSegmentsToAdd)
+
+      let nextOrder = existingCaptions.length
+      const newCaptions = displayChunks.map((chunk) => ({
+        id: randomUUID(),
+        startSec: chunk.startSec,
+        endSec: chunk.endSec,
+        text: chunk.text,
         captionType: 'normal',
         emphasisText: null,
         displayOrder: nextOrder++,
       }))
       store.transition(current, 'ready_for_edit', {
         captions: [...existingCaptions, ...newCaptions],
+        rawSegments: [...existingRawSegments, ...rawSegmentsToAdd],
         transcribedAt: new Date().toISOString(),
       })
-      logSafe('transcription complete', jobId, `captions=${newCaptions.length}`)
+      logSafe('transcription complete', jobId, `segments=${rawSegmentsToAdd.length} captions=${newCaptions.length}`)
     } catch (err) {
       const j = store.load(jobId)
       if (j) store.transition(j, 'failed', { errorMessage: `音声抽出に失敗しました: ${err.message}` })

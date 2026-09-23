@@ -75,7 +75,7 @@ export function LocalCaptionVideoMode() {
   const [newText, setNewText] = useState('')
 
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<{ startSec: string; endSec: string; text: string } | null>(null)
+  const [editDraft, setEditDraft] = useState<{ startSec: string; endSec: string; text: string; captionType: CaptionType } | null>(null)
 
   const sortedCaptions = useMemo(() => {
     if (!currentJob) return []
@@ -128,7 +128,7 @@ export function LocalCaptionVideoMode() {
 
   const startEdit = (c: Caption) => {
     setEditingId(c.id)
-    setEditDraft({ startSec: String(c.startSec), endSec: String(c.endSec), text: c.text })
+    setEditDraft({ startSec: String(c.startSec), endSec: String(c.endSec), text: c.text, captionType: c.captionType })
   }
 
   const saveEdit = async (jobId: string, captionId: string) => {
@@ -139,7 +139,12 @@ export function LocalCaptionVideoMode() {
       setError('終了時刻は開始時刻より後にしてください')
       return
     }
-    const ok = await updateCaption(jobId, captionId, { startSec: s, endSec: e, text: editDraft.text.trim() })
+    const ok = await updateCaption(jobId, captionId, {
+      startSec: s,
+      endSec: e,
+      text: editDraft.text.trim(),
+      captionType: editDraft.captionType,
+    })
     if (ok) {
       setEditingId(null)
       setEditDraft(null)
@@ -358,6 +363,14 @@ export function LocalCaptionVideoMode() {
                             value={editDraft.text}
                             onChange={(e) => setEditDraft({ ...editDraft, text: e.target.value })}
                           />
+                          <select
+                            value={editDraft.captionType}
+                            onChange={(e) => setEditDraft({ ...editDraft, captionType: e.target.value as CaptionType })}
+                          >
+                            {(Object.keys(CAPTION_TYPE_LABELS) as CaptionType[]).map((type) => (
+                              <option key={type} value={type}>{CAPTION_TYPE_LABELS[type]}</option>
+                            ))}
+                          </select>
                           <button type="button" onClick={() => saveEdit(currentJob.id, c.id)}>保存</button>
                           <button type="button" onClick={() => { setEditingId(null); setEditDraft(null) }}>キャンセル</button>
                         </div>
