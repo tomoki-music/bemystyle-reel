@@ -62,7 +62,11 @@ describe('localCaptionFiveMinute: 安全性(静的確認)', () => {
     expect(src).toContain("rmSync(partialPath, { force: true })")
     expect(src).toContain('partialFilesLeft')
     expect(src.indexOf('renameSync(partialPath, finalPath)')).toBeGreaterThan(src.indexOf('renderPreviewClip('))
-    expect(src).toContain("buildComparisonOutputPath('five_minute_topics'")
+    expect(src).toContain("buildComparisonOutputPath(contNorm ? 'five_minute_continuous_topics' : 'five_minute_topics'")
+    // 常時表示版: 生成したASSと完成MP4の全フレームでテーマ被覆を検証し、満たさなければ動画を作らない/失敗にする
+    expect(src).toContain('analyzeTopicAssEvents(assText')
+    expect(src).toContain('verifyThemeFramesInVideo(finalPath')
+    expect(src).toContain("problems.push('生成したASSでテーマ表示が0〜300秒を完全に被覆していません')")
   })
 
   it('動画尺が300秒でなければ完成品にしない（rename前に検証）', () => {
