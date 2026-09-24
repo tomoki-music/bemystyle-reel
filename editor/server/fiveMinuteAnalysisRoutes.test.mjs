@@ -20,8 +20,8 @@ const captions = Array.from({ length: 100 }, (_, i) => ({
 const id = (i) => captions[i].id
 const validated = {
   topics: [
-    { title: 'メンバーとの距離の取り方', startCaptionId: id(0), endCaptionId: id(49), supportingCaptionIds: [id(2)], confidence: 0.9 },
-    { title: 'ライブ準備の進め方', startCaptionId: id(50), endCaptionId: id(99), supportingCaptionIds: [id(60)], confidence: 0.8 },
+    { title: 'メンバーとの距離の取り方', startCaptionId: id(0), endCaptionId: id(49), evidenceCaptionIds: [id(2)], confidence: 0.9 },
+    { title: 'ライブ準備の進め方', startCaptionId: id(50), endCaptionId: id(99), evidenceCaptionIds: [id(60)], confidence: 0.8 },
   ],
   emphasis: [{ captionId: id(0), emphasisText: 'とても大事', category: 'keyword', confidence: 0.8 }],
 }

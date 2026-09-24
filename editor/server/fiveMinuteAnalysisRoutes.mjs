@@ -23,16 +23,22 @@ import {
 
 const JOB_ID_RE = /^[a-zA-Z0-9-]+$/
 
+/** キーごとのpagesファイル。修正後の v2（.pages.v2.json）があれば v2、なければ v1（.pages.json）。v1は変更しない。 */
+export function pagesFileFor(dataDir, key) {
+  const v2 = join(dataDir, `${key}.pages.v2.json`)
+  return existsSync(v2) ? v2 : join(dataDir, `${key}.pages.json`)
+}
+
 /** ジョブに対応する5分比較用のpages/analysisを探す（最新のkey）。無ければ null。 */
 export function findFiveMinuteData(dataDir, jobId) {
   if (!existsSync(dataDir)) return null
-  const keys = readdirSync(dataDir)
-    .filter((n) => n.endsWith('.pages.json'))
-    .map((n) => n.replace(/\.pages\.json$/, ''))
+  const keys = [...new Set(readdirSync(dataDir)
+    .filter((n) => /\.pages(\.v2)?\.json$/.test(n))
+    .map((n) => n.replace(/\.pages(\.v2)?\.json$/, '')))]
     .sort()
     .reverse()
   for (const key of keys) {
-    const pages = JSON.parse(readFileSync(join(dataDir, `${key}.pages.json`), 'utf-8'))
+    const pages = JSON.parse(readFileSync(pagesFileFor(dataDir, key), 'utf-8'))
     if (pages.jobId !== jobId) continue
     const aPath = analysisPath(dataDir, key)
     const analysis = existsSync(aPath) ? JSON.parse(readFileSync(aPath, 'utf-8')) : null

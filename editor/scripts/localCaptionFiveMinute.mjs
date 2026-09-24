@@ -3,7 +3,8 @@
 // 使い方（editor/ で実行。.env の FFMPEG_BIN / FFPROBE_BIN / VIDEO_INPUT_ROOTS / VIDEO_OUTPUT_ROOT / OPENAI_API_KEY を使用）:
 //   node scripts/localCaptionFiveMinute.mjs select  --job <jobId> [--reference-start 671.48 --reference-sec 60]
 //   node scripts/localCaptionFiveMinute.mjs align   --job <jobId> [--start <sec>]
-//   node scripts/localCaptionFiveMinute.mjs analyze --job <jobId> --allow-api        # gpt-4o-mini を1回だけ
+//   node scripts/localCaptionFiveMinute.mjs analyze --job <jobId> --allow-api --attempt <N>   # gpt-4o-mini を1回だけ（累計上限2回）
+//   node scripts/localCaptionFiveMinute.mjs revalidate --job <jobId> --attempt <N>             # 保存済み応答の再検証（HTTPなし）
 //   node scripts/localCaptionFiveMinute.mjs render  --job <jobId> [--stills-dir <dir>] [--mobile-widths 390,430]
 //   node scripts/localCaptionFiveMinute.mjs check   --job <jobId> [--stills-dir <dir>]      # AI結果なし・動画は生成しない（字幕サイズ/位置の実描画確認）
 //
@@ -37,10 +38,11 @@ import { buildNaturalCaptions } from '../server/lib/naturalCaptionPipeline.mjs'
 import { planChunksFromRawSegments, alignCanonicalByChunks } from '../server/lib/chunkedAlignment.mjs'
 import { selectFiveMinuteWindow, rerankWithVisual, darkMassMotion } from '../server/lib/windowSelector.mjs'
 import { boundaryProblems } from '../server/lib/japaneseText.mjs'
+import { countBoundaryProblems, isStandaloneShort } from '../server/lib/boundaryRules.mjs'
 import { measureSyncAgainstAudio, measureCaptionTiming, readabilityStats, countForbiddenBoundaries, stats } from '../server/lib/comparisonMetrics.mjs'
 import { measureCaptionRender } from '../server/lib/assRenderMeasure.mjs'
 import { getCaptionFitLimits } from '../server/lib/captionFit.mjs'
-import { runAnalysisOnce, loadAnalysis, materializeAnalysis, fingerprintCaptions, AnalysisError } from '../server/lib/topicAnalysis.mjs'
+import { runAnalysisOnce, revalidateSavedResponse, loadAnalysis, materializeAnalysis, fingerprintCaptions, AnalysisError } from '../server/lib/topicAnalysis.mjs'
 import { fitTopicTitle } from '../server/lib/topicAss.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -63,6 +65,10 @@ function parseArgs(argv) {
     else if (a === '--reference-start') out.referenceStart = Number(argv[++i])
     else if (a === '--reference-sec') out.referenceSec = Number(argv[++i])
     else if (a === '--allow-api') out.allowApi = true
+    else if (a === '--from-cache') out.fromCache = true
+    else if (a === '--dry-run') out.dryRun = true
+    else if (a === '--midword-silence-span-sec') out.midWordSilenceSpanSec = Number(argv[++i])
+    else if (a === '--attempt') out.attempt = Number(argv[++i])
     else if (a === '--stills-dir') out.stillsDir = argv[++i]
     else if (a === '--mobile-widths') out.mobileWidths = argv[++i].split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0)
   }
@@ -76,6 +82,24 @@ function loadJob(jobId) {
   const job = JSON.parse(bytes.toString('utf-8'))
   const canon = (j) => sha256(JSON.stringify({ captions: j.captions, rawSegments: j.rawSegments, cls: j.captionClassification ?? null }))
   return { file, bytes, job, canon }
+}
+
+/** JSONを一時ファイルへ書いてからrenameする（権限0600。途中状態のファイルを残さない）。 */
+function writePagesV2(path, obj) {
+  const tmp = `${path}.tmp-${process.pid}`
+  try {
+    writeFileSync(tmp, JSON.stringify(obj, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    renameSync(tmp, path)
+  } catch (err) {
+    rmSync(tmp, { force: true })
+    throw err
+  }
+}
+
+/** 使用するpagesファイル。v2があればv2、なければv1（v1は変更しない）。 */
+function resolvePagesPath(key) {
+  const v2 = resolve(DATA_DIR, `${key}.pages.v2.json`)
+  return existsSync(v2) ? v2 : resolve(DATA_DIR, `${key}.pages.json`)
 }
 
 function safetyContext(job) {
@@ -152,29 +176,51 @@ async function stageAlign(args) {
   const timings = {}
   let result
 
+  const cachePath = resolve(DATA_DIR, `five_minute_${Math.round(startSec)}.align-cache.json`)
   const { removed: tempDirRemoved } = await withTempDir('lcv-five-min-', async (tmpDir) => {
-    const wavPath = join(tmpDir, 'clip.wav')
+    let align, silences, thresholdDb, frameDb, frameSec, run
     let t = Date.now()
-    await extractAudioSegmentWav(sourceRealPath, wavPath, startSec, WINDOW_SEC)
-    const { samples, sampleRate } = readWavPcm16Mono(readFileSync(wavPath))
-    const { silences, thresholdDb } = detectSilences(samples, sampleRate, { minSilenceSec: 0.3 })
-    const { db: frameDb, frameSec } = computeFrameDb(samples, sampleRate)
-    timings.audioMs = Date.now() - t
+    if (args.fromCache) {
+      // ローカルの中間データ(git管理外)から再構築する。whisper・音声抽出は行わない。
+      const cache = JSON.parse(readFileSync(cachePath, 'utf-8'))
+      if (cache.canonicalSha256 !== sha256(canonicalText)) throw new Error('キャッシュが現在の正本と一致しません')
+      ;({ silences, thresholdDb, frameDb, frameSec, run } = cache)
+      align = { tokens: cache.tokens }
+      timings.audioMs = 0
+      timings.whisperMs = 0
+    } else {
+      const wavPath = join(tmpDir, 'clip.wav')
+      await extractAudioSegmentWav(sourceRealPath, wavPath, startSec, WINDOW_SEC)
+      const { samples, sampleRate } = readWavPcm16Mono(readFileSync(wavPath))
+      const det = detectSilences(samples, sampleRate, { minSilenceSec: 0.3 })
+      silences = det.silences
+      thresholdDb = det.thresholdDb
+      const fdb = computeFrameDb(samples, sampleRate)
+      frameDb = fdb.db
+      frameSec = fdb.frameSec
+      timings.audioMs = Date.now() - t
 
-    // whisper.cpp（DTW + -nfa。VADなし）。/usr/bin/time -l 経由で起動して子プロセスの最大RSSを得る。
-    t = Date.now()
-    const outBase = join(tmpDir, 'align')
-    const wargs = buildWhisperArgs({ modelPath, audioPath: wavPath, outputBase: outBase, prompt: PUNCTUATION_PROMPT })
-    const spawnFn = (bin, a, o) => spawn('/usr/bin/time', ['-l', bin, ...a], o)
-    const run = await runWhisperCli(wargs, { spawnFn, timeoutMs: 40 * 60 * 1000 })
-    const align = parseWhisperJson(readWhisperJsonFile(`${outBase}.json`))
-    timings.whisperMs = run.elapsedMs
+      // whisper.cpp（DTW + -nfa。VADなし）。/usr/bin/time -l 経由で起動して子プロセスの最大RSSを得る。
+      t = Date.now()
+      const outBase = join(tmpDir, 'align')
+      const wargs = buildWhisperArgs({ modelPath, audioPath: wavPath, outputBase: outBase, prompt: PUNCTUATION_PROMPT })
+      const spawnFn = (bin, a, o) => spawn('/usr/bin/time', ['-l', bin, ...a], o)
+      run = await runWhisperCli(wargs, { spawnFn, timeoutMs: 40 * 60 * 1000 })
+      align = parseWhisperJson(readWhisperJsonFile(`${outBase}.json`))
+      timings.whisperMs = run.elapsedMs
+      mkdirSync(DATA_DIR, { recursive: true })
+      writeFileSync(cachePath, JSON.stringify({ canonicalSha256: sha256(canonicalText), tokens: align.tokens, silences, thresholdDb, frameDb: frameDb.map((v) => round(v, 2)), frameSec, run }), { encoding: 'utf-8', mode: 0o600 })
+    }
 
     // 区間単位のアラインメント（rawSegment単位。5分全体を1つのLCSにしない）
     t = Date.now()
     const chunks = planChunksFromRawSegments({ rawSegments: job.rawSegments, globalOffset, textLength: canonicalText.length, windowStartSec: startSec, windowDurationSec: WINDOW_SEC })
     const timing = alignCanonicalByChunks({ canonicalText, chunks, tokens: align.tokens, silences, bounds: { startSec: 0, endSec: WINDOW_SEC } })
-    const natural = buildNaturalCaptions({ legacyCaptions: legacy, windowStartSec: startSec, windowDurationSec: WINDOW_SEC, tokens: align.tokens, silences, timing })
+    const naturalArgs = { legacyCaptions: legacy, windowStartSec: startSec, windowDurationSec: WINDOW_SEC, tokens: align.tokens, silences, timing }
+    // 修正前（従来のDP結果そのまま）と修正後（禁止境界・極端に短いページを修正）を、同じ入力から作って比較する。
+    const baseNatural = buildNaturalCaptions(naturalArgs)
+    let repairReport = null
+    const natural = buildNaturalCaptions({ ...naturalArgs, splitOptions: { repair: true, targetPagesPerMinute: 30, midWordSilenceSpanSec: Number.isFinite(args.midWordSilenceSpanSec) ? args.midWordSilenceSpanSec : null, onRepairReport: (r) => { repairReport = r } } })
     timings.alignAndSplitMs = Date.now() - t
 
     const caps = natural.captions
@@ -184,10 +230,45 @@ async function stageAlign(args) {
     if (caps.some((c) => c.lines.length > 2)) problems.push('3行以上のcaptionがあります')
     if (caps.some((c) => c.lines.join('') !== c.text)) problems.push('linesが本文と一致しません')
     if (caps.some((c) => c.text.length > 30)) problems.push('30文字を超えるcaptionがあります')
+    if ((repairReport?.unresolved.length ?? 1) > 0) problems.push('修正できない禁止境界・極端に短いページがあります（診断のみ保存）')
 
     // ── 測定（承認済みの自然タイミング方式と同じ指標） ──
     const tm = measureCaptionTiming(caps, natural.timing, silences)
     const forb = countForbiddenBoundaries(caps.map((c) => c.text))
+    const gapsOf = (cs) => cs.slice(0, -1).map((c, i) => {
+      const lastIdx = c.startIndex + c.text.length - 1
+      const nextFirst = cs[i + 1].startIndex
+      const a = [...Array(c.text.length).keys()].map((k) => c.startIndex + k).filter((q) => /[^\s。、！？!?,，「」『』（）()・…]/.test(canonicalText[q])).pop() ?? lastIdx
+      const b = [...Array(cs[i + 1].text.length).keys()].map((k) => nextFirst + k).find((q) => /[^\s。、！？!?,，「」『』（）()・…]/.test(canonicalText[q])) ?? nextFirst
+      return Math.max(0, natural.timing.charStart[b] - natural.timing.charEnd[a])
+    })
+    const bnAfter = countBoundaryProblems(caps.map((c) => c.text), { gaps: gapsOf(caps) })
+    if (bnAfter.refined.forbidden > 0 || bnAfter.danglingConjunction > 0) problems.push('禁止境界または孤立した接続詞が残っています')
+    const bnBefore = countBoundaryProblems(baseNatural.captions.map((c) => c.text), { gaps: gapsOf(baseNatural.captions) })
+    // 極端に短いページ（0.5秒未満または3文字以下）。独立した短語・完結した短文は許容する。
+    const shortStats = (cs) => {
+      const rows = cs.map((c, i) => ({ c, i, dur: c.endSec - c.startSec, chars: Array.from(c.text).filter((ch) => /[^\s。、！？!?,，]/.test(ch)).length }))
+      const cand = rows.filter((r) => r.dur < 0.5 || r.chars <= 3)
+      const allowed = cand.filter((r) => isStandaloneShort(r.c.text, r.c.startIndex === 0 || /[。！？!?]/.test(canonicalText[r.c.startIndex - 1] ?? '')))
+      return { under0_5sec: rows.filter((r) => r.dur < 0.5).length, chars3orLess: rows.filter((r) => r.chars <= 3).length, candidates: cand.length, allowedStandalone: allowed.length, notAllowed: cand.length - allowed.length }
+    }
+    // 修正前後の「文字ごとの先行表示量」の変化（正=修正後のほうが早く見える）。発話時刻(DTW)自体は変えていない。
+    const pageOfChar = (cs) => { const m = new Array(canonicalText.length).fill(null); cs.forEach((c) => { for (let q = c.startIndex; q < c.startIndex + c.text.length; q++) m[q] = c }); return m }
+    const pBase = pageOfChar(baseNatural.captions)
+    const pNew = pageOfChar(caps)
+    let maxDelta = 0
+    let over500 = 0
+    let charsChecked = 0
+    let charsOutsidePage = 0
+    for (let q = 0; q < canonicalText.length; q++) {
+      if (!/[^\s。、！？!?,，「」『』（）()・…]/.test(canonicalText[q]) || !pBase[q] || !pNew[q]) continue
+      charsChecked += 1
+      const dl = (natural.timing.charStart[q] - pNew[q].startSec) - (natural.timing.charStart[q] - pBase[q].startSec)
+      maxDelta = Math.max(maxDelta, Math.abs(dl))
+      if (Math.abs(dl) >= 0.5) over500 += 1
+      // その文字が表示されている間に発話される（ページの表示区間が発話時刻を含む）
+      if (natural.timing.charStart[q] > pNew[q].endSec + 1e-6 || natural.timing.charEnd[q] < pNew[q].startSec - 1e-6) charsOutsidePage += 1
+    }
     const read = readabilityStats(caps)
     const sync = measureSyncAgainstAudio(caps, frameDb, frameSec, thresholdDb)
     const midWord = ['midtoken', 'compound', 'okurigana', 'fragment', 'bound', 'smallkana'].reduce((a, k) => a + (forb.byReason[k] ?? 0), 0)
@@ -241,19 +322,33 @@ async function stageAlign(args) {
         audioTrailingSilentSec: rounded(sync.trailingSilentSec),
       },
       boundaries: { forbidden: forb.forbidden, midWord, particleStart: forb.byReason.particle ?? 0, byReason: forb.byReason },
+      boundaryRepair: {
+        pagesBefore: baseNatural.captions.length,
+        pagesAfter: caps.length,
+        before: { strict: bnBefore.strict, refined: bnBefore.refined, danglingConjunction: bnBefore.danglingConjunction },
+        after: { strict: bnAfter.strict, refined: bnAfter.refined, danglingConjunction: bnAfter.danglingConjunction },
+        actions: repairReport ? repairReport.actions.reduce((h, a) => ({ ...h, [a.kind]: (h[a.kind] ?? 0) + 1 }), {}) : {},
+        consolidatedPages: repairReport?.consolidated ?? 0,
+        unresolved: repairReport?.unresolved.length ?? 0,
+        shortPages: { before: shortStats(baseNatural.captions), after: shortStats(caps) },
+        beforeStats: { pagesPerMinute: round((baseNatural.captions.length / WINDOW_SEC) * 60, 1), under2sec: baseNatural.captions.filter((c) => c.endSec - c.startSec < 2).length, minDisplaySec: round(Math.min(...baseNatural.captions.map((c) => c.endSec - c.startSec)), 2) },
+        charLeadChange: { charsChecked, maxAbsSec: round(maxDelta, 3), over500ms: over500, charsOutsideDisplayedPage: charsOutsidePage },
+      },
       invariantProblems: problems,
     }
     const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
     const key = `five_minute_${Math.round(startSec)}`
     result = { key, metrics, run, problems, stamp, caps }
-    if (problems.length === 0) {
-      mkdirSync(DATA_DIR, { recursive: true })
+    mkdirSync(DATA_DIR, { recursive: true })
+    if (args.dryRun) {
+      // 試算のみ: 何も保存しない
+    } else if (problems.length === 0) {
       // 中間データ（字幕本文を含む）は git管理外の editor/data/ にのみ保存する。標準出力へは出さない。
-      writeFileSync(
-        resolve(DATA_DIR, `${key}.pages.json`),
-        JSON.stringify({ createdAt: new Date().toISOString(), jobId: job.id, window: metrics.window, canonicalSha256: sha256(canonicalText), captions: caps.map((c) => ({ id: c.id, startSec: c.startSec, endSec: c.endSec, text: c.text, lines: c.lines, captionType: 'normal', emphasisText: null, lowConfidence: c.lowConfidence, displayOrder: c.displayOrder })), silences, metrics }, null, 2),
-        'utf-8',
-      )
+      // 既存の v1（.pages.json）は変更せず、修正後は v2 として別ファイルへ原子的に保存する。
+      writePagesV2(resolve(DATA_DIR, `${key}.pages.v2.json`), { createdAt: new Date().toISOString(), pagesVersion: 2, jobId: job.id, window: metrics.window, canonicalSha256: sha256(canonicalText), captions: caps.map((c) => ({ id: c.id, startSec: c.startSec, endSec: c.endSec, text: c.text, lines: c.lines, captionType: 'normal', emphasisText: null, lowConfidence: c.lowConfidence, displayOrder: c.displayOrder })), silences, metrics })
+    } else if (repairReport) {
+      // 直せなかった位置は、本文を含まない診断（ページ番号と理由のみ）として保存する。
+      writePagesV2(resolve(DATA_DIR, `${key}.repair-diagnostics.json`), { createdAt: new Date().toISOString(), unresolved: repairReport.unresolved, problems })
     }
   })
   clearInterval(sampler)
@@ -262,7 +357,8 @@ async function stageAlign(args) {
   const outputsAfter = snapshotDir(outputRoot)
   console.log(JSON.stringify({
     stage: 'align',
-    pagesFile: result.problems.length === 0 ? `${result.key}.pages.json` : null,
+    pagesFile: result.problems.length === 0 ? `${result.key}.pages.v2.json` : null,
+    problems: result.problems,
     metrics: result.metrics,
     performance: {
       totalMs: Date.now() - t0,
@@ -286,31 +382,60 @@ async function stageAlign(args) {
 }
 
 // ────────────────────────────────────────────────────────────────
-// analyze: gpt-4o-mini を1回だけ（テーマ + 強調）
+// analyze: gpt-4o-mini を1回だけ（テーマ + 強調）。試行番号を明示し、累計の上限を超える試行は拒否する。
+// revalidate: 保存済みの応答（診断）を、HTTPなしで現在の検証ロジックで再検証する（リクエストは送らない）。
 // ────────────────────────────────────────────────────────────────
-async function stageAnalyze(args) {
-  if (!args.allowApi) throw new Error('AI分析には --allow-api が必要です（gpt-4o-mini を1回だけ呼びます）')
+function loadPagesFor(args) {
   const { job } = loadJob(args.job)
   const startSec = Number.isFinite(args.start) ? args.start : JSON.parse(readFileSync(resolve(DATA_DIR, 'five_minute_selection.json'), 'utf-8')).best.startSec
   const key = `five_minute_${Math.round(startSec)}`
-  const pages = JSON.parse(readFileSync(resolve(DATA_DIR, `${key}.pages.json`), 'utf-8'))
+  const pages = JSON.parse(readFileSync(resolvePagesPath(key), 'utf-8'))
   if (pages.jobId !== job.id) throw new Error('pagesのjobIdが一致しません')
+  return { key, pages }
+}
+
+/** 報告用の要約（件数・理由コードだけ。字幕本文・テーマ名・強調語は含めない）。 */
+const reportOf = (v) => v && { adopted: v.adopted, counts: v.counts, reasons: v.reasons, warnings: v.warnings.length }
+
+async function stageAnalyze(args) {
+  if (!args.allowApi) throw new Error('AI分析には --allow-api が必要です（gpt-4o-mini を1回だけ呼びます）')
+  if (!Number.isInteger(args.attempt)) throw new Error('--attempt <試行番号> を明示してください（累計の上限を超える試行は拒否されます）')
+  const { key, pages } = loadPagesFor(args)
   try {
-    const r = await runAnalysisOnce({ dir: DATA_DIR, key, captions: pages.captions, apiKey: process.env.OPENAI_API_KEY })
+    const r = await runAnalysisOnce({ dir: DATA_DIR, key, captions: pages.captions, apiKey: process.env.OPENAI_API_KEY, attempt: args.attempt })
     const a = r.analysis
     console.log(JSON.stringify({
       stage: 'analyze',
       model: a.model,
       apiRequestsThisRun: r.requestCount,
+      attempt: r.attempt,
+      attemptsTotal: r.attemptsTotal,
       reusedSavedResult: r.reused,
       topics: a.topics.length,
       emphasis: a.emphasis.length,
+      validation: reportOf(r.validation),
+      diagnostics: r.diagnostics,
       warnings: r.warnings,
       savedAs: `${key}.analysis.json`,
     }, null, 2))
   } catch (err) {
     if (err instanceof AnalysisError) {
-      console.error(`[localCaptionFiveMinute] AI分析を停止しました (${err.kind}): ${err.message}`)
+      console.error(JSON.stringify({ stage: 'analyze', stopped: true, kind: err.kind, message: err.message, attempt: err.attempt ?? args.attempt, apiRequestsThisRun: ['already-requested', 'attempt-sequence', 'attempt-limit', 'config', 'stale'].includes(err.kind) ? 0 : 1, validation: reportOf(err.validation), diagnostics: err.diagnostics ?? null }, null, 2))
+      process.exit(2)
+    }
+    throw err
+  }
+}
+
+async function stageRevalidate(args) {
+  if (!Number.isInteger(args.attempt)) throw new Error('--attempt <試行番号> を指定してください')
+  const { key, pages } = loadPagesFor(args)
+  try {
+    const r = revalidateSavedResponse({ dir: DATA_DIR, key, captions: pages.captions, attempt: args.attempt })
+    console.log(JSON.stringify({ stage: 'revalidate', apiRequestsThisRun: 0, attempt: args.attempt, adopted: r.adopted, saved: r.saved, validation: reportOf(r.validation) }, null, 2))
+  } catch (err) {
+    if (err instanceof AnalysisError) {
+      console.error(`[localCaptionFiveMinute] 再検証を停止しました (${err.kind}): ${err.message}`)
       process.exit(2)
     }
     throw err
@@ -329,7 +454,7 @@ async function stageRender(args) {
   const canonBefore = canon(job)
   const startSec = Number.isFinite(args.start) ? args.start : JSON.parse(readFileSync(resolve(DATA_DIR, 'five_minute_selection.json'), 'utf-8')).best.startSec
   const key = `five_minute_${Math.round(startSec)}`
-  const pagesPath = resolve(DATA_DIR, `${key}.pages.json`)
+  const pagesPath = resolvePagesPath(key)
   const pagesBytes = readFileSync(pagesPath)
   const pages = JSON.parse(pagesBytes.toString('utf-8'))
   // check ステージは AI 結果なし・動画なし。render は保存済みの分析結果を再利用する（APIは呼ばない）。
@@ -540,8 +665,9 @@ async function main() {
   if (args.stage === 'select') return stageSelect(args)
   if (args.stage === 'align') return stageAlign(args)
   if (args.stage === 'analyze') return stageAnalyze(args)
+  if (args.stage === 'revalidate') return stageRevalidate(args)
   if (args.stage === 'render' || args.stage === 'check') return stageRender(args)
-  throw new Error('ステージは select / align / analyze / render / check のいずれかです')
+  throw new Error('ステージは select / align / analyze / revalidate / render / check のいずれかです')
 }
 
 main().catch((err) => {

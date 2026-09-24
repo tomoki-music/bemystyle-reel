@@ -16,8 +16,10 @@
 // - ページ分割とページ内改行は別処理(lineBreaker)。本文に \N は入れない。
 // - 純粋関数。AI/LLMは使わない。連結すると正本テキストへ完全一致する。
 
-import { classifyBoundaries, endsWithDanglingConjunction, isSpeechChar, segmentWords, PARTICLES, BOUND_WORDS, CONJUNCTIONS, STRONG_PUNCT } from './japaneseText.mjs'
+import { classifyBoundaries, endsWithDanglingConjunction, isSpeechChar, segmentWords, boundaryProblems, startsWithSmallKanaOrLongVowel, PARTICLES, BOUND_WORDS, CONJUNCTIONS, STRONG_PUNCT } from './japaneseText.mjs'
 import { breakIntoLines } from './lineBreaker.mjs'
+import { refineForbidden, isStandaloneShort } from './boundaryRules.mjs'
+import { repairCuts, consolidateCuts } from './boundaryRepair.mjs'
 
 export const NATURAL_DEFAULTS = {
   maxPageChars: 30,
@@ -40,6 +42,15 @@ export const NATURAL_DEFAULTS = {
   lowConfMinUnmatchedRun: 4,
   lowConfMaxSecPerChar: 0.4,
   lowConfMinTokenP: 0.15,
+  // 禁止境界・極端に短いページの修正（repair:true のときだけ）。既定では従来どおりDP結果をそのまま使う。
+  repair: false,
+  shortPageSec: 0.5, // 表示時間の見込みがこれ未満、または3文字以下のページは「極端に短い」
+  shortPageChars: 3,
+  // 話者が「語の途中」で実際に間を置いた場合（例: 「〜です|け…ど」の0.6秒超の無音）だけ、語を割るよりも無音をまたぐほうを
+  // 許すときの、またいでよい無音の上限（秒）。null（既定）なら例外なし＝従来どおり0.6秒以上は絶対にまたがない。
+  midWordSilenceSpanSec: null,
+  consolidate: null, // 統合の条件の上書き（maxLen / maxSpeechSec / shortSpeechSec）
+  targetPagesPerMinute: null, // 数値を指定すると、不自然にならない範囲でだけ統合して近づける（未達でも無理に統合しない）
 }
 
 const KIND_COST = { strong: 0, semantic: 4, comma: 6, conj: 8, phrase: 12, word: 60 }
@@ -289,7 +300,7 @@ export function splitTextIntoNaturalPages(text, timing0, bounds, overrides = {})
 
   // 制約を満たす分割が無い場合（例: 句点をまたがずに30文字超が続く）は、制約を緩めず最後の手段として
   // 30文字ごと・語境界優先の分割へフォールバックする（本文は保持）。
-  const cuts = []
+  let cuts = []
   if (dp[n] === Infinity) {
     let i = 0
     while (i < n) {
@@ -312,6 +323,81 @@ export function splitTextIntoNaturalPages(text, timing0, bounds, overrides = {})
   } else {
     for (let j = n; j > 0; j = back[j]) cuts.push([back[j], j])
     cuts.reverse()
+  }
+
+  let repairReport = null
+  if (opt.repair) {
+    const speechDur = (i, j) => {
+      const r = displayRange(i, j)
+      return r ? r.speechEnd - r.speechStart : 0
+    }
+    const spanSilenceOk = (i, j) => {
+      for (let p = i + 1; p < j; p++) {
+        if (nextSpeech[p] < 0 || nextSpeech[p] >= j) continue
+        const limit = boundaryInfo[p]?.midToken && Number.isFinite(opt.midWordSilenceSpanSec) ? opt.midWordSilenceSpanSec : opt.maxSpannedSilenceSec
+        if (gapAt[p] >= limit) return false
+      }
+      return true
+    }
+    // 句点をまたぐ結合は禁止。ただし句点の直後が小書き仮名・長音で始まる場合は、文として成立しない
+    // 断片（認識器の誤った句点）なので、直前の文へ付けるために限ってまたいでよい。
+    const crossesRealSentence = (i, j) => {
+      for (let k = i; k < j - 1; k++) {
+        if (isStrong[k] && afterStrong[k] < j && !(afterStrong[k] < n && startsWithSmallKanaOrLongVowel(text[afterStrong[k]]))) return true
+      }
+      return false
+    }
+    const pageOk = (i, j) => {
+      if (j - i <= 0 || j - i > opt.maxPageChars) return false
+      if (!displayRange(i, j) || crossesRealSentence(i, j) || !spanSilenceOk(i, j)) return false
+      if (speechDur(i, j) > opt.hardMaxSpeechSec) return false
+      const lines = breakIntoLines(text.slice(i, j), { maxLineChars: opt.maxLineChars, hardMaxLineChars: opt.hardMaxLineChars })
+      if (lines.length > 2 || lines.some((l) => Array.from(l).length > opt.hardMaxLineChars)) return false
+      if (lines.length === 2) {
+        const bp = boundaryProblems(lines[0], lines[1])
+        if (bp.midWord || bp.particleStart) return false
+      }
+      return true
+    }
+    const startsAfterStrong = (i) => i === 0 || STRONG_PUNCT.has(text[i - 1]) || (CLOSING.has(text[i - 1]) && i >= 2 && STRONG_PUNCT.has(text[i - 2]))
+    const endsSentence = (i, j) => STRONG_PUNCT.has(text[j - 1]) || (CLOSING.has(text[j - 1]) && j - i >= 2 && STRONG_PUNCT.has(text[j - 2]))
+    const speechChars = (i, j) => {
+      let c = 0
+      for (let q = i; q < j; q++) if (speech[q]) c++
+      return c
+    }
+    const ctx = {
+      reasonsAt: (p) => (p > 0 && p < n ? refineForbidden(text, p, boundaryInfo[p], { gapSec: gapAt[p] }) : []),
+      pageOk,
+      dangling: (i, j) => j < n && endsWithDanglingConjunction(text.slice(i, j)),
+      isShort: (i, j) => {
+        const est = speechDur(i, j) + opt.leadSec + opt.tailSec
+        if (est >= opt.shortPageSec && speechChars(i, j) > opt.shortPageChars) return false
+        return !isStandaloneShort(text.slice(i, j), startsAfterStrong(i))
+      },
+      cutCost: (q) => (gapAt[q] >= opt.silenceBoundarySec ? 0 : (KIND_COST[boundaryInfo[q]?.kind ?? 'word'] ?? 30)),
+      softCost: (i, j) => {
+        const dur = speechDur(i, j)
+        const len = j - i
+        let c = 0
+        if (dur > opt.softMaxSpeechSec) c += (dur - opt.softMaxSpeechSec) * 26
+        if (len > opt.comfortChars) c += (len - opt.comfortChars) * 1.2
+        if (len > opt.idealMaxChars) c += (len - opt.idealMaxChars) * 6
+        return c
+      },
+    }
+    const before = cuts.length
+    const rep = repairCuts(cuts, ctx)
+    cuts = rep.cuts
+    let consolidated = 0
+    if (Number.isFinite(opt.targetPagesPerMinute)) {
+      const target = Math.ceil((opt.targetPagesPerMinute * (bounds.endSec - bounds.startSec)) / 60)
+      const c = consolidateCuts(cuts, { ...ctx, gapAt: (p) => gapAt[p] ?? 0, endsSentence, speechDur, len: (i, j) => j - i }, { targetCount: target, ...(opt.consolidate ?? {}) })
+      cuts = c.cuts
+      consolidated = c.merged
+    }
+    repairReport = { pagesBefore: before, pagesAfter: cuts.length, actions: rep.actions, unresolved: rep.unresolved, consolidated }
+    if (typeof opt.onRepairReport === 'function') opt.onRepairReport(repairReport)
   }
 
   const pages = []

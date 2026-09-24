@@ -14,7 +14,8 @@ describe('localCaptionFiveMinute: 安全性(静的確認)', () => {
     expect(src).toContain('externalWhisperApiCalled: false')
   })
 
-  it('AI分析は analyze ステージのみで、--allow-api が無ければ実行しない。1回きり(runAnalysisOnce)を使う', () => {
+  it('AI分析は analyze ステージのみで、--allow-api と --attempt の明示が無ければ実行しない。1回きり(runAnalysisOnce)を使う', () => {
+    expect(src).toContain("if (!Number.isInteger(args.attempt)) throw new Error('--attempt <試行番号> を明示してください")
     expect(src).toContain("if (!args.allowApi) throw new Error('AI分析には --allow-api が必要です")
     expect(src.match(/runAnalysisOnce\(/g)).toHaveLength(1)
     const renderPart = src.slice(src.indexOf('async function stageRender'))
@@ -26,6 +27,14 @@ describe('localCaptionFiveMinute: 安全性(静的確認)', () => {
     expect(src).toContain('process.exit(2)')
     expect(/(for|while)\s*\([^)]*\)\s*\{[^}]*runAnalysisOnce/.test(src)).toBe(false) // ループ・再試行の中でAPIを呼ばない
     expect(/catch[^{]*\{[^}]*runAnalysisOnce/.test(src)).toBe(false)
+  })
+
+  it('既存の5分データ(v1のpages・前回の送信済みマーカー・分析結果)を上書き・削除しない。修正後は v2 を別ファイルへ原子的に保存する', () => {
+    expect(src).toContain('.pages.v2.json')
+    expect(/writeFileSync\([^)]*\.pages\.json/.test(src)).toBe(false)
+    expect(/rmSync\([^)]*(marker|pages\.json)/i.test(src)).toBe(false)
+    expect(/renameSync\([^)]*pages\.json/.test(src)).toBe(false)
+    expect(src).toContain('renameSync(tmp, path)')
   })
 
   it('既存ジョブJSONは読み取り専用（書き込み・削除・リネーム対象にしない）', () => {
@@ -75,7 +84,7 @@ describe('localCaptionFiveMinute: 安全性(静的確認)', () => {
   it('中間データ(pages/analysis/選定)は editor/data/ 配下(git管理外)にだけ保存する', () => {
     expect(src).toContain("'data/local_caption_comparisons/five_minute'")
     const writes = [...src.matchAll(/writeFileSync\(\s*([^,]+),/g)].map((m) => m[1].trim())
-    for (const w of writes) expect(/resolve\(DATA_DIR|assPath|longAss/.test(w)).toBe(true)
+    for (const w of writes) expect(/resolve\(DATA_DIR|assPath|longAss|cachePath|^tmp$/.test(w)).toBe(true)
   })
 
   it('5分データ・分析結果・送信済みマーカー・AI応答の保存先が git 管理外である', () => {
@@ -90,6 +99,10 @@ describe('localCaptionFiveMinute: 安全性(静的確認)', () => {
     expect(ignored('editor/data/local_caption_comparisons/five_minute/five_minute_613.pages.json')).toBe(true)
     expect(ignored('editor/data/local_caption_comparisons/five_minute/five_minute_613.analysis.json')).toBe(true)
     expect(ignored('editor/data/local_caption_comparisons/five_minute/five_minute_613.analysis-request.marker')).toBe(true)
+    expect(ignored('editor/data/local_caption_comparisons/five_minute/five_minute_613.pages.v2.json')).toBe(true)
+    expect(ignored('editor/data/local_caption_comparisons/five_minute/five_minute_613.analysis-request.attempt-2.marker')).toBe(true)
+    expect(ignored('editor/data/local_caption_comparisons/five_minute/diagnostics/five_minute_613.attempt-2.json')).toBe(true)
+    expect(ignored('editor/data/local_caption_comparisons/five_minute/five_minute_613.repair-diagnostics.json')).toBe(true)
     expect(ignored('editor/.env')).toBe(true)
     expect(ignored('out/comparison_five_minute_topics_20260924_210000.mp4')).toBe(true)
   })
