@@ -85,9 +85,9 @@ export function distributeAcrossSpeech(startSec, endSec, count, silences) {
  * トークン列を文字ごとの時刻(開始・終了)へ展開する。1トークンの発話時間(無音を除く)をその文字数で等分する。
  * 発話でない文字（句読点・空白）は除外する。
  *
- * @param {Array<{ text: string, startSec: number, endSec: number }>} tokens
+ * @param {Array<{ text: string, startSec: number, endSec: number, p?: number }>} tokens
  * @param {Array<{ startSec: number, endSec: number }>} [silences]
- * @returns {Array<{ ch: string, startSec: number, endSec: number }>}
+ * @returns {Array<{ ch: string, startSec: number, endSec: number, p: number | null }>}
  */
 export function expandTokensToChars(tokens, silences = []) {
   const chars = []
@@ -97,7 +97,7 @@ export function expandTokensToChars(tokens, silences = []) {
     const end = Math.min(t.endSec, t.startSec + MAX_TOKEN_SEC * Math.max(1, list.length))
     const spans = distributeAcrossSpeech(t.startSec, end, list.length, silences)
     list.forEach((ch, i) => {
-      chars.push({ ch, startSec: spans[i].startSec, endSec: spans[i].endSec })
+      chars.push({ ch, startSec: spans[i].startSec, endSec: spans[i].endSec, p: Number.isFinite(t.p) ? t.p : null })
     })
   }
   return chars
@@ -145,6 +145,7 @@ export function lcsPairs(a, b) {
  * @param {{ startSec: number, endSec: number }} bounds クリップの範囲（0〜長さ）
  * @returns {{
  *   charStart: number[], charEnd: number[],
+ *   charMatched: boolean[], charTokenP: Array<number | null>,
  *   matchedCount: number, canonicalSpeechCount: number, localSpeechCount: number,
  * }}
  *   発話でない文字(句読点・空白)は、直前の発話文字の終了時刻と同じ(ゼロ長)。
@@ -169,9 +170,13 @@ export function alignCanonicalToTokens(canonicalText, tokens, silences, bounds) 
   const sN = speechIdx.length
   const sStart = new Array(sN).fill(NaN)
   const sEnd = new Array(sN).fill(NaN)
+  const sMatched = new Array(sN).fill(false)
+  const sP = new Array(sN).fill(null)
   for (const [ai, bi] of pairs) {
     sStart[ai] = local[bi].startSec
     sEnd[ai] = local[bi].endSec
+    sMatched[ai] = true
+    sP[ai] = local[bi].p
   }
 
   let k = 0
@@ -222,6 +227,8 @@ export function alignCanonicalToTokens(canonicalText, tokens, silences, bounds) 
   // 全文字へ展開（非発話文字はゼロ長で直前の終了時刻に置く）
   const charStart = new Array(n)
   const charEnd = new Array(n)
+  const charMatched = new Array(n).fill(false)
+  const charTokenP = new Array(n).fill(null)
   let cursor = bounds.startSec
   let sPos = 0
   for (let i = 0; i < n; i++) {
@@ -229,6 +236,8 @@ export function alignCanonicalToTokens(canonicalText, tokens, silences, bounds) 
       charStart[i] = sStart[sPos]
       charEnd[i] = sEnd[sPos]
       cursor = sEnd[sPos]
+      charMatched[i] = sMatched[sPos]
+      charTokenP[i] = sP[sPos]
       sPos++
     } else {
       charStart[i] = cursor
@@ -239,6 +248,8 @@ export function alignCanonicalToTokens(canonicalText, tokens, silences, bounds) 
   return {
     charStart,
     charEnd,
+    charMatched,
+    charTokenP,
     matchedCount: pairs.length,
     canonicalSpeechCount: sN,
     localSpeechCount: local.length,

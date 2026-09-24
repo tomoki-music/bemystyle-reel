@@ -87,6 +87,15 @@ describe('buildComparisonOutputPath (旧方式/新方式の比較動画)', () =>
     expect(legacy + semantic).not.toContain('なぜ社名')
   })
 
+  it('natural_timing は comparison_natural_timing_<timestamp>.mp4 で、旧2方式と別名', () => {
+    const sourceReal = resolve(dir, 'なぜ社名.mp4')
+    writeFileSync(sourceReal, 'x')
+    const natural = buildComparisonOutputPath('natural_timing', dir, sourceReal, now)
+    expect(natural).toMatch(/comparison_natural_timing_20260923_220000\.mp4$/)
+    expect(natural).not.toContain('なぜ社名')
+    expect(natural).not.toBe(buildComparisonOutputPath('semantic', dir, sourceReal, now))
+  })
+
   it('既存の完成動画・プレビュー動画・比較動画を上書きしない（衝突時はサフィックス）', () => {
     const sourceReal = resolve(dir, 'src.mp4')
     writeFileSync(sourceReal, 'x')

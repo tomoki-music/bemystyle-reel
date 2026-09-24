@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  measureCaptionTiming,
   normalizedSimilarity,
   countPunctuation,
   analyzeMissing,
@@ -100,5 +101,46 @@ describe('measureBoundaryAlignment', () => {
   it('無音を丸ごと表示し続けるcaptionを数える', () => {
     const r = measureBoundaryAlignment([{ startSec: 1.0, endSec: 3.0 }], silences)
     expect(r.shownThroughSilence).toBe(1)
+  })
+})
+
+describe('measureCaptionTiming: 発話(DTW文字時刻)との差', () => {
+  const text = 'あいうえおかきくけこ'
+  const timing = { charStart: Array.from(text, (_, i) => i * 0.1), charEnd: Array.from(text, (_, i) => i * 0.1 + 0.1) }
+
+  it('caption開始/終了と発話開始/終了の差、500ms以上の先行・遅延を数える', () => {
+    const caps = [
+      { text: 'あいうえお', startSec: -0.6, endSec: 0.5, startIndex: 0 }, // 600ms先行
+      { text: 'かきくけこ', startSec: 1.0, endSec: 1.05, startIndex: 5 }, // 500ms遅れ
+    ]
+    const m = measureCaptionTiming(caps, timing, [])
+    expect(m.early500ms).toBe(1)
+    expect(m.late500ms).toBe(1)
+    expect(m.startLeadSec.max).toBeCloseTo(0.6, 5)
+  })
+
+  it('無音を1秒以上またいで残るcaption・発話終了後に1秒以上残るcaptionを数える', () => {
+    const caps = [{ text: 'あいうえおかきくけこ', startSec: 0, endSec: 3.0, startIndex: 0 }]
+    expect(measureCaptionTiming(caps, timing, []).silentOver1s).toBe(1)
+    const caps2 = [{ text: 'あいうえおかきくけこ', startSec: 0, endSec: 1.1, startIndex: 0 }]
+    expect(measureCaptionTiming(caps2, timing, [{ startSec: 0.0, endSec: 1.4 }]).silentOver1s).toBe(1)
+  })
+
+  it('句点をまたぐ後続文が1秒以上先に表示されている件数を数える', () => {
+    const t2 = 'はい。そうです'
+    const tm = { charStart: [], charEnd: [] }
+    let x = 0
+    for (const ch of t2) {
+      if (ch === '。') {
+        tm.charStart.push(x)
+        tm.charEnd.push(x)
+        continue
+      }
+      tm.charStart.push(x)
+      tm.charEnd.push(x + 0.5)
+      x += 0.5
+    }
+    const m = measureCaptionTiming([{ text: t2, startSec: 0, endSec: 4, startIndex: 0 }], tm, [])
+    expect(m.laterSentenceEarlyOver1s).toBe(1)
   })
 })

@@ -193,3 +193,82 @@ export function measureBoundaryAlignment(captions, silences) {
     shownThroughSilence,
   }
 }
+
+/**
+ * caption表示時刻と「実際の発話時刻(DTW文字時刻)」の差を測る。全方式を同じ基準で採点する。
+ *
+ * captionsは正本の連結順(startIndex/endIndexを持つか、textの累積長で復元)。timingは正本の文字時刻。
+ * - leadSec       : 最初の発話文字の開始 - caption開始（正=先行表示）。
+ * - startDelaySec : caption開始 - 最初の発話文字の開始（正=遅れ）。
+ * - endGapSec     : caption終了 - 最後の発話文字の終了（正=発話終了後も残る）。
+ * - silentStretchSec : caption表示中に、実測無音(0.3秒以上)と重なる最大の長さ
+ * - trailingHoldSec : 最後の発話終了以降に表示が残る時間
+ * - tailLeadSec   : 最後の発話文字の開始 - caption開始（=そのページの後半が先に見えている時間）
+ * - laterSentenceEarlySec : 句点で終わる文の後ろに続く別の文が同一ページにある場合、その先出し時間（無ければ0）
+ *
+ * @param {Array<{ text: string, startSec: number, endSec: number, startIndex?: number }>} captions
+ * @param {{ charStart: number[], charEnd: number[] }} timing
+ * @param {Array<{ startSec: number, endSec: number }>} silences
+ * @param {{ lowConfidence?: boolean[] }} [extra] captionごとの低信頼フラグ
+ */
+export function measureCaptionTiming(captions, timing, silences, extra = {}) {
+  const rows = []
+  let cursor = 0
+  for (const c of captions) {
+    const startIndex = Number.isInteger(c.startIndex) ? c.startIndex : cursor
+    const endIndex = startIndex + c.text.length
+    cursor = endIndex
+    let first = -1
+    let last = -1
+    for (let i = startIndex; i < endIndex; i++) {
+      if (!isSpeechChar(c.text[i - startIndex])) continue
+      if (first < 0) first = i
+      last = i
+    }
+    if (first < 0) continue
+    const firstStart = timing.charStart[first]
+    const lastEnd = timing.charEnd[last]
+    const lastStart = timing.charStart[last]
+    let silentStretch = 0
+    for (const s of silences) {
+      const ov = Math.min(c.endSec, s.endSec) - Math.max(c.startSec, s.startSec)
+      if (ov > silentStretch) silentStretch = ov
+    }
+    // 句点をまたぐ「後続文」の先出し: 最初の句点(末尾以外)の直後の発話文字の開始 - caption開始
+    let laterSentenceEarly = 0
+    for (let i = startIndex; i < endIndex - 1; i++) {
+      if (STRONG_PUNCT.has(c.text[i - startIndex])) {
+        let q = i + 1
+        while (q < endIndex && !isSpeechChar(c.text[q - startIndex])) q++
+        if (q < endIndex) {
+          laterSentenceEarly = Math.max(0, timing.charStart[q] - c.startSec)
+          break
+        }
+      }
+    }
+    rows.push({
+      leadSec: firstStart - c.startSec,
+      endGapSec: c.endSec - lastEnd,
+      silentStretchSec: silentStretch,
+      trailingHoldSec: Math.max(0, c.endSec - lastEnd),
+      tailLeadSec: Math.max(0, lastStart - c.startSec),
+      laterSentenceEarlySec: laterSentenceEarly,
+      durationSec: c.endSec - c.startSec,
+    })
+  }
+  const lead = rows.map((r) => r.leadSec)
+  return {
+    captions: rows.length,
+    startLeadSec: stats(lead), // 正=先行
+    endGapSec: stats(rows.map((r) => r.endGapSec)),
+    early500ms: rows.filter((r) => r.leadSec >= 0.5).length,
+    late500ms: rows.filter((r) => -r.leadSec >= 0.5).length,
+    silentOver1s: rows.filter((r) => r.silentStretchSec >= 1 || r.trailingHoldSec >= 1).length,
+    laterSentenceEarlyOver1s: rows.filter((r) => r.laterSentenceEarlySec >= 1).length,
+    tailLeadSec: stats(rows.map((r) => r.tailLeadSec)),
+    tailLeadOver1s: rows.filter((r) => r.tailLeadSec >= 1).length,
+    totalLeadSec: rows.reduce((a, r) => a + Math.max(0, r.leadSec), 0),
+    totalSilentHoldSec: rows.reduce((a, r) => a + Math.max(0, r.trailingHoldSec), 0),
+    durationSec: stats(rows.map((r) => r.durationSec)),
+  }
+}

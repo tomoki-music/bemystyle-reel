@@ -24,9 +24,10 @@ const COLOR = {
   paleGray: '&H00D9D9D9&', // sub用の白〜淡いグレー
   black: '&H00000000&',
   yellow: '&H0000FFFF&', // R255 G255 B0
-  highlight: '&H0000A5FF&', // オレンジ (R255 G165 B0) - emphasisのアクセント色
-  transparentBlack60: '&H60000000&',
-  brand: '&H00FC84C0&', // エディタUIのアクセント色 #c084fc を流用 (main用ブランドカラー)
+  // 動画全体で共通の強調色（1色のみ）。落ち着いたトーク動画(白壁・黒服・木目のギター)に馴染む
+  // 琥珀色 #F0B34A。強い純オレンジ/紫は使わない。部分強調にだけ使い、通常字幕の色は変えない。
+  highlight: '&H004AB3F0&',
+  softShadow: '&H80000000&',
 }
 
 /**
@@ -47,97 +48,69 @@ function buildStyleDefs(displayWidth, displayHeight) {
   const safeMarginH = Math.max(20, Math.round(displayWidth * 0.06))
   const safeMarginV = Math.max(24, Math.round(displayHeight * 0.06))
 
+  // 通常字幕は captionType によらず「白文字・黒縁・画面下部中央」で統一する（頻繁に色を変えない）。
+  // 不透明の全面バナー・点滅・拡大などの強い演出は使わない。強調はcaption全体ではなく、
+  // Dialogue側の部分カラーオーバーライド(emphasisText)でのみ行う。
+  const base = {
+    primaryColour: COLOR.white,
+    outlineColour: COLOR.black,
+    backColour: COLOR.softShadow,
+    bold: 1,
+    borderStyle: 1,
+    outline: 3,
+    shadow: 1,
+    alignment: ALIGNMENT.bottomCenter,
+    marginL: safeMarginH,
+    marginR: safeMarginH,
+    marginV: safeMarginV,
+    highlightColour: COLOR.highlight,
+  }
+
   return {
     normal: {
+      ...base,
       name: 'Normal',
       fontsize: Math.max(18, Math.round(shortSide * 0.052)),
-      primaryColour: COLOR.white,
-      outlineColour: COLOR.black,
-      backColour: COLOR.black,
-      bold: 0,
-      borderStyle: 1,
-      outline: 2,
-      shadow: 0,
-      alignment: ALIGNMENT.bottomCenter,
-      marginL: safeMarginH,
-      marginR: safeMarginH,
-      marginV: safeMarginV,
     },
     main: {
+      ...base,
       name: 'Main',
-      // normalより少し大きい程度に留め、画面を覆いすぎないようにする。
-      fontsize: Math.max(22, Math.round(shortSide * 0.062)),
-      primaryColour: COLOR.white,
-      outlineColour: COLOR.brand,
-      backColour: COLOR.brand,
-      bold: 1,
-      borderStyle: 3, // ブランドカラーの不透明ボックス（中心メッセージとして目立たせる）
-      outline: 4,
-      shadow: 0,
-      alignment: ALIGNMENT.bottomCenter,
-      marginL: safeMarginH,
-      marginR: safeMarginH,
-      marginV: safeMarginV,
+      // 全面バナーにせず、normalより少し大きくする程度に留める。
+      fontsize: Math.max(20, Math.round(shortSide * 0.058)),
+      outline: 3.5,
     },
     sub: {
+      ...base,
       name: 'Sub',
       // mainより明確に小さく、説明文として読みやすい控えめなデザイン。
-      fontsize: Math.max(13, Math.round(shortSide * 0.036)),
+      fontsize: Math.max(13, Math.round(shortSide * 0.038)),
       primaryColour: COLOR.paleGray,
-      outlineColour: COLOR.black,
-      backColour: COLOR.black,
       bold: 0,
-      borderStyle: 1,
-      outline: 1,
+      outline: 2,
       shadow: 0,
-      alignment: ALIGNMENT.bottomCenter,
-      marginL: safeMarginH,
-      marginR: safeMarginH,
       marginV: Math.max(16, Math.round(safeMarginV * 0.6)),
     },
     emphasis: {
+      ...base,
       name: 'Emphasis',
+      // 文全体をアクセント色にしない（不自然になるため）。見た目はmain相当で、強調は部分オーバーライドで行う。
       fontsize: Math.max(20, Math.round(shortSide * 0.058)),
-      // emphasisType全体をアクセント色・太字・強めの縁取りにし、一目で強調と分かるようにする。
-      primaryColour: COLOR.highlight,
-      outlineColour: COLOR.black,
-      backColour: COLOR.black,
-      bold: 1,
-      borderStyle: 1,
-      outline: 4,
-      shadow: 0,
-      alignment: ALIGNMENT.bottomCenter,
-      marginL: safeMarginH,
-      marginR: safeMarginH,
-      marginV: safeMarginV,
-      // emphasisType以外のcaptionでも、部分文字列だけをこの色で強調したい場合に
-      // Dialogue側で \c カラーオーバーライドタグを差し込む（emphasisText参照）。
-      highlightColour: COLOR.highlight,
+      outline: 3.5,
     },
     heading: {
+      ...base,
       name: 'Heading',
-      fontsize: Math.max(26, Math.round(shortSide * 0.08)),
-      primaryColour: COLOR.white,
-      outlineColour: COLOR.black,
-      backColour: COLOR.transparentBlack60,
-      bold: 1,
-      borderStyle: 3, // 不透明ボックス（バナー風）
-      outline: 6,
-      shadow: 0,
+      // 本当の話題転換だけに使う。上部の大きな黒帯は廃止し、縁取り文字のみ・やや大きめにする。
+      fontsize: Math.max(22, Math.round(shortSide * 0.064)),
+      outline: 3.5,
       alignment: ALIGNMENT.topCenter,
-      marginL: safeMarginH,
-      marginR: safeMarginH,
-      marginV: safeMarginV,
     },
     annotation: {
+      ...base,
       name: 'Annotation',
       fontsize: Math.max(12, Math.round(shortSide * 0.03)),
-      primaryColour: COLOR.white,
-      outlineColour: COLOR.black,
-      backColour: COLOR.black,
       bold: 0,
-      borderStyle: 1,
-      outline: 1,
+      outline: 1.5,
       shadow: 0,
       alignment: ALIGNMENT.bottomRight,
       marginL: Math.max(16, Math.round(safeMarginH * 0.5)),
@@ -196,7 +169,13 @@ function formatAssTime(seconds) {
 
 /**
  * 1キャプション分の Dialogue: 行テキスト（エスケープ・強調オーバーライド込み）を組み立てる。
- * emphasisText が text の部分文字列として実在する場合のみ、その部分にカラーオーバーライドを付与する。
+ *
+ * - 改行: lines が本文と完全一致するときだけ、行境界へ明示的な ASS 改行 \\N を挿入する
+ *   （本文(text)自体には \\N を保存しない。レンダー時に変換する）。
+ * - 強調: emphasisText が text の部分文字列として実在する場合のみ、その範囲にだけ
+ *   カラーオーバーライドを付与し、直後の {\\r} で必ず通常スタイルへ戻す。
+ *   強調範囲が改行をまたぐ場合は、行ごとに開始・終了(\\r)を入れ直して行末で色を持ち越さない。
+ * - ユーザー入力は必ず escapeAssText を通す（タグ注入不可）。
  *
  * @param {{ text: string, lines?: string[], emphasisText?: string | null }} caption
  * @param {string} highlightColour
@@ -204,25 +183,24 @@ function formatAssTime(seconds) {
 export function buildDialogueText(caption, highlightColour) {
   const text = typeof caption?.text === 'string' ? caption.text : ''
   const emphasisText = typeof caption?.emphasisText === 'string' ? caption.emphasisText : ''
+  const useLines = Array.isArray(caption?.lines) && caption.lines.length > 1 && caption.lines.join('') === text
+  const lines = useLines ? caption.lines : [text]
 
-  if (!emphasisText || !text.includes(emphasisText)) {
-    // 表示用の改行位置(lines)が指定され、本文と完全一致する場合のみ、各行をエスケープした上で
-    // 明示的な ASS 改行 \N で連結する。本文(text)自体には \N を保存しない（レンダー時変換）。
-    if (Array.isArray(caption?.lines) && caption.lines.length > 1 && caption.lines.join('') === text) {
-      return caption.lines.map((line) => escapeAssText(line)).join('\\N')
-    }
-    return escapeAssText(text)
-  }
+  const emStart = emphasisText && text.includes(emphasisText) ? text.indexOf(emphasisText) : -1
+  const emEnd = emStart >= 0 ? emStart + emphasisText.length : -1
+  const colourTag = `{\\c${highlightColour.replace(/^&H/, '').replace(/&$/, '')}&}`
 
-  const idx = text.indexOf(emphasisText)
-  const before = text.slice(0, idx)
-  const mid = text.slice(idx, idx + emphasisText.length)
-  const after = text.slice(idx + emphasisText.length)
-
-  // {\c...} / {\r} はこちら側で組み立てたリテラルタグであり、ユーザー入力は
-  // 必ず escapeAssText を通してから前後に連結するため、ユーザー入力からの
-  // オーバーライドタグ注入は起こらない。
-  return `${escapeAssText(before)}{\\c${highlightColour.replace(/^&H/, '').replace(/&$/, '')}&}${escapeAssText(mid)}{\\r}${escapeAssText(after)}`
+  let offset = 0
+  const renderedLines = lines.map((line) => {
+    const lineStart = offset
+    offset += line.length
+    if (emStart < 0) return escapeAssText(line)
+    const a = Math.max(emStart, lineStart) - lineStart
+    const b = Math.min(emEnd, lineStart + line.length) - lineStart
+    if (b <= a) return escapeAssText(line)
+    return `${escapeAssText(line.slice(0, a))}${colourTag}${escapeAssText(line.slice(a, b))}{\\r}${escapeAssText(line.slice(b))}`
+  })
+  return renderedLines.join('\\N')
 }
 
 /**

@@ -58,12 +58,22 @@ describe('captionType別デザイン (Phase: AI分類デザイン)', () => {
     return byName
   }
 
-  it('6種類のスタイルが互いに異なる見た目(色または太さまたは枠)を持つ', () => {
+  it('全スタイルが縁取り(BorderStyle=1)で、紫などの不透明な全面バナー(BorderStyle=3)を使わない', () => {
     const content = buildAssContent({ width: 1920, height: 1080, captions: [] })
     const styles = extractStyleLines(content)
-    const signature = (s) => `${s.primaryColour}|${s.bold}|${s.borderStyle}|${s.outline}`
-    const signatures = new Set(Object.values(styles).map(signature))
-    expect(signatures.size).toBe(6) // 6種類すべてが一意の見た目
+    expect(Object.keys(styles)).toHaveLength(6)
+    for (const s of Object.values(styles)) expect(s.borderStyle).toBe(1)
+    expect(content).not.toContain('&H00FC84C0&') // 旧ブランド紫
+  })
+
+  it('通常字幕はcaptionTypeによらず白文字・黒縁で統一される（色を頻繁に変えない）', () => {
+    const content = buildAssContent({ width: 1920, height: 1080, captions: [] })
+    const styles = extractStyleLines(content)
+    for (const name of ['Normal', 'Main', 'Emphasis', 'Heading']) {
+      expect(styles[name].primaryColour).toBe('&H00FFFFFF&')
+      expect(styles[name].outlineColour).toBe('&H00000000&')
+      expect(styles[name].bold).toBe(1)
+    }
   })
 
   it('mainはnormalより大きく、画面を覆いすぎない範囲に収まる', () => {
@@ -79,20 +89,43 @@ describe('captionType別デザイン (Phase: AI分類デザイン)', () => {
     expect(styles.Sub.fontsize).toBeLessThan(styles.Main.fontsize)
   })
 
-  it('emphasisは太字かつ強めの縁取りでアクセント色を使う', () => {
+  it('emphasisタイプでも文全体をアクセント色にしない（強調は部分オーバーライドだけ）', () => {
     const content = buildAssContent({ width: 1920, height: 1080, captions: [] })
     const styles = extractStyleLines(content)
+    expect(styles.Emphasis.primaryColour).toBe(styles.Normal.primaryColour)
     expect(styles.Emphasis.bold).toBe(1)
-    expect(styles.Emphasis.outline).toBeGreaterThanOrEqual(3)
-    expect(styles.Emphasis.primaryColour).not.toBe(styles.Normal.primaryColour)
   })
 
-  it('headingは最も大きく、他タイプと明確に区別される(不透明ボックス)', () => {
+  it('アクセント色は動画全体で1色（落ち着いた琥珀色）で、全スタイル共通のhighlightを使う', () => {
+    const ass = buildAssContent({
+      width: 1920,
+      height: 1080,
+      captions: [
+        { startSec: 0, endSec: 1, text: 'これは大事です', captionType: 'normal', emphasisText: '大事', displayOrder: 0 },
+        { startSec: 1, endSec: 2, text: 'ここも重要です', captionType: 'main', emphasisText: '重要', displayOrder: 1 },
+        { startSec: 2, endSec: 3, text: 'さらに肝心です', captionType: 'heading', emphasisText: '肝心', displayOrder: 2 },
+      ],
+    })
+    const colours = new Set([...ass.matchAll(/\{\\c([0-9A-F]{8})&\}/g)].map((m) => m[1]))
+    expect(colours.size).toBe(1)
+    expect([...colours][0]).toBe('004AB3F0')
+  })
+
+  it('headingは最も大きいが、上部の黒帯(不透明ボックス)は使わず縁取り文字のみ', () => {
     const content = buildAssContent({ width: 1920, height: 1080, captions: [] })
     const styles = extractStyleLines(content)
     const allSizes = Object.values(styles).map((s) => s.fontsize)
     expect(styles.Heading.fontsize).toBe(Math.max(...allSizes))
-    expect(styles.Heading.borderStyle).toBe(3)
+    expect(styles.Heading.borderStyle).toBe(1)
+    const headingLine = content.split('\n').find((l) => l.startsWith('Style: Heading'))
+    expect(headingLine.split(',')[18]).toBe('8') // 上部中央
+  })
+
+  it('mainは全面バナーにせず、normalより少し大きい程度', () => {
+    const content = buildAssContent({ width: 1920, height: 1080, captions: [] })
+    const styles = extractStyleLines(content)
+    expect(styles.Main.borderStyle).toBe(1)
+    expect(styles.Main.fontsize / styles.Normal.fontsize).toBeLessThan(1.2)
   })
 
   it('annotationは最も小さく控えめ', () => {
