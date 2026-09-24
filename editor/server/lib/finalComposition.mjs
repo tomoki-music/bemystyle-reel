@@ -46,8 +46,10 @@ export const COMPOSITION_DEFAULTS = Object.freeze({
   }),
   // QR表示は冒頭・末尾ともに既定ON。qr.enabled は全体スイッチ、showQr は区間ごとのスイッチ（どちらかがOFFなら、その区間ではQRを出さない）。
   qr: Object.freeze({ enabled: true }),
-  lineIntro: Object.freeze({ enabled: true, durationSec: 30, showQr: true }),
-  lineOutro: Object.freeze({ enabled: true, durationSec: 12, showQr: true }),
+  // 冒頭のLINE案内は本編の最初のdurationSec秒へ重ねる（overlay: 動画の長さを増やさず、本編は止めない）。standalone は独立した全画面カード（長さが増える）。
+  lineIntro: Object.freeze({ enabled: true, mode: 'overlay', durationSec: 30, showQr: true, startWithMain: true }),
+  // 末尾のLINE案内は独立した全画面カード（本編終了後に追加）。
+  lineOutro: Object.freeze({ enabled: true, mode: 'standalone', durationSec: 12, showQr: true }),
   line: Object.freeze({ qrPath: '', text: LINE_TEXT_DEFAULT, backgroundColor: '0x161c19' }),
   // プレビュー（短時間の確認動画）では、追加区間を既定で入れない。プレビューでも入れたい機能だけ true にする。
   preview: Object.freeze({ digest: false, lineIntro: false, lineOutro: false }),
@@ -96,6 +98,9 @@ export function validateCompositionConfig(cfg) {
   num(cfg.digest.bgm.fadeOutSec, 0, 10, 'BGMフェードアウト')
   num(cfg.lineIntro.durationSec, 3, 90, '冒頭LINE案内秒数')
   num(cfg.lineOutro.durationSec, 3, 60, '末尾LINE案内秒数')
+  if (!['overlay', 'standalone'].includes(cfg.lineIntro.mode)) errors.push('冒頭LINE案内の表示方式は overlay か standalone を指定してください')
+  if (cfg.lineOutro.mode !== 'standalone') errors.push('末尾LINE案内の表示方式は standalone のみ対応しています')
+  if (cfg.lineIntro.mode === 'overlay' && cfg.lineIntro.startWithMain !== true) errors.push('冒頭LINE案内(overlay)は本編開始と同時に始めてください')
   return { ok: errors.length === 0, errors }
 }
 
@@ -103,14 +108,16 @@ export const QR_MISSING_MESSAGE = 'LINE QR画像が見つかりません。QR画
 
 /**
  * QRを表示するLINE案内区間（最終動画の時刻）。qr.enabled・区間のenabled・区間のshowQr がすべてtrueの区間だけ。
- * 表示時間はLINE案内の開始〜終了と同一（途中で消さない）。
- * @returns {Array<{ kind: 'lineIntro' | 'lineOutro', startSec: number, endSec: number }>}
+ * 冒頭(overlay)は timeline.overlays、末尾(standalone)は timeline.sections から取る。表示時間はLINE案内の開始〜終了と同一（途中で消さない）。
+ * @returns {Array<{ kind: 'lineIntro' | 'lineOutro', mode: 'overlay' | 'standalone', startSec: number, endSec: number }>}
  */
 export function planQrWindows(cfg, timeline) {
   if (!cfg.qr?.enabled) return []
-  return timeline.sections
-    .filter((s) => (s.kind === 'lineIntro' && cfg.lineIntro.enabled && cfg.lineIntro.showQr) || (s.kind === 'lineOutro' && cfg.lineOutro.enabled && cfg.lineOutro.showQr))
-    .map((s) => ({ kind: s.kind, startSec: s.startSec, endSec: s.endSec }))
+  const wins = [
+    ...timeline.sections.filter((s) => s.kind === 'lineIntro' || s.kind === 'lineOutro').map((s) => ({ kind: s.kind, mode: 'standalone', startSec: s.startSec, endSec: s.endSec })),
+    ...(timeline.overlays ?? []).map((o) => ({ kind: o.kind, mode: 'overlay', startSec: o.startSec, endSec: o.endSec })),
+  ]
+  return wins.filter((w) => cfg[w.kind].enabled && cfg[w.kind].showQr).sort((a, b) => a.startSec - b.startSec)
 }
 
 /** 区間（enabled）にQRを出す設定か（素材の要否の判定用。タイムライン不要）。 */
@@ -203,13 +210,16 @@ export function selectDigestClips(p) {
 // ────────────────────────────────────────────────────────────────
 
 /**
- * 区間構成: digest → lineIntro → main → lineOutro（有効なものだけ）。
+ * 区間構成: digest → (standaloneの冒頭LINE案内) → main → lineOutro（有効なものだけ）。
+ * 冒頭LINE案内が overlay のときは独立した区間を作らず、本編の最初のdurationSec秒（本編長まで）へ重ねる overlays に入れる。
+ * 本編のオフセット = ダイジェスト長（standaloneのときだけ、さらに冒頭案内の長さ）。全体の長さに overlay の秒数は加算しない。
  * @param {ReturnType<typeof resolveCompositionConfig>} cfg
  * @param {{ mainStartSec: number, mainEndSec: number, digestClips?: Array<{ durationSec: number }> }} p
- * @returns {{ sections: Array<{ kind: 'digest' | 'lineIntro' | 'main' | 'lineOutro', startSec: number, endSec: number }>, mainOffsetSec: number, totalSec: number, digestSec: number }}
+ * @returns {{ sections: Array<{ kind: 'digest' | 'lineIntro' | 'main' | 'lineOutro', startSec: number, endSec: number }>, overlays: Array<{ kind: 'lineIntro', startSec: number, endSec: number }>, mainOffsetSec: number, totalSec: number, digestSec: number }}
  */
 export function planTimeline(cfg, p) {
   const sections = []
+  const overlays = []
   let t = 0
   const digestSec = cfg.digest.enabled ? (p.digestClips ?? []).reduce((a, c) => a + c.durationSec, 0) : 0
   const push = (kind, len) => {
@@ -217,11 +227,15 @@ export function planTimeline(cfg, p) {
     t += len
   }
   if (cfg.digest.enabled && digestSec > 0) push('digest', digestSec)
-  if (cfg.lineIntro.enabled) push('lineIntro', cfg.lineIntro.durationSec)
+  if (cfg.lineIntro.enabled && cfg.lineIntro.mode === 'standalone') push('lineIntro', cfg.lineIntro.durationSec)
   const mainOffsetSec = t
-  push('main', p.mainEndSec - p.mainStartSec)
+  const mainSec = p.mainEndSec - p.mainStartSec
+  push('main', mainSec)
+  if (cfg.lineIntro.enabled && cfg.lineIntro.mode !== 'standalone') {
+    overlays.push({ kind: 'lineIntro', startSec: round3(mainOffsetSec), endSec: round3(mainOffsetSec + Math.min(cfg.lineIntro.durationSec, mainSec)) })
+  }
   if (cfg.lineOutro.enabled) push('lineOutro', cfg.lineOutro.durationSec)
-  return { sections, mainOffsetSec: round3(mainOffsetSec), totalSec: round3(t), digestSec: round3(digestSec) }
+  return { sections, overlays, mainOffsetSec: round3(mainOffsetSec), totalSec: round3(t), digestSec: round3(digestSec) }
 }
 const round3 = (v) => Math.round(v * 1000) / 1000
 
@@ -308,8 +322,8 @@ const QR_FRAME_PX = 3 // QRカードの外側に付ける薄い枠（quiet zone�
  * 周囲に白いquiet zone（長辺の8%）を付け、その外側に薄い枠を付ける。imgWidth/imgHeight が無いときは枠いっぱい（最大占有領域）。
  * @returns {{ innerW: number, innerH: number, inner: number, quiet: number, frame: number, totalW: number, totalH: number, total: number, x: number, y: number, marginX: number }}
  */
-export function qrLayout(width, height, imgWidth, imgHeight) {
-  const box = Math.round(height * 0.52)
+export function qrLayout(width, height, imgWidth, imgHeight, opts = {}) {
+  const box = opts.box ?? Math.round(height * 0.52)
   const a = imgWidth > 0 && imgHeight > 0 ? imgWidth / imgHeight : 1
   const innerW = a >= 1 ? box : Math.round(box * a)
   const innerH = a >= 1 ? Math.round(box / a) : box
@@ -378,6 +392,81 @@ export function lineTextLayout(width, height, text, withQr) {
   return { items, textRight: Math.max(...items.map((i) => i.x + i.widthPx)) }
 }
 
+// ────────────────────────────────────────────────────────────────
+// 冒頭LINE案内（overlay）: 本編の上へ重ねるコンパクトなパネル。本編の顔・左上のテーマ・下部の字幕と重ならない右側の領域に置く。
+// ────────────────────────────────────────────────────────────────
+
+/** 本編の被写体・既存の字幕/テーマを避けるための予約領域（画面に対する比率）。パネルはこの外に置く。 */
+export const OVERLAY_SAFE = Object.freeze({
+  faceRightRatio: 0.7, // 人物（髪・顔）は画面中央〜これより左。パネルの左端はこの右側
+  captionTopRatio: 0.66, // 下部の字幕（最大2行）はこれより下。パネルの下端はこの上
+  themeRightRatio: 0.47, // 左上のトークテーマの最大右端（TOPIC_BOX_MAX_RIGHT_RATIO）
+})
+const LINE_GREEN = '&H55C706&' // LINEの緑 #06C755（ASSのBGR）
+const PANEL_ALPHA = '&H50&' // 約69%不透明の黒（既存のテーマ箱と同じ。本編が透けて見える）
+export const LINE_OVERLAY_STAGES_SEC = Object.freeze([0, 5, 10]) // 見出し（最初のフレームから）→ 特典 → その他。QRは段階に関係なく常時表示
+
+/**
+ * オーバーレイパネルのレイアウト（1080p基準の値を高さ比でスケール）。パネル内は 見出し → QR → 特典 → その他 の縦並び。
+ * @returns {{ panel: {x,y,w,h}, accent: {x,y,w,h}, items: Array<{key,text,cx,y,size,style,widthPx,heightPx}>, qr: null | ReturnType<typeof qrLayout>, innerW: number }}
+ */
+export function overlayPanelLayout(width, height, text, withQr, imgWidth, imgHeight) {
+  const k = height / 1080
+  const r = (v) => Math.round(v * k)
+  const panelW = r(500)
+  const pad = r(22)
+  const headSize = r(48)
+  const bodySize = r(42)
+  const lineH = (size, n) => Math.round(size * 1.1 * n)
+  const panelX = width - Math.round(width * 0.02) - panelW
+  const panelY = r(20)
+  const q = withQr ? qrLayout(width, height, imgWidth, imgHeight, { box: r(330) }) : null
+  const linesOf = (t) => t.split('\\N')
+  const measure = (t, size) => Math.round(Math.max(...linesOf(forRender(t)).map((l) => estimateTextWidthPx(l, size))))
+  const cx = panelX + Math.round(panelW / 2)
+  let y = panelY + pad
+  const items = []
+  const addText = (key, t, size, style) => {
+    const h = lineH(size, linesOf(t).length)
+    items.push({ key, text: t, cx, y, size, style, widthPx: measure(t, size), heightPx: h })
+    y += h
+  }
+  addText('headline', text.headline, headSize, LINE_STYLE_HEAD)
+  let qr = null
+  if (q) {
+    y += r(12)
+    qr = { ...q, x: panelX + Math.round((panelW - q.totalW) / 2), y }
+    y += q.totalH + r(14)
+  } else y += r(10)
+  addText('offer', text.offer, bodySize, LINE_STYLE_BODY)
+  y += r(8)
+  addText('bonus', text.bonus, bodySize, LINE_STYLE_BODY)
+  const panelH = y + pad - panelY
+  return { panel: { x: panelX, y: panelY, w: panelW, h: panelH }, accent: { x: panelX, y: panelY, w: r(8), h: panelH }, items, qr, innerW: panelW - pad * 2 }
+}
+
+/** 冒頭LINE案内（overlay）のDialogue。パネル・緑のアクセントは開始フレームから終了まで。見出しも開始フレームから。特典・その他は段階的にフェードイン（QRはASSではなくffmpegで常時表示）。 */
+export function buildLineOverlayEvents(width, height, text, overlay, withQr, imgWidth, imgHeight) {
+  const L = overlayPanelLayout(width, height, text, withQr, imgWidth, imgHeight)
+  const start = assTime(overlay.startSec)
+  const end = assTime(overlay.endSec)
+  const dur = overlay.endSec - overlay.startSec
+  const amberBgr = ASS_AMBER.replace(/&H\d{2}/, '&H')
+  const rect = (r) => `m 0 0 l ${r.w} 0 ${r.w} ${r.h} 0 ${r.h}`
+  const draw = (layer, r, colour, alpha) => `Dialogue: ${layer},${start},${end},${LINE_STYLE_BODY},,0,0,0,,{\\an7\\pos(${r.x},${r.y})\\p1\\bord0\\shad0\\1c${colour}\\1a${alpha}}${rect(r)}{\\p0}`
+  const events = [draw(19, L.panel, '&H000000&', PANEL_ALPHA), draw(19, L.accent, LINE_GREEN, '&H00&')]
+  L.items.forEach((it, i) => {
+    const at = overlay.startSec + Math.min(LINE_OVERLAY_STAGES_SEC[i] ?? 0, Math.max(0, dur - 1))
+    const body = forRender(it.text)
+      .split('\\N')
+      .map((l) => escapeAssText(l).replace('無料歌唱診断', `{\\1c${amberBgr}}無料歌唱診断{\\1c&HFFFFFF&}`))
+      .join('\\N')
+    const fade = i === 0 ? '' : '\\fad(400,0)' // 見出しは開始フレームから（フェードなし）
+    events.push(`Dialogue: 20,${assTime(at)},${end},${it.style},,0,0,0,,{\\an8\\pos(${it.cx},${it.y})\\fs${it.size}\\bord2${fade}}${body}`)
+  })
+  return events
+}
+
 /** LINE案内区間のDialogue。段階表示（見出し → 特典 → その他）で、派手な動きは使わずフェードインだけ。 */
 export function buildLineEvents(width, height, text, section, withQr, stages) {
   const layout = lineTextLayout(width, height, text, withQr)
@@ -397,12 +486,15 @@ export function buildLineEvents(width, height, text, section, withQr, stages) {
 /**
  * 最終動画全体のASS。字幕・テーマ・強調は最終動画の時刻へ配置済みのものを渡す。LINE案内区間にはテーマも本編字幕も重ねない。
  */
-export function buildFinalAss({ width, height, cfg, timeline, mainCaptions, digestCaps, themeBlocks }) {
+export function buildFinalAss({ width, height, cfg, timeline, mainCaptions, digestCaps, themeBlocks, qrSize }) {
   const line = buildLineStyleLines(width, height)
   const extraEvents = []
   for (const s of timeline.sections) {
     if (s.kind === 'lineIntro') extraEvents.push(...buildLineEvents(width, height, cfg.line.text, s, sectionShowsQr(cfg, 'lineIntro'), [0, 0.33, 0.66]))
     if (s.kind === 'lineOutro') extraEvents.push(...buildLineEvents(width, height, cfg.line.text, s, sectionShowsQr(cfg, 'lineOutro'), [0, 0.1, 0.2]))
+  }
+  for (const o of timeline.overlays ?? []) {
+    if (o.kind === 'lineIntro') extraEvents.push(...buildLineOverlayEvents(width, height, cfg.line.text, o, sectionShowsQr(cfg, 'lineIntro'), qrSize?.width, qrSize?.height))
   }
   return buildAssContent({ width, height, captions: [...digestCaps, ...mainCaptions] }, { topicBlocks: themeBlocks, topicAccentMode: 'label', extraStyleLines: line.lines, extraEvents })
 }
@@ -410,6 +502,12 @@ export function buildFinalAss({ width, height, cfg, timeline, mainCaptions, dige
 // ────────────────────────────────────────────────────────────────
 // ffmpeg（spawn argv配列。shell展開しない）
 // ────────────────────────────────────────────────────────────────
+
+/** QR1区間の配置。overlay はパネル内、standalone は全画面カードの右側。 */
+export function planQrPlacement(win, width, height, qrSize, cfg) {
+  if (win.mode === 'overlay') return overlayPanelLayout(width, height, cfg.line.text, true, qrSize?.width, qrSize?.height).qr
+  return qrLayout(width, height, qrSize?.width, qrSize?.height)
+}
 
 /**
  * 構成動画1本を書き出すffmpeg引数。ダイジェストの映像だけを白黒（クリップごとのフィルタチェーンに閉じ込め、他区間へ漏らさない）にし、
@@ -504,11 +602,12 @@ export function buildCompositionArgs(p) {
     if (!(p.qrSize?.width > 0 && p.qrSize?.height > 0)) throw new Error('QR画像の寸法が必要です')
     args.push('-loop', '1', '-framerate', String(F), '-t', String(timeline.totalSec), '-i', p.qrPath)
     const qi = idx++
-    const q = qrLayout(width, height, p.qrSize.width, p.qrSize.height)
-    // 縦横比を維持して縮尺し、白いquiet zoneと薄い枠を外側へ付ける（QR本体は変形・着色・透過しない）。
-    const card = `scale=${q.innerW}:${q.innerH}:flags=bicubic,pad=${q.innerW + q.quiet * 2}:${q.innerH + q.quiet * 2}:${q.quiet}:${q.quiet}:color=white,pad=${q.totalW}:${q.totalH}:${q.frame}:${q.frame}:color=0x8a968f,format=yuv420p`
-    chain.push(`[${qi}:v]${card},split=${qrWindows.length}${qrWindows.map((_, i) => `[qr${i}]`).join('')}`)
+    chain.push(`[${qi}:v]split=${qrWindows.length}${qrWindows.map((_, i) => `[qs${i}]`).join('')}`)
     qrWindows.forEach((w, i) => {
+      const q = planQrPlacement(w, width, height, p.qrSize, cfg)
+      // 縦横比を維持して縮尺し、白いquiet zoneと薄い枠を外側へ付ける（QR本体は変形・着色・透過しない）。
+      const card = `scale=${q.innerW}:${q.innerH}:flags=bicubic,pad=${q.innerW + q.quiet * 2}:${q.innerH + q.quiet * 2}:${q.quiet}:${q.quiet}:color=white,pad=${q.totalW}:${q.totalH}:${q.frame}:${q.frame}:color=0x8a968f,format=yuv420p`
+      chain.push(`[qs${i}]${card}[qr${i}]`)
       chain.push(`${vout}[qr${i}]overlay=${q.x}:${q.y}:enable='between(t,${w.startSec},${w.endSec})':eof_action=repeat[ov${i}]`)
       vout = `[ov${i}]`
     })

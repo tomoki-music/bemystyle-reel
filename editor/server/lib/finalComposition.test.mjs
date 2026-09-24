@@ -1,3 +1,5 @@
+import { computeTopicGeometry } from './topicAss.mjs'
+import { getCaptionStyleDefs } from './captionStyles.mjs'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -5,7 +7,7 @@ import { join } from 'path'
 import { EventEmitter } from 'events'
 import {
   COMPOSITION_DEFAULTS, resolveCompositionConfig, validateCompositionConfig, selectDigestClips, planTimeline, shiftMainCaptions, digestCaptions,
-  mainThemeBlock, digestThemeBlocks, buildFinalAss, buildCompositionArgs, planQrWindows, sectionShowsQr, QR_MISSING_MESSAGE, buildDigestStemArgs, qrLayout, lineTextLayout, buildLineEvents, mainToFinal, RENDER_GLYPH_SUBSTITUTIONS,
+  mainThemeBlock, digestThemeBlocks, buildFinalAss, buildCompositionArgs, planQrWindows, planQrPlacement, overlayPanelLayout, buildLineOverlayEvents, OVERLAY_SAFE, LINE_OVERLAY_STAGES_SEC, sectionShowsQr, QR_MISSING_MESSAGE, buildDigestStemArgs, qrLayout, lineTextLayout, buildLineEvents, mainToFinal, RENDER_GLYPH_SUBSTITUTIONS,
 } from './finalComposition.mjs'
 import { inspectAsset, resolveCompositionAssets, renderCompositionToFile, checkFreeSpace, FULL_RENDER_MIN_FREE_BYTES } from './compositionRender.mjs'
 import { normalizeTopicSectionsContinuous } from './topicSections.mjs'
@@ -32,6 +34,7 @@ const digest = () => selectDigestClips({ captions, themes, config: cfgFull.diges
 const W = 1920
 const H = 1080
 const QR_SIZE = { width: 554, height: 518 }
+const assTimeOf = (sec) => { const t = Math.round(sec * 100); const c = t % 100; const x = Math.floor(t / 100); return `${Math.floor(x / 3600)}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}.${String(c).padStart(2, '0')}` }
 
 describe('デフォルト設定と有効/無効', () => {
   it('完成動画の既定はすべてON。秒数・BGM・クレジット・白黒の既定値', () => {
@@ -114,24 +117,50 @@ describe('ダイジェスト選定（語・文の途中から始めない/終わ
 describe('タイムライン（区間順序とオフセット）', () => {
   const sel = digest()
   const main = { mainStartSec: 1100, mainEndSec: 1130 }
-  it('順序: ダイジェスト → 冒頭LINE → 本編 → 末尾LINE。各区間が隙間なく連続する', () => {
+  it('順序: ダイジェスト → 本編 → 末尾LINE。冒頭LINE(overlay)は独立区間ではなく本編の最初の30秒へ重なる', () => {
     const t = planTimeline(cfgFull, { ...main, digestClips: sel.clips })
-    expect(t.sections.map((s) => s.kind)).toEqual(['digest', 'lineIntro', 'main', 'lineOutro'])
+    expect(t.sections.map((s) => s.kind)).toEqual(['digest', 'main', 'lineOutro'])
     t.sections.slice(1).forEach((s, i) => expect(s.startSec).toBeCloseTo(t.sections[i].endSec, 3))
     expect(t.sections[0].startSec).toBe(0)
-    expect(t.totalSec).toBeCloseTo(sel.totalSec + 30 + 30 + 12, 2)
-    expect(t.mainOffsetSec).toBeCloseTo(sel.totalSec + 30, 2)
-    expect(t.sections[2].endSec - t.sections[2].startSec).toBeCloseTo(30, 3)
+    expect(t.totalSec).toBeCloseTo(sel.totalSec + 30 + 12, 2) // ダイジェスト + 本編 + 末尾LINE（冒頭LINEの30秒は加算しない）
+    expect(t.mainOffsetSec).toBeCloseTo(sel.totalSec, 2) // 本編のオフセットはダイジェストの長さだけ
+    expect(t.overlays).toHaveLength(1)
+    expect(t.overlays[0]).toMatchObject({ kind: 'lineIntro', startSec: t.sections[1].startSec }) // 本編開始とオーバーレイ開始が同一
+    expect(t.overlays[0].endSec - t.overlays[0].startSec).toBeCloseTo(30, 3)
+    expect(t.overlays[0].endSec).toBeLessThanOrEqual(t.sections[1].endSec) // 本編の範囲内
+  })
+  it('overlayは全体durationへ加算しない。standaloneは加算され、本編オフセットも30秒後ろへずれる', () => {
+    const ov = planTimeline(resolveCompositionConfig({ lineIntro: { mode: 'overlay' } }), { ...main, digestClips: sel.clips })
+    const st = planTimeline(resolveCompositionConfig({ lineIntro: { mode: 'standalone' } }), { ...main, digestClips: sel.clips })
+    expect(st.totalSec - ov.totalSec).toBeCloseTo(30, 3)
+    expect(st.mainOffsetSec - ov.mainOffsetSec).toBeCloseTo(30, 3)
+    expect(st.sections.map((x) => x.kind)).toEqual(['digest', 'lineIntro', 'main', 'lineOutro'])
+    expect(st.overlays).toEqual([])
+    // overlayの秒数を変えても長さは変わらない。本編より長い指定は本編の終わりまでに丸める
+    const ov60 = planTimeline(resolveCompositionConfig({ lineIntro: { durationSec: 60 } }), { ...main, digestClips: sel.clips })
+    expect(ov60.totalSec).toBeCloseTo(ov.totalSec, 3)
+    expect(ov60.overlays[0].endSec).toBeCloseTo(ov60.sections[1].endSec, 3)
+  })
+  it('構成確認動画相当（ダイジェスト+本編35秒+末尾12秒）の長さ。旧仕様の二重加算（+30秒）をしない', () => {
+    const t = planTimeline(cfgFull, { mainStartSec: 1100, mainEndSec: 1135, digestClips: sel.clips })
+    expect(t.totalSec).toBeCloseTo(sel.totalSec + 35 + 12, 2)
+    expect(t.totalSec).not.toBeCloseTo(sel.totalSec + 30 + 35 + 12, 1)
+    expect(t.overlays[0].endSec - t.overlays[0].startSec).toBeCloseTo(30, 3)
+    expect(t.sections[1].endSec - t.overlays[0].endSec).toBeCloseTo(5, 3) // 残り約5秒はLINE案内なし
   })
   it('ダイジェストOFF・冒頭LINEOFF・末尾LINEOFFの組み合わせ', () => {
     const kinds = (o) => planTimeline(resolveCompositionConfig(o), { ...main, digestClips: sel.clips }).sections.map((s) => s.kind)
-    expect(kinds({ digest: { enabled: false } })).toEqual(['lineIntro', 'main', 'lineOutro'])
+    expect(kinds({ digest: { enabled: false } })).toEqual(['main', 'lineOutro'])
     expect(kinds({ lineIntro: { enabled: false } })).toEqual(['digest', 'main', 'lineOutro'])
-    expect(kinds({ lineOutro: { enabled: false, showQr: false } })).toEqual(['digest', 'lineIntro', 'main'])
+    expect(planTimeline(resolveCompositionConfig({ lineIntro: { enabled: false } }), { ...main, digestClips: sel.clips }).overlays).toEqual([])
+    expect(kinds({ lineOutro: { enabled: false, showQr: false } })).toEqual(['digest', 'main'])
     expect(kinds({ digest: { enabled: false }, lineIntro: { enabled: false }, lineOutro: { enabled: false } })).toEqual(['main'])
     const t = planTimeline(resolveCompositionConfig({ digest: { enabled: false }, lineIntro: { enabled: false }, lineOutro: { enabled: false } }), { ...main, digestClips: sel.clips })
     expect(t.mainOffsetSec).toBe(0)
     expect(t.totalSec).toBe(30)
+    // ダイジェストOFFでも冒頭overlayは本編の最初（0秒）から
+    const noDigest = planTimeline(resolveCompositionConfig({ digest: { enabled: false } }), { ...main, digestClips: sel.clips })
+    expect(noDigest.overlays[0]).toMatchObject({ startSec: 0, endSec: 30 })
   })
   it('caption・テーマ・強調が本編オフセットと同じ秒数だけ移動し、本編内部の相対時刻は変わらない', () => {
     const t = planTimeline(cfgFull, { ...main, digestClips: sel.clips })
@@ -196,21 +225,25 @@ describe('最終ASS（LINE案内・テーマ・字幕）', () => {
     return m && { layer: Number(m[1]), a: +m[2] * 3600 + +m[3] * 60 + +m[4] + +m[5] / 100, b: +m[6] * 3600 + +m[7] * 60 + +m[8] + +m[9] / 100, style: m[10] }
   }
   const events = ass.split('\n').map(parse).filter(Boolean)
-  const lineSecs = timeline.sections.filter((s) => s.kind === 'lineIntro' || s.kind === 'lineOutro')
+  const lineSecs = timeline.sections.filter((s) => s.kind === 'lineIntro' || s.kind === 'lineOutro') // 独立区間は末尾のみ（冒頭はoverlay）
 
-  it('LINE案内の区間に、本編字幕・ダイジェスト字幕・トークテーマを重ねない', () => {
+  it('独立したLINE案内区間（末尾）に、本編字幕・ダイジェスト字幕・トークテーマを重ねない', () => {
     for (const s of lineSecs) {
       const overlapping = events.filter((e) => !e.style.startsWith('Line') && e.a < s.endSec - 1e-6 && e.b > s.startSec + 1e-6)
       expect(overlapping).toEqual([])
     }
   })
-  it('LINE案内は2〜3段階で表示される（冒頭: 3段階、末尾: 3行が最初から段階的に）。フェードのみで派手な動きはない', () => {
-    const intro = timeline.sections.find((s) => s.kind === 'lineIntro')
-    const lineEvents = events.filter((e) => e.style.startsWith('Line') && e.a >= intro.startSec && e.b <= intro.endSec + 1e-6)
-    expect(lineEvents).toHaveLength(3)
-    const starts = lineEvents.map((e) => e.a)
-    expect(new Set(starts).size).toBe(3)
-    expect(starts[1]).toBeGreaterThan(starts[0] + 5)
+  it('末尾LINE案内は3行が段階的に表示される（従来どおり）。冒頭overlayは見出し→特典→その他の3段階。フェードのみで派手な動きはない', () => {
+    const outro = timeline.sections.find((s) => s.kind === 'lineOutro')
+    const outroEv = events.filter((e) => e.style.startsWith('Line') && e.a >= outro.startSec && e.b <= outro.endSec + 1e-6)
+    expect(outroEv).toHaveLength(3)
+    expect(outroEv.map((e) => e.a)[1]).toBeGreaterThan(outroEv[0].a)
+    const ov = timeline.overlays[0]
+    const texts = events.filter((e) => e.layer === 20 && e.a >= ov.startSec - 1e-6 && e.b <= ov.endSec + 1e-6 && e.style.startsWith('Line'))
+    expect(texts).toHaveLength(3)
+    expect(texts[0].a).toBeCloseTo(ov.startSec, 2) // 見出しは開始フレームから
+    expect(texts[1].a - texts[0].a).toBeCloseTo(LINE_OVERLAY_STAGES_SEC[1], 2)
+    expect(texts[2].a - texts[0].a).toBeCloseTo(LINE_OVERLAY_STAGES_SEC[2], 2)
     expect(ass).not.toMatch(/\\move|\\t\(|\\frz|\\org/)
     expect(ass).toContain('\\fad(500,0)')
   })
@@ -281,7 +314,7 @@ describe('QR（縦横比・quiet zone・画面内・テキストと重ならな�
       }
     }
   })
-  it('QRありのLINE案内は左揃え（QRは右）。QRなしの案内は中央揃えで画面内', () => {
+  it('QRありの独立LINE案内（末尾）は左揃え（QRは右）。QRなしの案内は中央揃えで画面内', () => {
     const withQr = buildLineEvents(1920, 1080, cfgFull.line.text, { startSec: 0, endSec: 30 }, true, [0, 0.33, 0.66])
     expect(withQr.every((l) => l.includes('\\an7'))).toBe(true)
     const { items } = lineTextLayout(1920, 1080, cfgFull.line.text, false)
@@ -292,13 +325,152 @@ describe('QR（縦横比・quiet zone・画面内・テキストと重ならな�
     const ev = buildLineEvents(1920, 1080, cfgFull.line.text, { startSec: 0, endSec: 30 }, false, [0, 0.33, 0.66])
     expect(ev.every((l) => l.includes('\\an8'))).toBe(true)
   })
-  it('完成動画の既定で、冒頭・末尾のLINE案内はどちらも左揃え+QR（3段階表示は維持）', () => {
-    const sel = digest()
-    const timeline = planTimeline(cfgFull, { mainStartSec: 1100, mainEndSec: 1130, digestClips: sel.clips })
-    const ass = buildFinalAss({ width: W, height: H, cfg: cfgFull, timeline, mainCaptions: [], digestCaps: [], themeBlocks: [] })
-    const lines = ass.split('\n').filter((l) => l.startsWith('Dialogue: 20,') && /LineHead|LineBody/.test(l))
-    expect(lines).toHaveLength(6) // 冒頭3段階 + 末尾3段階
-    expect(lines.every((l) => l.includes('\\an7'))).toBe(true)
+})
+
+describe('冒頭LINE案内 overlay（本編の上へ重ねる。QRは開始フレームから終了まで不透明で常時表示）', () => {
+  const sel = digest()
+  const main = { mainStartSec: 1100, mainEndSec: 1135 }
+  const timeline = planTimeline(cfgFull, { ...main, digestClips: sel.clips })
+  const ov = timeline.overlays[0]
+  const mainCaps = shiftMainCaptions(captions, main.mainStartSec, main.mainEndSec, timeline.mainOffsetSec)
+  const built = buildCompositionArgs({ cfg: cfgFull, timeline, width: W, height: H, sourcePath: '/src/video.mov', ...main, digestClips: sel.clips, bgmPath: '/x/bgm.mp3', qrPath: '/x/qr.png', qrSize: QR_SIZE, assPath: '/tmp/a.ass', outputPath: '/out/.rendering.mp4' })
+  const f = built.filterComplex
+  const chains = f.split(';')
+  const L = overlayPanelLayout(W, H, cfgFull.line.text, true, QR_SIZE.width, QR_SIZE.height)
+
+  it('QRは本編開始と同時（オーバーレイの最初のフレーム）から、終了（30秒後）まで途切れず表示。30秒後にLINE案内だけ消える', () => {
+    const w = planQrWindows(cfgFull, timeline).find((x) => x.kind === 'lineIntro')
+    expect(w.mode).toBe('overlay')
+    expect(w.startSec).toBe(timeline.sections.find((x) => x.kind === 'main').startSec)
+    expect(w.startSec).toBe(ov.startSec)
+    expect(w.endSec - w.startSec).toBeCloseTo(30, 3)
+    const qrOv = chains.find((c) => c.includes(`between(t,${ov.startSec},${ov.endSec})`))
+    expect(qrOv).toContain('overlay=')
+    expect(qrOv).toContain('eof_action=repeat')
+    // 30fps: 開始直前のフレームは無し、最初のフレームと最終フレームは有り、終了フレームは無し
+    const fps = cfgFull.fps
+    const onAt = (t) => t >= ov.startSec && t <= ov.endSec
+    expect(onAt(ov.startSec - 1 / fps)).toBe(false)
+    expect(onAt(Math.ceil(ov.startSec * fps) / fps)).toBe(true)
+    expect(onAt(ov.endSec - 1 / fps)).toBe(true)
+    expect(onAt(Math.ceil(ov.endSec * fps) / fps + 1 / fps)).toBe(false)
+  })
+  it('QRにフェード・透明度・白黒・ぼかしを適用しない。QRカードは元画像の縦横比のままquiet zoneを持つ', () => {
+    const qrChain = chains.find((c) => c.startsWith('[qs0]'))
+    const scope = [qrChain, chains.find((c) => c.includes('overlay=') && c.includes(`${ov.startSec}`))].join(';')
+    for (const bad of ['fade', 'hue', 'gray', 'colorchannelmixer', 'colorlevels', 'eq=', 'boxblur', 'gblur', 'avgblur', 'geq', 'alpha', 'format=rgba', 'format=yuva', 'lut', 'curves', 'negate', 'colorkey', 'chromakey']) expect(scope).not.toContain(bad)
+    const q = L.qr
+    expect(Math.abs(q.innerW / q.innerH - QR_SIZE.width / QR_SIZE.height)).toBeLessThan(0.01)
+    expect(q.quiet / Math.max(q.innerW, q.innerH)).toBeGreaterThanOrEqual(0.06)
+    expect(qrChain).toContain(`scale=${q.innerW}:${q.innerH}`)
+    expect(qrChain).toContain('color=white')
+    // ASSのパネルにはフェードをかけない（QRが見えているのにパネルが無い/薄い状態を作らない）。段階表示の特典・その他だけがフェードイン
+    const ass = buildLineOverlayEvents(W, H, cfgFull.line.text, ov, true, QR_SIZE.width, QR_SIZE.height)
+    expect(ass.filter((l) => l.includes('\\p1')).every((l) => !l.includes('\\fad'))).toBe(true)
+    expect(ass.find((l) => l.includes('LINEお友だち登録受付中'))).not.toContain('\\fad')
+  })
+  it('見出しとQRは最初のフレームから。特典・その他は数秒後に追加（QRは段階に関係なく常時）', () => {
+    const ass = buildLineOverlayEvents(W, H, cfgFull.line.text, ov, true, QR_SIZE.width, QR_SIZE.height)
+    const start = (l) => { const m = /^Dialogue: \d+,(\d+):(\d\d):(\d\d)\.(\d\d),/.exec(l); return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 100 }
+    const head = ass.find((l) => l.includes('LINEお友だち登録受付中'))
+    expect(start(head)).toBeCloseTo(ov.startSec, 2)
+    expect(start(ass.find((l) => l.includes('お一人様1回')))).toBeCloseTo(ov.startSec + LINE_OVERLAY_STAGES_SEC[1], 2)
+    expect(start(ass.find((l) => l.includes('その他、お得な情報も')))).toBeCloseTo(ov.startSec + LINE_OVERLAY_STAGES_SEC[2], 2)
+    expect(ass.join('\n')).toContain('\\1c&H55C706&') // LINEの緑のアクセント
+    // 全イベントの終了はオーバーレイの終了（30秒後）で、本編の字幕・テーマ側には触れない
+    for (const l of ass) expect(l).toContain(`,${assTimeOf(ov.endSec)},`)
+  })
+  it('本編の映像・音声は連続（停止・スロー・分割なし）。LINE案内中も本編音声が存在し、無音区間を作らない', () => {
+    const mainV = chains.filter((c) => c.endsWith('[mv]'))
+    expect(mainV).toHaveLength(1)
+    expect(mainV[0]).toMatch(new RegExp(`trim=0:${35},setpts=PTS-STARTPTS`))
+    expect(f).not.toMatch(/freezeframes|tpad|loop=|setpts=[^;]*\*|atempo|apad/)
+    const mainA = chains.filter((c) => c.endsWith('[ma]'))
+    expect(mainA).toHaveLength(1)
+    expect(mainA[0]).not.toContain('volume=') // 本編音声を小さくしない
+    // 無音（anullsrc）は末尾LINE案内の1つだけ。冒頭overlay区間は本編音声そのまま
+    expect(chains.filter((c) => c.includes('anullsrc'))).toHaveLength(1)
+    expect(f).toContain('[dvid][dA][mv][ma][lov][loa]concat=n=3')
+  })
+  it('ダイジェストBGMは本編（LINE案内overlay区間）へ漏れない。BGM入力は1回で、ダイジェスト長で切る', () => {
+    expect(built.args.filter((a) => a === '/x/bgm.mp3')).toHaveLength(1)
+    expect(f).toContain(`atrim=0:${timeline.digestSec}`)
+    expect(chains.filter((c) => c.includes('[bgm]') || c.includes('[bgmd]')).every((c) => !c.includes('[ma]') && !c.includes('[mv]'))).toBe(true)
+    // 効果音は追加しない
+    expect(f).not.toMatch(/sine|aevalsrc|\bse\b/)
+  })
+  it('パネルは被写体・トークテーマ・下部の字幕・画面端と重ならない（右側の安全領域）', () => {
+    for (const [w, h] of [[1920, 1080], [1280, 720]]) {
+      const l = overlayPanelLayout(w, h, cfgFull.line.text, true, QR_SIZE.width, QR_SIZE.height)
+      const p = l.panel
+      expect(p.x).toBeGreaterThanOrEqual(w * OVERLAY_SAFE.faceRightRatio) // 顔・髪の右
+      expect(p.x + p.w).toBeLessThanOrEqual(w)
+      expect(p.y).toBeGreaterThanOrEqual(0)
+      expect(p.y + p.h).toBeLessThanOrEqual(h * OVERLAY_SAFE.captionTopRatio) // 下部の字幕の上
+      // トークテーマ（左上）: 最大右端より右
+      const g = computeTopicGeometry(['音楽仲間との', '違いを把握'], w, h, 84 * (h / 1080))
+      expect(p.x).toBeGreaterThan(g.box.x + g.box.w)
+      expect(p.x).toBeGreaterThan(w * OVERLAY_SAFE.themeRightRatio)
+      // 実際の字幕（最大フォント・2行・下余白）の上端より上
+      const defs = getCaptionStyleDefs(w, h)
+      const maxFont = Math.max(...Object.values(defs).filter((d) => d.alignment === 2).map((d) => d.fontsize))
+      const captionTop = h - defs.normal.marginV - maxFont * 1.2 * 2
+      expect(p.y + p.h).toBeLessThan(captionTop)
+      // テキストとQRはパネル内で互いに重ならない
+      const boxes = [...l.items.map((i) => ({ y0: i.y, y1: i.y + i.heightPx, x0: i.cx - i.widthPx / 2, x1: i.cx + i.widthPx / 2 })), { y0: l.qr.y, y1: l.qr.y + l.qr.totalH, x0: l.qr.x, x1: l.qr.x + l.qr.totalW }]
+      for (const b of boxes) {
+        expect(b.x0).toBeGreaterThanOrEqual(p.x)
+        expect(b.x1).toBeLessThanOrEqual(p.x + p.w)
+        expect(b.y0).toBeGreaterThanOrEqual(p.y)
+        expect(b.y1).toBeLessThanOrEqual(p.y + p.h)
+      }
+      const sorted = [...boxes].sort((a, b) => a.y0 - b.y0)
+      sorted.slice(1).forEach((b, i) => expect(b.y0).toBeGreaterThanOrEqual(sorted[i].y1))
+      expect(l.items.every((i) => i.widthPx <= l.innerW)).toBe(true)
+    }
+  })
+  it('パネルのQRはスマホ縮小（390px・430px幅）でも読める大きさ（QR画像が横幅の3%以上=約60px相当）', () => {
+    const q = L.qr
+    for (const phoneW of [390, 430]) expect(q.innerW * (phoneW / W)).toBeGreaterThanOrEqual(62)
+  })
+  it('本編字幕・テーマの位置とサイズ、本編内部の相対時刻はoverlayの有無で変わらない', () => {
+    const off = resolveCompositionConfig({ lineIntro: { enabled: false } })
+    const tOff = planTimeline(off, { ...main, digestClips: sel.clips })
+    expect(tOff.mainOffsetSec).toBeCloseTo(timeline.mainOffsetSec, 3) // 旧仕様の +30 秒を持たない
+    const capsOff = shiftMainCaptions(captions, main.mainStartSec, main.mainEndSec, tOff.mainOffsetSec)
+    expect(capsOff).toEqual(mainCaps) // overlayの有無で、字幕の時刻・本文・強調は完全一致
+    mainCaps.forEach((c, i) => expect(c.startSec - timeline.mainOffsetSec).toBeCloseTo(captions.filter((x) => x.startSec >= main.mainStartSec && x.endSec <= main.mainEndSec)[i].startSec - main.mainStartSec, 3))
+    const args = { width: W, height: H, mainCaptions: mainCaps, digestCaps: digestCaptions(captions, sel.clips), themeBlocks: [mainThemeBlock(themes, main.mainStartSec, main.mainEndSec, timeline.mainOffsetSec)] }
+    const withOv = buildFinalAss({ ...args, cfg: cfgFull, timeline })
+    const noOv = buildFinalAss({ ...args, cfg: off, timeline: tOff })
+    const strip = (t) => t.split('\n').filter((l) => !/^Dialogue: (19|20),/.test(l) && !l.startsWith('Style: Line')).join('\n')
+    // 既存の字幕・テーマのDialogue/Styleは、overlayを足しても1文字も変わらない（末尾LINEの行を除いて比較）
+    expect(strip(withOv)).toBe(strip(noOv))
+  })
+  it('QR表示ONで素材が無ければ、overlayでもレンダー前に失敗する。overlayのQRだけOFFにもできる', () => {
+    const build = (cfg, extra = {}) => buildCompositionArgs({ cfg, timeline: planTimeline(cfg, { ...main, digestClips: sel.clips }), width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, qrPath: '/q', qrSize: QR_SIZE, assPath: '/a', outputPath: '/o', ...extra })
+    const introOnly = resolveCompositionConfig({ lineOutro: { enabled: false } })
+    expect(() => build(introOnly, { qrPath: undefined })).toThrow(QR_MISSING_MESSAGE)
+    const noIntroQr = resolveCompositionConfig({ lineIntro: { showQr: false }, lineOutro: { enabled: false } })
+    expect(build(noIntroQr, { qrPath: undefined, qrSize: undefined }).filterComplex).not.toContain('overlay=')
+    expect(sectionShowsQr(noIntroQr, 'lineIntro')).toBe(false)
+  })
+  it('設定: 既定は 冒頭=overlay・末尾=standalone、開始は本編と同時。旧設定（modeなし）は既定へ正規化。不正なmodeは検証エラー', () => {
+    const c = resolveCompositionConfig({})
+    expect(c.lineIntro).toMatchObject({ mode: 'overlay', startWithMain: true, durationSec: 30, showQr: true, enabled: true })
+    expect(c.lineOutro).toMatchObject({ mode: 'standalone', durationSec: 12, showQr: true, enabled: true })
+    expect(resolveCompositionConfig({ lineIntro: { enabled: true, durationSec: 30, showQr: true } }).lineIntro.mode).toBe('overlay') // 旧設定
+    expect(validateCompositionConfig(resolveCompositionConfig({ lineIntro: { mode: 'fullscreen' } })).ok).toBe(false)
+    expect(validateCompositionConfig(resolveCompositionConfig({ lineOutro: { mode: 'overlay' } })).ok).toBe(false)
+    expect(validateCompositionConfig(resolveCompositionConfig({ lineIntro: { startWithMain: false } })).ok).toBe(false)
+    expect(validateCompositionConfig(resolveCompositionConfig({ lineIntro: { mode: 'standalone' } })).ok).toBe(true)
+  })
+  it('短時間プレビューでは、overlayも含め構成追加を既定でOFF', () => {
+    const pc = resolveCompositionConfig({}, { mode: 'preview' })
+    const pt = planTimeline(pc, { ...main, digestClips: [] })
+    expect(pt.overlays).toEqual([])
+    expect(pt.sections.map((x) => x.kind)).toEqual(['main'])
+    expect(planQrWindows(pc, pt)).toEqual([])
   })
 })
 
@@ -343,7 +515,7 @@ describe('ffmpeg引数（白黒・BGM・QRの範囲）', () => {
     // BGMの入力(-i bgm)は1回だけで、ミックスは digest の音声チェーン内のみ
     expect(built.args.filter((a) => a === '/x/bgm.mp3')).toHaveLength(1)
     const concatAudioIn = f.slice(f.indexOf('[dvid][dA]'))
-    expect(concatAudioIn.startsWith('[dvid][dA][liv][lia][mv][ma][lov][loa]concat=n=4')).toBe(true)
+    expect(concatAudioIn.startsWith('[dvid][dA][mv][ma][lov][loa]concat=n=3')).toBe(true)
   })
   it('BGMなし・ducking OFFの場合の音声チェーン', () => {
     const noBgm = buildCompositionArgs({ cfg: cfgFull, timeline, width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, qrPath: '/q', qrSize: QR_SIZE, assPath: '/a', outputPath: '/o' })
@@ -352,31 +524,33 @@ describe('ffmpeg引数（白黒・BGM・QRの範囲）', () => {
     expect(fixed.filterComplex).not.toContain('sidechaincompress')
     expect(fixed.filterComplex).toContain('[dvoice][bgm]amix')
   })
-  it('LINE案内区間の音声は無音（BGMを流さない）', () => {
+  it('独立したLINE案内区間（末尾）の音声は無音（BGMを流さない）', () => {
     expect(f).toContain('anullsrc')
     const chains = f.split(';')
-    expect(chains.filter((c) => c.includes('anullsrc'))).toHaveLength(2) // 冒頭・末尾
+    expect(chains.filter((c) => c.includes('anullsrc'))).toHaveLength(1) // 末尾のみ（冒頭はoverlayで本編音声のまま）
   })
   const buildWith = (cfg, extra = {}) => buildCompositionArgs({ cfg, timeline: planTimeline(cfg, { ...main, digestClips: sel.clips }), width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, qrPath: '/q', qrSize: QR_SIZE, assPath: '/a', outputPath: '/o', ...extra })
-  it('QRは字幕の後に、冒頭・末尾のLINE案内の全時間帯へ重ねる（開始〜終了と一致）。QRには白黒・字幕を適用しない', () => {
-    const intro = timeline.sections.find((s) => s.kind === 'lineIntro')
+  it('QRは字幕の後に、冒頭overlay・末尾standaloneの全時間帯へ重ねる（開始〜終了と一致）。QRには白黒・字幕を適用しない', () => {
+    const introO = timeline.overlays[0]
     const outro = timeline.sections.find((s) => s.kind === 'lineOutro')
     const overlays = f.split(';').filter((c) => c.includes('overlay='))
     expect(overlays).toHaveLength(2)
-    expect(overlays[0]).toContain(`between(t,${intro.startSec},${intro.endSec})`)
+    expect(overlays[0]).toContain(`between(t,${introO.startSec},${introO.endSec})`)
     expect(overlays[1]).toContain(`between(t,${outro.startSec},${outro.endSec})`)
     expect(f.indexOf('overlay=')).toBeGreaterThan(f.indexOf('ass='))
-    const q = qrLayout(W, H, QR_SIZE.width, QR_SIZE.height)
-    expect(f).toContain(`scale=${q.innerW}:${q.innerH}:flags=bicubic,pad=${q.innerW + q.quiet * 2}:${q.innerH + q.quiet * 2}:${q.quiet}:${q.quiet}:color=white`)
-    expect(f).toContain(`overlay=${q.x}:${q.y}`)
+    const wins = planQrWindows(cfgFull, timeline)
+    const qo = planQrPlacement(wins[0], W, H, QR_SIZE, cfgFull)
+    const qs = planQrPlacement(wins[1], W, H, QR_SIZE, cfgFull)
+    expect(f).toContain(`overlay=${qo.x}:${qo.y}`)
+    expect(f).toContain(`overlay=${qs.x}:${qs.y}`)
+    expect(f).toContain(`scale=${qs.innerW}:${qs.innerH}:flags=bicubic,pad=${qs.innerW + qs.quiet * 2}:${qs.innerH + qs.quiet * 2}:${qs.quiet}:${qs.quiet}:color=white`)
   })
   it('QR表示区間（planQrWindows）は冒頭・末尾のLINE案内の開始・終了時刻と一致し、最終フレーム付近まで続く', () => {
     const w = planQrWindows(cfgFull, timeline)
     expect(w.map((x) => x.kind)).toEqual(['lineIntro', 'lineOutro'])
-    for (const x of w) {
-      const s = timeline.sections.find((t) => t.kind === x.kind)
-      expect([x.startSec, x.endSec]).toEqual([s.startSec, s.endSec])
-    }
+    expect([w[0].startSec, w[0].endSec]).toEqual([timeline.overlays[0].startSec, timeline.overlays[0].endSec])
+    const outro = timeline.sections.find((t) => t.kind === 'lineOutro')
+    expect([w[1].startSec, w[1].endSec]).toEqual([outro.startSec, outro.endSec])
     expect(w[0].endSec - w[0].startSec).toBeCloseTo(30, 3)
     expect(w[1].endSec - w[1].startSec).toBeCloseTo(12, 3)
     const lastFrameSec = timeline.totalSec - 1 / cfgFull.fps
@@ -395,11 +569,11 @@ describe('ffmpeg引数（白黒・BGM・QRの範囲）', () => {
     expect(noneQr.args).not.toContain('-loop')
   })
   it('QRは元画像の縦横比のまま、周囲に白いquiet zone。半透明・フェード・白黒化・ぼかし・透過は適用しない', () => {
-    const qrChain = f.split(';').find((c) => /^\[\d+:v\]scale=/.test(c) && c.includes('pad='))
+    const qrChain = f.split(';').filter((c) => /^\[qs\d\]scale=/.test(c) && c.includes('pad=')).join(';')
     const overlays = f.split(';').filter((c) => c.includes('overlay='))
     const scope = [qrChain, ...overlays].join(';')
     for (const bad of ['fade', 'hue', 'gray', 'colorchannelmixer', 'colorlevels', 'eq=', 'boxblur', 'gblur', 'avgblur', 'geq', 'alpha', 'format=rgba', 'format=yuva', 'lut', 'curves', 'negate', 'colorkey', 'chromakey', 'noise']) expect(scope).not.toContain(bad)
-    const m = qrChain.match(/scale=(\d+):(\d+)/)
+    const m = qrChain.match(/scale=(\d+):(\d+)/) // 冒頭・末尾どちらも同じ縦横比
     expect(Math.abs(Number(m[1]) / Number(m[2]) - QR_SIZE.width / QR_SIZE.height)).toBeLessThan(0.01)
     expect(qrChain).toContain('color=white')
     // QRの入力は白黒チェーン(hue)の下流ではなく、独立した入力

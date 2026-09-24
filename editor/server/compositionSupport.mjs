@@ -33,11 +33,12 @@ export function sanitizeCompositionOverrides(body) {
   if (!isPlainObject(body)) return {}
   const num = (v) => (Number.isFinite(v) ? v : undefined)
   const bool = (v) => (typeof v === 'boolean' ? v : undefined)
+  const mode = (v) => (v === 'overlay' || v === 'standalone' ? v : undefined)
   const strip = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined))
   return {
     digest: strip({ enabled: bool(body.digest?.enabled), durationSec: num(body.digest?.durationSec), grayscale: bool(body.digest?.grayscale), bgm: strip({ volume: num(body.digest?.bgm?.volume), fadeInSec: num(body.digest?.bgm?.fadeInSec), fadeOutSec: num(body.digest?.bgm?.fadeOutSec) }) }),
-    lineIntro: strip({ enabled: bool(body.lineIntro?.enabled), durationSec: num(body.lineIntro?.durationSec), showQr: bool(body.lineIntro?.showQr) }),
-    lineOutro: strip({ enabled: bool(body.lineOutro?.enabled), durationSec: num(body.lineOutro?.durationSec), showQr: bool(body.lineOutro?.showQr) }),
+    lineIntro: strip({ enabled: bool(body.lineIntro?.enabled), mode: mode(body.lineIntro?.mode), durationSec: num(body.lineIntro?.durationSec), showQr: bool(body.lineIntro?.showQr), startWithMain: bool(body.lineIntro?.startWithMain) }),
+    lineOutro: strip({ enabled: bool(body.lineOutro?.enabled), mode: mode(body.lineOutro?.mode), durationSec: num(body.lineOutro?.durationSec), showQr: bool(body.lineOutro?.showQr) }),
     qr: strip({ enabled: bool(body.qr?.enabled) }),
     preview: strip({ digest: bool(body.preview?.digest), lineIntro: bool(body.preview?.lineIntro), lineOutro: bool(body.preview?.lineOutro) }),
   }
@@ -97,6 +98,7 @@ export async function prepareJobComposition(job, overrides, roots, deps = {}) {
     mainCaptions: shiftMainCaptions(sorted, mainStartSec, mainEndSec, timeline.mainOffsetSec),
     digestCaps: digestCaptions(sorted, clips),
     themeBlocks: [...digBlocks, ...mainBlock],
+    qrSize: assets.qr ? { width: assets.qr.width, height: assets.qr.height } : undefined,
   })
   return { cfg, assets, timeline, assText, digest: { clips }, mainStartSec, mainEndSec }
 }

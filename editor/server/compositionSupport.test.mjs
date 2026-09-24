@@ -43,6 +43,10 @@ describe('設定の受け渡し', () => {
     expect(o.lineOutro).toEqual({})
     expect(sanitizeCompositionOverrides(null)).toEqual({})
   })
+  it('表示方式（mode）・開始位置の上書きは許可された値だけ受け取る', () => {
+    expect(sanitizeCompositionOverrides({ lineIntro: { mode: 'standalone', startWithMain: true }, lineOutro: { mode: 'x' } }).lineIntro).toEqual({ mode: 'standalone', startWithMain: true })
+    expect(sanitizeCompositionOverrides({ lineOutro: { mode: 'x' } }).lineOutro).toEqual({})
+  })
   it('素材パスは環境設定から。どちらか指定されていれば「環境設定で構成を適用」（足りない素材は準備時にエラー）', () => {
     expect(getCompositionEnvOverrides({})).toEqual({})
     expect(isCompositionConfiguredByEnv({})).toBe(false)
@@ -84,8 +88,9 @@ describe('prepareJobComposition（ジョブから構成を準備）', () => {
     const env = assets()
     const before = JSON.stringify(job)
     const p = await prepareJobComposition(job, {}, [dir], { env, spawnFn: probe() })
-    expect(p.timeline.sections.map((s) => s.kind)).toEqual(['digest', 'lineIntro', 'main', 'lineOutro'])
-    expect(p.timeline.mainOffsetSec).toBeCloseTo(p.timeline.sections[1].endSec, 3)
+    expect(p.timeline.sections.map((s) => s.kind)).toEqual(['digest', 'main', 'lineOutro']) // 冒頭LINE案内はoverlay（独立区間なし）
+    expect(p.timeline.mainOffsetSec).toBeCloseTo(p.timeline.sections[0].endSec, 3) // 本編開始 = ダイジェスト終了
+    expect(p.timeline.overlays[0]).toMatchObject({ kind: 'lineIntro', startSec: p.timeline.mainOffsetSec })
     expect(p.digest.clips.length).toBeGreaterThanOrEqual(3)
     expect(p.assText).toContain('LINEお友だち登録受付中')
     expect(p.assText).toContain('TALK THEME')

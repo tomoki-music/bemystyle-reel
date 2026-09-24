@@ -99,7 +99,7 @@ async function stageRender(args) {
   const digCaps = digestCaptions(captions, sel.clips)
   const dTheme = digestThemeBlocks(themes, sel.clips, captions)
   const mTheme = mainThemeBlock(themes, mainStartSec, mainEndSec, timeline.mainOffsetSec)
-  const assText = buildFinalAss({ width: W, height: H, cfg, timeline, mainCaptions: mainCaps, digestCaps: digCaps, themeBlocks: [...dTheme.blocks, mTheme] })
+  const assText = buildFinalAss({ width: W, height: H, cfg, timeline, mainCaptions: mainCaps, digestCaps: digCaps, themeBlocks: [...dTheme.blocks, mTheme], qrSize: assets.qr ? { width: assets.qr.width, height: assets.qr.height } : undefined })
 
   const free = await checkFreeSpace(outputRoot, 2 * 1024 ** 3) // 構成確認動画（約100秒）。完成動画(フル)は15GB
   if (!free.ok) throw new Error('出力先の空き容量が不足しています')
@@ -124,12 +124,13 @@ async function stageRender(args) {
     width: W,
     height: H,
     timeline: timeline.sections,
+    overlays: timeline.overlays,
     mainOffsetSec: timeline.mainOffsetSec,
     totalSec: timeline.totalSec,
     digest: { clips: sel.clips.map((c) => ({ index: [c.firstIndex, c.lastIndex], srcStartSec: round(c.srcStartSec), durationSec: round(c.durationSec), themeId: c.themeId, score: c.score })), totalSec: round(sel.totalSec), themeBlocks: dTheme.blocks.map((b) => ({ startSec: b.startSec, endSec: b.endSec, sections: b.sections.map((s) => ({ id: s.id, startSec: s.startSec, endSec: s.endSec })) })), clipsWithoutTheme: dTheme.clipsWithoutTheme },
     main: { srcStartSec: round(mainStartSec), srcEndSec: round(mainEndSec), captionCount: mainCaps.length, emphasisCount: mainCaps.filter((c) => c.emphasisText).length, themeSections: mTheme.sections.map((s) => ({ id: s.id, startSec: s.startSec, endSec: s.endSec })) },
     assets: { bgmDurationSec: assets.bgm && round(assets.bgm.durationSec, 2), qrWidth: assets.qr?.width, qrHeight: assets.qr?.height },
-    config: { digest: { enabled: cfg.digest.enabled, grayscale: cfg.digest.grayscale, bgmVolume: cfg.digest.bgm.volume, duck: cfg.digest.bgm.duck, fadeInSec: cfg.digest.bgm.fadeInSec, fadeOutSec: cfg.digest.bgm.fadeOutSec, credit: cfg.digest.bgm.credit }, lineIntroSec: cfg.lineIntro.durationSec, lineOutroSec: cfg.lineOutro.durationSec },
+    config: { digest: { enabled: cfg.digest.enabled, grayscale: cfg.digest.grayscale, bgmVolume: cfg.digest.bgm.volume, duck: cfg.digest.bgm.duck, fadeInSec: cfg.digest.bgm.fadeInSec, fadeOutSec: cfg.digest.bgm.fadeOutSec, credit: cfg.digest.bgm.credit }, lineIntroMode: cfg.lineIntro.mode, lineIntroSec: cfg.lineIntro.durationSec, lineOutroSec: cfg.lineOutro.durationSec },
     performance: { totalMs: Date.now() - t0 },
     safety: {
       sourceUnchanged: srcAfter.size === srcBefore.size && srcAfter.mtimeMs === srcBefore.mtimeMs,
