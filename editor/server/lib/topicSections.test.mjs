@@ -8,6 +8,10 @@ import {
   topicAtTime,
   coalesceAdjacentSameTitle,
   resolveTopicSections,
+  extractTopicTerms,
+  checkTopicTitleGrounding,
+  editTopicTitle,
+  isTopicCandidate,
   TOPIC_TITLE_HARD_MAX,
 } from './topicSections.mjs'
 
@@ -152,5 +156,74 @@ describe('resolveTopicSections / 連続同名', () => {
     const r = resolveTopicSections({ manual: [S('m', '', 1.4, 29.9)], captions: caps })
     expect(r.ok).toBe(false)
     expect(r.sections).toEqual([])
+  })
+})
+
+describe('テーマ名の対象語の検証（抽象化しすぎ・別概念への置き換えの再発防止）', () => {
+  // 合成の正本（実際の字幕本文ではない）。対象は「メンバー」との関係。
+  const canonical = 'バンドのメンバーと一緒にやるのがきついなと思ったら距離を取ることが大事で、活動は続けられます。'
+
+  it('対象語（2文字以上のカタカナ連続・漢字連続）を取り出す。「取り方」のような活用語は対象外', () => {
+    expect(extractTopicTerms('メンバーとの距離の取り方')).toEqual(['メンバー', '距離'])
+    expect(extractTopicTerms('活動との距離の取り方')).toEqual(['活動', '距離'])
+    expect(extractTopicTerms('')).toEqual([])
+  })
+
+  it('修正後のテーマ「メンバーとの距離の取り方」: 対象語が正本に実在し、必須語(メンバー)も残っている', () => {
+    const r = checkTopicTitleGrounding('メンバーとの距離の取り方', canonical, { requiredTerms: ['メンバー', '距離'] })
+    expect(r.ok).toBe(true)
+    expect(r.ungroundedTerms).toEqual([])
+    expect(r.missingRequired).toEqual([])
+  })
+
+  it('誤ったテーマ「活動との距離の取り方」は、必須語「メンバー」を落としているので不合格（「メンバー」を「活動」へ置き換えない）', () => {
+    const r = checkTopicTitleGrounding('活動との距離の取り方', canonical, { requiredTerms: ['メンバー'] })
+    expect(r.ok).toBe(false)
+    expect(r.missingRequired).toEqual(['メンバー'])
+  })
+
+  it('正本にない主語・対象を推測で作ったテーマは不合格（ungroundedTerms に出る）', () => {
+    const r = checkTopicTitleGrounding('後輩との距離の取り方', canonical)
+    expect(r.ok).toBe(false)
+    expect(r.ungroundedTerms).toEqual(['後輩'])
+  })
+
+  it('必須語の指定そのものが正本に無い場合も不合格（指定ミスを検出）', () => {
+    const r = checkTopicTitleGrounding('メンバーとの距離の取り方', 'まったく別の内容の本文です', { requiredTerms: ['メンバー'] })
+    expect(r.ok).toBe(false)
+    expect(r.requiredNotInCanonical).toEqual(['メンバー'])
+  })
+})
+
+describe('手動修正の優先（AIの候補は確定値ではなく編集可能な候補）', () => {
+  const ai = (id, title, a, b) => ({ id, title, startSec: a, endSec: b, source: 'ai' })
+  it('AI生成のテーマは候補、手動テーマは確定値として区別できる', () => {
+    expect(isTopicCandidate(ai('a', '活動との距離の取り方', 1, 9))).toBe(true)
+    expect(isTopicCandidate(S('m', 'メンバーとの距離の取り方', 1, 9))).toBe(false)
+  })
+
+  it('テーマ名を手動で修正すると source=manual になり、時刻・idは変わらず、入力は変更されない', () => {
+    const input = Object.freeze([Object.freeze(ai('t1', '活動との距離の取り方', 1.38, 60))])
+    const r = editTopicTitle(input, 't1', 'メンバーとの距離の取り方')
+    expect(r.ok).toBe(true)
+    expect(r.sections[0]).toEqual({ id: 't1', title: 'メンバーとの距離の取り方', startSec: 1.38, endSec: 60, source: 'manual' })
+    expect(input[0].title).toBe('活動との距離の取り方')
+  })
+
+  it('空タイトル・長すぎるタイトルの修正は拒否され、元のテーマが残る', () => {
+    const input = [S('t1', 'メンバーとの距離の取り方', 1, 9)]
+    expect(editTopicTitle(input, 't1', '  ').ok).toBe(false)
+    expect(editTopicTitle(input, 't1', 'あ'.repeat(30)).ok).toBe(false)
+    expect(editTopicTitle(input, 'nope', 'メンバーとの距離').ok).toBe(false)
+    expect(editTopicTitle(input, 't1', '  ').sections).toBe(input)
+  })
+
+  it('手動修正したテーマ名は、その後にAIが別のテーマ名を生成し直しても上書きされない', () => {
+    const edited = editTopicTitle([ai('t1', '活動との距離の取り方', 1.38, 60)], 't1', 'メンバーとの距離の取り方').sections
+    const regenerated = [ai('t1', '活動との距離の取り方', 1.38, 60), ai('t2', '別の話題の題名です', 10, 40)]
+    const r = resolveTopicSections({ manual: edited.filter((s) => s.source === 'manual'), ai: regenerated, captions: [{ startSec: 1.38, endSec: 60 }] })
+    expect(r.ok).toBe(true)
+    expect(r.sections).toHaveLength(1)
+    expect(r.sections[0]).toMatchObject({ title: 'メンバーとの距離の取り方', source: 'manual' })
   })
 })

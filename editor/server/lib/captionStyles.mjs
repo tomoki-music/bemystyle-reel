@@ -9,6 +9,7 @@
 
 import { escapeAssText } from './assText.mjs'
 import { buildTopicStyleLines, buildTopicEvents } from './topicAss.mjs'
+import { fitCaptionFontSize, getCaptionFitLimits } from './captionFit.mjs'
 
 export const CAPTION_TYPES = ['normal', 'main', 'sub', 'emphasis', 'heading', 'annotation']
 
@@ -17,16 +18,14 @@ const DEFAULT_FONT_FAMILY = 'Noto Sans CJK JP'
 /**
  * 字幕サイズの倍率。フォントサイズ・縁取り・影の「大きさ」だけに、ここで一度だけ掛ける
  * （位置・余白・行数は掛けない。固定pxとの二重適用をしない）。基準は 1080p で normal=56px（1.00）。
- * normal / main / sub の比は倍率によらず一定（mainはnormalの約1.08倍）。
- * 部分強調は色のオーバーライドのみでサイズを変えない。
  *
- * 1.46 → normal 82px。スマホで横長動画を見ても読める大きさとして採用した値。
- * 候補 78px(1.39) / 82px(1.46) / 84px(1.50) を比較し、84px は「20文字ハード上限を全角=1em で見積もった幅」が
- * 使える幅(1690px)に対して10pxしか余裕が無いため見送り、余裕のある 82px を採用した。
- * （履歴: 56px(1.00) → 67px(1.20) → 82px(1.46)）
+ * 1.78 → normal 100px（基本サイズ）。スマホの横長表示でも明確に読める大きさ。長い行だけが
+ * captionFit.mjs の動的縮小（下限82px）で小さくなる。
+ * サイズの比は倍率によらず一定: main は normal の約1.08倍、sub は約0.94倍、emphasis は normal と同じ。
+ * （履歴: 56px(1.00) → 67px(1.20) → 82px(1.46) → 100px(1.78)）
  */
-export const CAPTION_FONT_SCALE = 1.46
-export const CAPTION_FONT_SCALE_MAX = 1.6
+export const CAPTION_FONT_SCALE = 1.78
+export const CAPTION_FONT_SCALE_MAX = 2
 
 /** 倍率を検証する。不正値は既定倍率へ戻す（極端な値で画面外へ出さない）。 */
 export function resolveCaptionFontScale(scale) {
@@ -107,20 +106,20 @@ export function getCaptionStyleDefs(displayWidth, displayHeight, fontScale = CAP
     sub: {
       ...base,
       name: 'Sub',
-      // mainより明確に小さく、説明文として読みやすい控えめなデザイン。
-      fontsize: Math.max(13, Math.round(shortSide * 0.042)), // normalの約0.81倍（極端な差を付けない）
+      // 「サブだから小さくする」ことはしない（スマホで読めるサイズ）。淡いグレー・標準の太さで控えめに見せる。
+      fontsize: Math.max(13, Math.round(shortSide * 0.049)), // normalの約0.94倍。小さくせず、色(淡いグレー)・太さで役割を表す
       primaryColour: COLOR.paleGray,
       bold: 0,
       outline: o(2),
       shadow: 0,
-      marginV: Math.max(16, Math.round(safeMarginV * 0.6)),
     },
     emphasis: {
       ...base,
       name: 'Emphasis',
-      // 文全体をアクセント色にしない（不自然になるため）。見た目はmain相当で、強調は部分オーバーライドで行う。
-      fontsize: Math.max(20, Math.round(shortSide * 0.056)),
-      outline: o(3.2),
+      // 文全体をアクセント色にしない（不自然になるため）。サイズはnormalと同じで、強調は部分オーバーライドと
+      // やや太い縁取りで行う（サイズは変えない）。
+      fontsize: Math.max(20, Math.round(shortSide * 0.052)),
+      outline: o(3.4),
     },
     heading: {
       ...base,
@@ -202,10 +201,14 @@ function formatAssTime(seconds) {
  *   強調範囲が改行をまたぐ場合は、行ごとに開始・終了(\\r)を入れ直して行末で色を持ち越さない。
  * - ユーザー入力は必ず escapeAssText を通す（タグ注入不可）。
  *
+ * - サイズ: fontSize を渡したとき（動的縮小した字幕）だけ、先頭に \\fsN を付ける。強調後の {\\r} はスタイルへ戻して
+ *   サイズも基本サイズへ戻ってしまうので、{\\r\\fsN} にして字幕内でサイズが変わらないようにする。
+ *
  * @param {{ text: string, lines?: string[], emphasisText?: string | null }} caption
  * @param {string} highlightColour
+ * @param {number} [fontSize] 縮小後のフォントサイズ(px)。省略時はスタイルのサイズのまま
  */
-export function buildDialogueText(caption, highlightColour) {
+export function buildDialogueText(caption, highlightColour, fontSize) {
   const text = typeof caption?.text === 'string' ? caption.text : ''
   const emphasisText = typeof caption?.emphasisText === 'string' ? caption.emphasisText : ''
   const useLines = Array.isArray(caption?.lines) && caption.lines.length > 1 && caption.lines.join('') === text
@@ -214,6 +217,8 @@ export function buildDialogueText(caption, highlightColour) {
   const emStart = emphasisText && text.includes(emphasisText) ? text.indexOf(emphasisText) : -1
   const emEnd = emStart >= 0 ? emStart + emphasisText.length : -1
   const colourTag = `{\\c${highlightColour.replace(/^&H/, '').replace(/&$/, '')}&}`
+  const sizeTag = Number.isFinite(fontSize) ? `\\fs${fontSize}` : ''
+  const resetTag = `{\\r${sizeTag}}`
 
   let offset = 0
   const renderedLines = lines.map((line) => {
@@ -223,9 +228,33 @@ export function buildDialogueText(caption, highlightColour) {
     const a = Math.max(emStart, lineStart) - lineStart
     const b = Math.min(emEnd, lineStart + line.length) - lineStart
     if (b <= a) return escapeAssText(line)
-    return `${escapeAssText(line.slice(0, a))}${colourTag}${escapeAssText(line.slice(a, b))}{\\r}${escapeAssText(line.slice(b))}`
+    return `${escapeAssText(line.slice(0, a))}${colourTag}${escapeAssText(line.slice(a, b))}${resetTag}${escapeAssText(line.slice(b))}`
   })
-  return renderedLines.join('\\N')
+  const body = renderedLines.join('\\N')
+  return sizeTag ? `{${sizeTag}}${body}` : body
+}
+
+/**
+ * 字幕ごとのフォントサイズを決める（基本サイズ → 長い行だけ段階的に縮小、下限82px@1080p）。
+ * 表示側(buildAssContent)と検証側(ランナー/テスト)で同じ結果を使うために公開する。
+ *
+ * @param {Array<{ text: string, lines?: string[], captionType?: string }>} captions
+ * @param {number} displayWidth
+ * @param {number} displayHeight
+ * @param {number} [fontScale]
+ * @returns {Array<{ type: string, baseSize: number, size: number, shrunk: boolean, fits: boolean, widthPx: number }>}
+ */
+export function planCaptionFits(captions, displayWidth, displayHeight, fontScale = CAPTION_FONT_SCALE) {
+  const defs = getCaptionStyleDefs(displayWidth, displayHeight, fontScale)
+  const limits = getCaptionFitLimits(displayWidth, displayHeight)
+  return (captions ?? []).map((c) => {
+    const type = CAPTION_TYPES.includes(c?.captionType) ? c.captionType : 'normal'
+    const text = typeof c?.text === 'string' ? c.text : ''
+    const lines = Array.isArray(c?.lines) && c.lines.length > 1 && c.lines.join('') === text ? c.lines : [text]
+    const baseSize = defs[type].fontsize
+    const fit = fitCaptionFontSize({ lines, baseSize, minSize: limits.minSizePx, maxWidthPx: limits.maxWidthPx })
+    return { type, baseSize, ...fit }
+  })
 }
 
 /**
@@ -273,12 +302,14 @@ export function buildAssContent(job, options = {}) {
 
   const captions = Array.isArray(job?.captions) ? job.captions : []
   const sorted = [...captions].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
-  for (const caption of sorted) {
+  const fits = planCaptionFits(sorted, displayWidth, displayHeight, options.captionFontScale)
+  for (const [i, caption] of sorted.entries()) {
     const type = CAPTION_TYPES.includes(caption?.captionType) ? caption.captionType : 'normal'
     const def = styleDefs[type]
     const start = formatAssTime(caption.startSec)
     const end = formatAssTime(caption.endSec)
-    const text = buildDialogueText(caption, def.highlightColour || COLOR.highlight)
+    // 縮小が必要な字幕だけサイズを指定する（短い字幕は基本サイズのまま）。
+    const text = buildDialogueText(caption, def.highlightColour || COLOR.highlight, fits[i].shrunk ? fits[i].size : undefined)
     events.push(`Dialogue: 0,${start},${end},${def.name},,0,0,0,,${text}`)
   }
 

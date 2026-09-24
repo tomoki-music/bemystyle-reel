@@ -14,7 +14,8 @@
 // 純粋関数のみ。
 
 import { escapeAssText } from './assText.mjs'
-import { breakTopicTitle } from './topicSections.mjs'
+import { breakTopicTitle, TOPIC_TITLE_LINE_HARD_MAX_CHARS } from './topicSections.mjs'
+import { breakIntoLines } from './lineBreaker.mjs'
 
 export const TOPIC_LAYER_BOX = 10
 export const TOPIC_LAYER_BAR = 11
@@ -42,6 +43,8 @@ export const TOPIC_TITLE_BASE_PX = 84
 export const TOPIC_TITLE_MIN_PX = 72
 /** 箱の右端の上限（画面幅に対する比率）。顔のある画面中央(50%)へ張り出さないための上限。 */
 export const TOPIC_BOX_MAX_RIGHT_RATIO = 0.47
+/** 1行のまま表示してよい箱の右端の上限（画面幅に対する比率）。超えるなら語境界で2行にして顔(頭)から離す。 */
+export const TOPIC_BOX_SINGLE_LINE_RIGHT_RATIO = 0.41
 
 /**
  * 表示解像度に対するテーマ表示のレイアウトを決める（すべて比率ベース。1080p で title=84 / label=40）。
@@ -101,10 +104,10 @@ export function computeTopicGeometry(lines, displayWidth, displayHeight, titleSi
 }
 
 /**
- * タイトルが箱からはみ出さない（右端が maxRight 以内）ように行とサイズを決める。
- * 1. 自然な語境界で最大2行にする（breakTopicTitle）。
- * 2. 箱は本文幅に合わせて広がるが、右端は画面中央へ張り出さない上限(maxRight)まで。
- * 3. それでも収まらないときだけ、既定サイズから下限まで縮小する。短いタイトルは既定サイズのまま。
+ * タイトルの行分割・サイズを決める。顔(画面中央の頭部)へ張り出さないよう、次の順で試す。
+ * 1. 1行のまま（14文字以内、かつ箱の右端が画面幅の41%以内）。短いタイトルは既定サイズの1行。
+ * 2. 自然な語境界で、行の長さがなるべく揃うよう2行にする（箱の右端が47%以内なら既定サイズのまま）。
+ * 3. それでも収まらないときだけ、既定サイズから下限(72px)まで1px単位で縮小する。
  *
  * @param {string} title
  * @param {number} displayWidth
@@ -112,16 +115,31 @@ export function computeTopicGeometry(lines, displayWidth, displayHeight, titleSi
  * @returns {{ lines: string[], titleSize: number, shrunk: boolean, fits: boolean }}
  */
 export function fitTopicTitle(title, displayWidth, displayHeight) {
-  const lines = breakTopicTitle(title)
+  const t = typeof title === 'string' ? title.trim() : ''
   const L = getTopicLayout(displayWidth, displayHeight)
-  const rightAt = (size) => {
+  const rightOf = (lines, size) => {
     const g = computeTopicGeometry(lines, displayWidth, displayHeight, size)
     return g.box.x + g.box.w
   }
-  for (let size = L.titleBase; size >= L.titleMin; size -= 1) {
-    if (rightAt(size) <= L.maxRight) return { lines, titleSize: size, shrunk: size < L.titleBase, fits: true }
+  const n = Array.from(t).length
+  if (n === 0) return { lines: [], titleSize: L.titleBase, shrunk: false, fits: true }
+
+  // 1. 1行
+  const singleLimit = Math.round(displayWidth * TOPIC_BOX_SINGLE_LINE_RIGHT_RATIO)
+  if (n <= TOPIC_TITLE_LINE_HARD_MAX_CHARS && rightOf([t], L.titleBase) <= singleLimit) {
+    return { lines: [t], titleSize: L.titleBase, shrunk: false, fits: true }
   }
-  return { lines, titleSize: L.titleMin, shrunk: L.titleMin < L.titleBase, fits: rightAt(L.titleMin) <= L.maxRight }
+
+  // 2. 2行（行の長さを揃える。語の途中・助詞の直前では折らない）
+  let lines = n > 1 ? breakIntoLines(t, { maxLineChars: Math.ceil(n / 2), hardMaxLineChars: TOPIC_TITLE_LINE_HARD_MAX_CHARS }) : [t]
+  if (lines.length > 2) lines = breakTopicTitle(t)
+  if (lines.length === 1 && n > TOPIC_TITLE_LINE_HARD_MAX_CHARS) lines = breakTopicTitle(t)
+
+  // 3. 収まらないときだけ縮小
+  for (let size = L.titleBase; size >= L.titleMin; size -= 1) {
+    if (rightOf(lines, size) <= L.maxRight) return { lines, titleSize: size, shrunk: size < L.titleBase, fits: true }
+  }
+  return { lines, titleSize: L.titleMin, shrunk: L.titleMin < L.titleBase, fits: rightOf(lines, L.titleMin) <= L.maxRight }
 }
 
 /**

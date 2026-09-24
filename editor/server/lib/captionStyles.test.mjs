@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { buildAssContent, CAPTION_TYPES, buildDialogueText } from './captionStyles.mjs'
+import { buildAssContent, CAPTION_TYPES, buildDialogueText, planCaptionFits } from './captionStyles.mjs'
 
 afterEach(() => {
   delete process.env.CAPTION_VIDEO_FONT_FAMILY
@@ -154,15 +154,13 @@ describe('captionType別デザイン (Phase: AI分類デザイン)', () => {
     }
   })
 
-  it('最大級のcaption(30文字/行20文字ハード上限)でも、通常字幕系スタイルが左右セーフエリアに収まる', () => {
-    // 通常字幕(normal)は保守的に 全角=1em で、行の最大文字数(ハード上限20)を確認する。
-    // main/emphasis/sub は実測の全角送り幅(約0.72em、余裕を見て0.8em)で確認する。headingは短い見出し用なので対象外。
-    const content = buildAssContent({ width: 1920, height: 1080, captions: [] })
-    const styles = extractStyleLines(content)
-    const usableWidth = 1920 - Math.max(20, Math.round(1920 * 0.06)) * 2
-    expect(styles.Normal.fontsize * 20).toBeLessThan(usableWidth)
-    for (const name of ['Main', 'Emphasis', 'Sub']) {
-      expect(styles[name].fontsize * 0.8 * 20).toBeLessThan(usableWidth)
+  it('最大級のcaption(1行20文字ハード上限)でも、全スタイルが動的縮小の後は使用可能幅(88%)に収まる', () => {
+    // 文字幅は実際のフォント(libass描画)で校正した推定式で判定する（全角1文字=1emの保守的推定はしない）。
+    const long = 'あ'.repeat(20)
+    const captions = ['normal', 'main', 'emphasis', 'sub'].map((captionType) => ({ text: long, lines: [long], captionType }))
+    for (const f of planCaptionFits(captions, 1920, 1080)) {
+      expect(f.fits).toBe(true)
+      expect(f.widthPx).toBeLessThanOrEqual(1920 * 0.88)
     }
   })
 

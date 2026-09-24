@@ -212,3 +212,58 @@ export function resolveTopicSections(p) {
   const v = validateTopicSections(snapped)
   return v.ok ? { ok: true, sections: snapped, errors: [] } : { ok: false, sections: [], errors: v.errors }
 }
+
+// ────────────────────────────────────────────────────────────────
+// テーマ名の「対象語」の検証（抽象化しすぎ・別概念への置き換えの再発防止）
+//
+// 背景: 対象は「メンバーとの関係」なのに、タイトルを「活動との距離…」のように抽象化し、対象の名詞を
+// 別の概念へ置き換えてしまった。テーマ名を作るときは、正本の文字にある対象の名詞を優先して残す。
+// - 外部AIは使わない。判定は決定的な文字列照合のみ。
+// - AIが作ったテーマ(source='ai')は確定値ではなく「編集可能な候補」。手動(source='manual')が常に優先される。
+// ────────────────────────────────────────────────────────────────
+
+/** タイトルから、対象を表す語（2文字以上のカタカナ連続・漢字連続）を取り出す。「取り方」のような活用語は含めない。 */
+export function extractTopicTerms(title) {
+  const t = typeof title === 'string' ? title : ''
+  const terms = t.match(/[ァ-ヺー]{2,}|[一-鿿々]{2,}/g) ?? []
+  return [...new Set(terms)]
+}
+
+/**
+ * タイトルの対象語が、正本の文字（そのテーマ区間の本文）に実在するかを確認する。
+ * - ungroundedTerms: 正本に無い語（推測で作った主語・対象の疑い）
+ * - missingRequired: requiredTerms のうち、タイトルに含まれない語（対象の名詞を落とした）
+ * - requiredNotInCanonical: requiredTerms のうち、正本にも無い語（指定自体が誤り）
+ *
+ * @param {string} title
+ * @param {string} canonicalText そのテーマ区間の正本文字（caption本文の連結）
+ * @param {{ requiredTerms?: string[] }} [options] 人が確認した「タイトルに残すべき対象語」
+ */
+export function checkTopicTitleGrounding(title, canonicalText, options = {}) {
+  const canon = typeof canonicalText === 'string' ? canonicalText : ''
+  const terms = extractTopicTerms(title)
+  const required = (options.requiredTerms ?? []).filter(Boolean)
+  const ungroundedTerms = terms.filter((w) => !canon.includes(w))
+  const missingRequired = required.filter((w) => !String(title).includes(w))
+  const requiredNotInCanonical = required.filter((w) => !canon.includes(w))
+  return { ok: ungroundedTerms.length === 0 && missingRequired.length === 0 && requiredNotInCanonical.length === 0, terms, ungroundedTerms, missingRequired, requiredNotInCanonical }
+}
+
+/**
+ * テーマ名を手動で修正する。修正したテーマは source='manual' になり、以後のAI生成結果(mergeTopicSections)で
+ * 上書きされない。検証に失敗した場合は入力をそのまま返し、errors を返す。入力は変更しない。
+ *
+ * @param {Array<{ id: string, title: string, startSec: number, endSec: number, source: string }>} sections
+ * @param {string} id
+ * @param {string} newTitle
+ */
+export function editTopicTitle(sections, id, newTitle) {
+  const v = validateTopicTitle(newTitle)
+  const found = (sections ?? []).some((s) => s.id === id)
+  if (!found) return { ok: false, sections, errors: ['対象のテーマが見つかりません'] }
+  if (!v.ok) return { ok: false, sections, errors: v.errors }
+  return { ok: true, sections: sections.map((s) => (s.id === id ? { ...s, title: newTitle.trim(), source: 'manual' } : { ...s })), errors: [] }
+}
+
+/** 確定値(手動)か、編集可能な候補(AI)か。 */
+export const isTopicCandidate = (section) => section?.source === 'ai'

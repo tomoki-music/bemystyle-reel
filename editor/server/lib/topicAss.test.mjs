@@ -10,7 +10,7 @@ import {
   TOPIC_LAYER_BOX,
   TOPIC_LAYER_TEXT,
 } from './topicAss.mjs'
-import { buildAssContent, getCaptionStyleDefs, CAPTION_FONT_SCALE, resolveCaptionFontScale, buildDialogueText } from './captionStyles.mjs'
+import { buildAssContent, getCaptionStyleDefs, CAPTION_FONT_SCALE, resolveCaptionFontScale, buildDialogueText, planCaptionFits } from './captionStyles.mjs'
 
 const W = 1920
 const H = 1080
@@ -33,87 +33,43 @@ const dialogues = (ass) =>
     })
 const styleFontsize = (ass, name) => Number(ass.split('\n').find((l) => l.startsWith(`Style: ${name},`)).split(',')[2])
 
-describe('通常字幕の拡大（採用サイズ・セーフエリア・二重適用なし）', () => {
+describe('通常字幕の採用サイズ・セーフエリア・二重適用なし（詳細は captionFit.test.mjs）', () => {
   const normalOf = (scale) => getCaptionStyleDefs(W, H, scale).normal
   const marginH = Math.round(W * 0.06)
-  const usable = W - marginH * 2
 
-  it('採用サイズは 1080p で normal=82px（基準56px × CAPTION_FONT_SCALE）', () => {
-    expect(CAPTION_FONT_SCALE).toBe(1.46)
+  it('採用サイズは 1080p で normal=100px（基準56px × CAPTION_FONT_SCALE 1.78）', () => {
+    expect(CAPTION_FONT_SCALE).toBe(1.78)
     expect(getCaptionStyleDefs(W, H, 1).normal.fontsize).toBe(56)
-    expect(normalOf().fontsize).toBe(82)
+    expect(normalOf().fontsize).toBe(100)
   })
 
-  it('候補 78 / 82 / 84px は倍率だけで表現でき、倍率と固定pxが二重に掛からない（ASS出力の Fontsize は1回分）', () => {
-    for (const [scale, px] of [[1.39, 78], [1.46, 82], [1.5, 84]]) {
+  it('候補 94 / 100 / 104px は倍率だけで表現でき、倍率と固定pxが二重に掛からない（ASSのFontsizeは1回分、Dialogueに \\fs なし）', () => {
+    for (const [scale, px] of [[1.67, 94], [1.78, 100], [1.85, 104]]) {
       expect(normalOf(scale).fontsize).toBe(px)
       const ass = buildAssContent({ width: W, height: H, captions: [] }, { captionFontScale: scale })
       expect(styleFontsize(ass, 'Normal')).toBe(px)
     }
     const ass = buildAssContent({ width: W, height: H, captions: [cap(0, 2, 'あ', ['あ'])] })
-    expect(dialogues(ass)[0].text).not.toMatch(/\\fs|\\fscx|\\fscy/) // Dialogue側で再度サイズ指定しない
-    const scaled = getCaptionStyleDefs(W, H, 2 * 0.73).normal.fontsize // 倍率を2回掛けた値(≒1.46^2)とは一致しない
-    expect(scaled).not.toBe(Math.round(82 * CAPTION_FONT_SCALE))
+    expect(dialogues(ass)[0].text).not.toMatch(/\\fs|\\fscx|\\fscy/)
+    expect(normalOf(CAPTION_FONT_SCALE * CAPTION_FONT_SCALE).fontsize).toBe(100) // 範囲外の倍率は既定へ戻り、二重適用にならない
   })
 
   it('不正な倍率は既定へ戻す（極端な値で画面外へ出さない）', () => {
     for (const s of [NaN, 0, -1, 9, Infinity, undefined]) expect(resolveCaptionFontScale(s)).toBe(CAPTION_FONT_SCALE)
   })
 
-  it('1行16文字（実データ最大）・1行20文字（ハード上限）・2行30文字が左右セーフエリア(各5%以上)に収まる（全角=1emの保守的見積り）', () => {
-    const d = normalOf()
-    expect(marginH).toBeGreaterThanOrEqual(W * 0.05)
-    expect(16 * d.fontsize).toBeLessThanOrEqual(usable)
-    expect(20 * d.fontsize).toBeLessThanOrEqual(usable)
-    expect(Math.ceil(30 / 2) * d.fontsize).toBeLessThanOrEqual(usable)
-    expect((W - 20 * d.fontsize) / 2).toBeGreaterThanOrEqual(W * 0.05)
-  })
-
-  it('候補のうち84pxは20文字の保守的見積りの余裕が10px以下で、82pxの方が余裕がある（82px採用の根拠）', () => {
-    expect(usable - 20 * normalOf(1.46).fontsize).toBeGreaterThan(usable - 20 * normalOf(1.5).fontsize)
-    expect(usable - 20 * normalOf(1.5).fontsize).toBeLessThanOrEqual(10)
-  })
-
-  it('2行ぶんが画面下部35%以内で、上下5%の安全余白を守り、顔の中央へ届かない', () => {
-    const d = normalOf()
-    const blockHeight = d.fontsize * 2 * 1.3 // 行送りを1.3として保守的に見積る
-    const bottom = H - d.marginV
-    const top = bottom - blockHeight
-    expect(d.marginV).toBeGreaterThanOrEqual(H * 0.05)
-    expect(top).toBeGreaterThanOrEqual(H * 0.65)
-    expect(bottom).toBeLessThanOrEqual(H * 0.95)
-  })
-
-  it('mainはnormalの1.05〜1.10倍、subはnormalより小さいが極端に小さくない、emphasisはmainと同じ', () => {
-    const s = getCaptionStyleDefs(W, H)
-    expect(s.main.fontsize / s.normal.fontsize).toBeGreaterThanOrEqual(1.05)
-    expect(s.main.fontsize / s.normal.fontsize).toBeLessThanOrEqual(1.1)
-    expect(s.emphasis.fontsize).toBe(s.main.fontsize)
-    expect(s.sub.fontsize / s.normal.fontsize).toBeGreaterThanOrEqual(0.75)
-    expect(s.sub.fontsize).toBeLessThan(s.normal.fontsize)
-    // 比は倍率を変えても一定
-    const s1 = getCaptionStyleDefs(W, H, 1)
-    expect(s.main.fontsize / s.normal.fontsize).toBeCloseTo(s1.main.fontsize / s1.normal.fontsize, 1)
-  })
-
-  it('縁取り・影も倍率に比例して強くなり、文字内部を潰さない太さ(fontsizeの3〜8%)に収まる', () => {
-    const d1 = getCaptionStyleDefs(W, H, 1).normal
-    const d = normalOf()
-    expect(d.outline / d1.outline).toBeCloseTo(CAPTION_FONT_SCALE, 1)
-    expect(d.shadow / d1.shadow).toBeCloseTo(CAPTION_FONT_SCALE, 1)
-    expect(d.outline).toBeGreaterThan(d1.outline)
-    expect(d.outline / d.fontsize).toBeGreaterThanOrEqual(0.03)
-    expect(d.outline / d.fontsize).toBeLessThanOrEqual(0.08)
-    const ass = buildAssContent({ width: W, height: H, captions: [] })
-    const f = ass.split('\n').find((l) => l.startsWith('Style: Normal,')).split(',')
-    expect(f[15]).toBe('1') // BorderStyle: 縁取り（不透明ボックスにしない）
-    expect(Number(f[16])).toBe(d.outline)
-  })
-
-  it('位置・余白（下部中央・セーフマージン）は拡大しても変わらない（倍率は大きさだけ）', () => {
+  it('左右の安全余白は各6%、位置・余白（下部中央・セーフマージン）は拡大しても変わらない', () => {
     const s1 = getCaptionStyleDefs(W, H, 1).normal
     const s = normalOf()
+    expect(marginH).toBeGreaterThanOrEqual(W * 0.05)
     expect([s.alignment, s.marginL, s.marginR, s.marginV]).toEqual([s1.alignment, s1.marginL, s1.marginR, s1.marginV])
+    expect(s.marginV).toBeGreaterThanOrEqual(H * 0.05)
+  })
+
+  it('2行ぶんの高さが画面下部35%以内で、下端の安全余白を守る（行送り1.3の保守的な見積り）', () => {
+    const d = normalOf()
+    const top = H - d.marginV - d.fontsize * 2 * 1.3
+    expect(top).toBeGreaterThanOrEqual(H * 0.65)
   })
 
   it('部分強調は色のオーバーライドのみで、文字サイズ・太さを変えない（2行・強調を含む字幕でも）', () => {
@@ -121,7 +77,7 @@ describe('通常字幕の拡大（採用サイズ・セーフエリア・二重�
     expect(text).not.toMatch(/\\fs|\\fscx|\\fscy|\\b\d|\\fn|\\bord/)
     expect(text).toContain('{\\c004AB3F0&}とても{\\r}')
     const ass = buildAssContent({ width: W, height: H, captions: [cap(0, 2, 'これはとても大事ですね', ['これはとても', '大事ですね'], 'とても大事')] })
-    expect(styleFontsize(ass, 'Normal')).toBe(82)
+    expect(styleFontsize(ass, 'Normal')).toBe(100)
   })
 })
 
@@ -393,7 +349,6 @@ describe('テーマタイトルの自動フィット（語境界 → 幅の上�
 })
 
 describe('境界条件（合成データ）: 通常字幕とテーマの領域・非重複', () => {
-  const usable = W - Math.round(W * 0.06) * 2
   const d = getCaptionStyleDefs(W, H).normal
   const synth = [
     { name: '1行16文字', lines: ['あ'.repeat(16)] },
@@ -408,8 +363,10 @@ describe('境界条件（合成データ）: 通常字幕とテーマの領域�
     const line = dialogues(ass)[0]
     expect((line.text.match(/\\N/g) ?? []).length).toBeLessThanOrEqual(1)
     expect(line.text).not.toMatch(/\\fs/)
-    for (const l of c.lines) expect(Array.from(l).length * d.fontsize).toBeLessThanOrEqual(usable)
-    const top = H - d.marginV - d.fontsize * c.lines.length * 1.3
+    const plan = planCaptionFits([cap(1, 3, text, c.lines)], W, H)[0]
+    expect(plan.fits).toBe(true)
+    expect(plan.widthPx).toBeLessThanOrEqual(W * 0.88) // 実フォントで校正した推定幅（全角=1emの保守的推定ではない）
+    const top = H - d.marginV - plan.size * c.lines.length * 1.3
     expect(top).toBeGreaterThanOrEqual(H * 0.65)
     expect(d.marginL).toBeGreaterThanOrEqual(W * 0.05)
   })
@@ -430,5 +387,57 @@ describe('境界条件（合成データ）: 通常字幕とテーマの領域�
       expect(g.box.x + g.box.w).toBeLessThan(W * 0.5)
       expect(g.box.y + g.box.h).toBeLessThan(H / 3)
     }
+  })
+})
+
+describe('修正後のテーマ「メンバーとの距離の取り方」（既存の自動改行・自動縮小を適用）', () => {
+  const TITLE = 'メンバーとの距離の取り方'
+  // この60秒素材で頭部(髪を含む)が占める領域の近似（1080pの代表フレームから）。テーマ箱はこれと重ならない。
+  const HEAD = { left: 640, top: 60, right: 1320, bottom: 720 }
+  const overlap = (a, b) => a.x < b.right && a.x + a.w > b.left && a.y < b.bottom && a.y + a.h > b.top
+
+  it('12文字のタイトルは1行だと箱の右端が画面中央寄りになるため、語境界で均等な2行になる', () => {
+    const r = fitTopicTitle(TITLE, W, H)
+    expect(r.lines).toEqual(['メンバーとの', '距離の取り方'])
+    expect(r.lines.join('')).toBe(TITLE)
+    expect(r.lines.length).toBeLessThanOrEqual(2)
+    expect(r.titleSize).toBe(84) // 既定サイズのまま（一律に縮小しない）
+    expect(r.shrunk).toBe(false)
+  })
+
+  it('語の途中・助詞の直前で折らない（「メンバー」を分断しない・2行目が助詞で始まらない）', () => {
+    const [a, b] = fitTopicTitle(TITLE, W, H).lines
+    expect(a.startsWith('メンバー')).toBe(true)
+    expect(/^[のをにがはでとへも]/.test(b)).toBe(false)
+  })
+
+  it('箱は左上の安全領域にあり、頭部の領域と重ならず、画面中央へ張り出さない', () => {
+    const r = fitTopicTitle(TITLE, W, H)
+    const g = computeTopicGeometry(r.lines, W, H, r.titleSize)
+    expect(g.box.x).toBeGreaterThanOrEqual(W * 0.05)
+    expect(g.box.y).toBeGreaterThanOrEqual(H * 0.05)
+    expect(g.box.x + g.box.w).toBeLessThanOrEqual(W * 0.41)
+    expect(g.box.y + g.box.h).toBeLessThanOrEqual(H * 0.33)
+    expect(overlap(g.box, HEAD)).toBe(false)
+  })
+
+  it('1行のままだと頭部の領域と重なる（2行にする理由の確認）', () => {
+    const g = computeTopicGeometry([TITLE], W, H, 84)
+    expect(overlap(g.box, HEAD)).toBe(true)
+  })
+
+  it('従来テーマ(10文字の1行)は変更されない（承認済みのデザイン: 1行・84px）', () => {
+    expect(fitTopicTitle('活動との距離の取り方', W, H)).toMatchObject({ lines: ['活動との距離の取り方'], titleSize: 84, shrunk: false })
+  })
+
+  it('ASSは最大2行(\\Nは1つ)・テーマ名は改変されず、配色・位置は承認済みのまま', () => {
+    const ass = buildAssContent({ width: W, height: H, captions: [] }, { topicSections: [sec('topic-001', TITLE, 1.38, 60)] })
+    const title = dialogues(ass).find((d) => d.style === 'TopicTitle')
+    expect((title.text.match(/\\N/g) ?? []).length).toBe(1)
+    expect(title.text.replace(/^\{[^}]*\}/, '').replace(/\\N/g, '')).toBe(TITLE)
+    expect(title.text).toContain('\\an7')
+    expect(ass).toContain('Style: TopicLabel,')
+    expect(ass.split('\n').find((l) => l.startsWith('Style: TopicLabel,')).split(',')[3]).toBe('&H004AB3F0&')
+    expect(ass.split('\n').find((l) => l.startsWith('Style: TopicTitle,')).split(',')[3]).toBe('&H00FFFFFF&')
   })
 })
