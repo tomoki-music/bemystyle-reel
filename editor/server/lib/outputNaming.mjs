@@ -97,7 +97,7 @@ export function buildPreviewOutputPath(jobId, outputRootRealPath, sourceRealPath
   return candidatePath
 }
 
-export const COMPARISON_KINDS = ['legacy', 'semantic', 'natural_timing', 'large_caption_topic', 'mobile_large_text', 'wide_caption_corrected_topic', 'extra_large_caption', 'five_minute_topics', 'five_minute_continuous_topics']
+export const COMPARISON_KINDS = ['legacy', 'semantic', 'natural_timing', 'large_caption_topic', 'mobile_large_text', 'wide_caption_corrected_topic', 'extra_large_caption', 'five_minute_topics', 'five_minute_continuous_topics', 'composition_check']
 
 /**
  * 旧方式/新方式の比較検証用動画の出力ファイル名を作る。

@@ -229,10 +229,11 @@ export function useLocalCaptionVideo() {
     return true
   }, [])
 
-  const startRender = useCallback(async (jobId: string) => {
+  const startRender = useCallback(async (jobId: string, options?: { composition?: unknown; compositionDisabled?: boolean }) => {
     setError(null)
     setFontWarning(null)
-    const data = await apiFetch<ApiResult<unknown>>(`/${jobId}/render`, { method: 'POST' })
+    const body = options && (options.composition !== undefined || options.compositionDisabled) ? JSON.stringify({ composition: options.composition, compositionDisabled: options.compositionDisabled }) : undefined
+    const data = await apiFetch<ApiResult<unknown>>(`/${jobId}/render`, { method: 'POST', body })
     if (!data.ok) {
       setError(data.message ?? 'レンダーの開始に失敗しました')
       return false

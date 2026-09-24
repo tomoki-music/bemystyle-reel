@@ -13,6 +13,7 @@
 //   （この機能はネットワーク非公開・単一オペレーターのローカルツールのため）。
 
 import express from 'express'
+import { spawn } from 'child_process'
 import {
   existsSync,
   unlinkSync,
@@ -51,6 +52,8 @@ import { checkDiskSpace } from './lib/diskSpace.mjs'
 import { checkJapaneseFontAvailable } from './lib/fontCheck.mjs'
 import { buildUniqueOutputPath, buildPreviewOutputPath } from './lib/outputNaming.mjs'
 import { createFiveMinuteAnalysisRouter } from './fiveMinuteAnalysisRoutes.mjs'
+import { createCompositionRouter, prepareJobComposition, isCompositionConfiguredByEnv } from './compositionSupport.mjs'
+import { renderCompositionToFile, checkFreeSpace, FULL_RENDER_MIN_FREE_BYTES } from './lib/compositionRender.mjs'
 
 export const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v'])
 export const MAX_AUDIO_BYTES = 24 * 1024 * 1024
@@ -167,6 +170,9 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
 
   // 5分比較用のテーマ・部分強調の確認/手動修正（既存ジョブJSONには触れない。AI APIは呼ばない）
   router.use('/:id/five-minute', createFiveMinuteAnalysisRouter({ dataDir: resolve(jobsDir, '..', 'local_caption_comparisons', 'five_minute') }))
+
+  // 構成動画（冒頭ダイジェスト・LINE案内）の設定状態とQRプレビュー（絶対パスは返さない）
+  router.use('/composition', createCompositionRouter({ getRoots: getAllowedInputRoots }))
 
   router.get('/roots', (_req, res) => {
     const configuredRoots = getAllowedInputRoots()
@@ -683,6 +689,24 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
       return res.status(500).json({ ok: false, message: err.message })
     }
 
+    // 完成動画の構成（冒頭ダイジェスト・LINE案内）: 環境設定で素材が指定されているか、リクエストで composition が渡されたときに適用する。
+    // 素材や設定が不正なら、レンダーを開始せず400を返す（黙って省略しない）。空き容量は15GB未満なら開始しない。
+    let composed = null
+    const compositionDisabled = req.body?.compositionDisabled === true
+    if (!compositionDisabled && (isCompositionConfiguredByEnv() || (req.body && typeof req.body.composition === 'object' && req.body.composition !== null))) {
+      try {
+        composed = await prepareJobComposition(job, req.body?.composition, getAllowedInputRoots())
+      } catch (err) {
+        store.releaseLock(job.id)
+        return res.status(err.status ?? 500).json({ ok: false, message: err.message })
+      }
+      const free = await checkFreeSpace(outputRootReal, FULL_RENDER_MIN_FREE_BYTES)
+      if (!free.ok) {
+        store.releaseLock(job.id)
+        return res.status(507).json({ ok: false, message: `フルレンダーには出力先に15GB以上の空きが必要です（空き: ${(free.freeBytes / 1024 ** 3).toFixed(1)}GB）` })
+      }
+    }
+
     const estimatedNeeded = Math.max(200 * 1024 * 1024, Number(job.sourceSize || 0) * 1.2)
     const diskCheck = await checkDiskSpace(outputRootReal, estimatedNeeded)
     if (!diskCheck.ok) {
@@ -734,26 +758,48 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
       fontWarning: fontStatus.status !== 'available' ? fontStatus.detail : null,
     })
 
-    burnCaptions({
-      sourceRealPath: job.sourcePath,
-      assPath,
-      outputPath: tempOutputPath,
-      durationSec: job.durationSec,
-      onProgress: (percent) => {
-        const current = store.load(job.id)
-        if (current && current.status === 'rendering') {
-          store.save({ ...current, renderProgress: Math.round(percent) })
-        }
-      },
-      onSpawn: (child) => {
-        activeRenderChildren.set(job.id, child)
-      },
-    })
-      .then(() => {
+    const renderPromise = composed
+      ? renderCompositionToFile({
+        cfg: composed.cfg,
+        timeline: composed.timeline,
+        width: job.width,
+        height: job.height,
+        sourcePath: job.sourcePath,
+        mainStartSec: composed.mainStartSec,
+        mainEndSec: composed.mainEndSec,
+        digestClips: composed.digest.clips,
+        bgmPath: composed.assets.bgm?.realPath,
+        qrPath: composed.assets.qr?.realPath,
+        assText: composed.assText,
+        tmpDir: tmpRoot,
+        finalPath: finalOutputPath, // 一時ファイルへ書き、成功後にだけ最終名へrenameする（renderCompositionToFile内）
+        spawnFn: (bin, argv, opts) => {
+          const child = spawn(bin, argv, opts)
+          activeRenderChildren.set(job.id, child) // キャンセル可能にする
+          return child
+        },
+      }).then(() => ({ alreadyFinal: true }))
+      : burnCaptions({
+        sourceRealPath: job.sourcePath,
+        assPath,
+        outputPath: tempOutputPath,
+        durationSec: job.durationSec,
+        onProgress: (percent) => {
+          const current = store.load(job.id)
+          if (current && current.status === 'rendering') {
+            store.save({ ...current, renderProgress: Math.round(percent) })
+          }
+        },
+        onSpawn: (child) => {
+          activeRenderChildren.set(job.id, child)
+        },
+      })
+    renderPromise
+      .then((r) => {
         const current = store.load(job.id)
         if (!current) return
         try {
-          renameSync(tempOutputPath, finalOutputPath)
+          if (!(r && r.alreadyFinal)) renameSync(tempOutputPath, finalOutputPath)
         } catch (err) {
           try {
             if (existsSync(tempOutputPath)) unlinkSync(tempOutputPath)

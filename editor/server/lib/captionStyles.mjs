@@ -8,7 +8,7 @@
 // "Noto Sans CJK JP"）。
 
 import { escapeAssText } from './assText.mjs'
-import { buildTopicStyleLines, buildTopicEvents, buildContinuousTopicEvents } from './topicAss.mjs'
+import { buildTopicStyleLines, buildTopicEvents, buildContinuousTopicEvents, buildContinuousTopicBlockEvents } from './topicAss.mjs'
 import { fitCaptionFontSize, getCaptionFitLimits } from './captionFit.mjs'
 
 export const CAPTION_TYPES = ['normal', 'main', 'sub', 'emphasis', 'heading', 'annotation']
@@ -290,9 +290,11 @@ export function buildAssContent(job, options = {}) {
   for (const type of CAPTION_TYPES) {
     stylesHeader.push(styleLine(styleDefs[type], fontFamily))
   }
-  if (topicSections.length > 0) {
+  const topicBlocks = Array.isArray(options.topicBlocks) ? options.topicBlocks : []
+  if (topicSections.length > 0 || topicBlocks.some((b) => b.sections?.length > 0)) {
     stylesHeader.push(...buildTopicStyleLines({ fontFamily, accent: COLOR.highlight, displayWidth, displayHeight, accentMode: options.topicAccentMode }))
   }
+  if (Array.isArray(options.extraStyleLines)) stylesHeader.push(...options.extraStyleLines)
   const styles = stylesHeader.join('\n') + '\n'
 
   const events = [
@@ -315,6 +317,10 @@ export function buildAssContent(job, options = {}) {
 
   // トークテーマは通常字幕と別レイヤー(10〜12)。時刻順に出力し、同時に表示されても字幕と競合しない。
   const orderedTopics = [...topicSections].sort((a, b) => a.startSec - b.startSec)
+  if (topicBlocks.length > 0) {
+    // 区間ブロックごとの常時表示（例: ダイジェスト区間と本編区間。LINE案内区間にはテーマを出さない）
+    events.push(...buildContinuousTopicBlockEvents(topicBlocks, { accent: COLOR.highlight, displayWidth, displayHeight, accentMode: options.topicAccentMode }).events)
+  }
   if (options.topicContinuous && orderedTopics.length > 0) {
     // 常時表示: 背景・ラベルは区間全体で1組、タイトルだけを差し替える（sectionsは隙間・重複なし）
     events.push(...buildContinuousTopicEvents(orderedTopics, { accent: COLOR.highlight, displayWidth, displayHeight, accentMode: options.topicAccentMode, startSec: options.topicContinuous.startSec, endSec: options.topicContinuous.endSec }).events)
@@ -324,5 +330,6 @@ export function buildAssContent(job, options = {}) {
     }
   }
 
+  if (Array.isArray(options.extraEvents)) events.push(...options.extraEvents)
   return `${scriptInfo}\n${styles}\n${events.join('\n')}\n`
 }

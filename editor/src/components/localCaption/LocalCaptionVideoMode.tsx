@@ -3,6 +3,7 @@ import { useLocalCaptionVideo } from './useLocalCaptionVideo'
 import { useOutputFileInfo } from './useOutputFileInfo'
 import { SourceVideoPanel, PreviewVideoPanel, FinalVideoPanel } from './VideoPanels'
 import { FiveMinuteAnalysisPanel } from './FiveMinuteAnalysisPanel'
+import { CompositionSettingsPanel, type CompositionOverrides } from './CompositionSettingsPanel'
 import type { Caption, CaptionType, LocalCaptionJob } from './types'
 import './LocalCaptionVideoMode.css'
 
@@ -73,6 +74,7 @@ export function LocalCaptionVideoMode() {
     renderPreview,
   } = useLocalCaptionVideo()
 
+  const [composition, setComposition] = useState<CompositionOverrides & { useComposition?: boolean }>({})
   const [manualPath, setManualPath] = useState('')
   const [titleInput, setTitleInput] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -504,6 +506,8 @@ export function LocalCaptionVideoMode() {
                 )}
               </section>
 
+              <CompositionSettingsPanel value={composition} onChange={setComposition} disabled={currentJob.status === 'rendering'} />
+
               <section className="lcv-panel">
                 <h2>動画を生成</h2>
                 {currentJob.status === 'rendering' ? (
@@ -511,7 +515,7 @@ export function LocalCaptionVideoMode() {
                     レンダーをキャンセル
                   </button>
                 ) : (
-                  <button type="button" disabled={Boolean(renderDisabled)} onClick={() => startRender(currentJob.id)}>
+                  <button type="button" disabled={Boolean(renderDisabled)} onClick={() => { const { useComposition, ...overrides } = composition; void startRender(currentJob.id, useComposition === undefined ? undefined : useComposition ? { composition: overrides } : { compositionDisabled: true }) }}>
                     字幕を焼き込んで動画を生成
                   </button>
                 )}

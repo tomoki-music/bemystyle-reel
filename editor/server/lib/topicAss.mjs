@@ -209,17 +209,19 @@ export function buildTopicEvents(section, p) {
 }
 
 /**
- * 常時表示版のDialogue行。背景・縦ライン・`TALK THEME` は区間全体で1組だけ出し（消さない・フェードしない）、
- * タイトルだけをテーマごとに同じ位置で差し替える。切り替えで空白フレームが生じないよう、タイトルは隙間・重複なしに並べる。
- * 背景は全テーマのタイトルが収まる共通サイズ（最大幅・最大高さ）にする。
+ * 常時表示版のDialogue行（複数の区間ブロック対応）。各ブロック（例: ダイジェスト区間・本編区間）の間、背景・縦ライン・`TALK THEME` は
+ * ブロック全体で1組だけ出し（消さない・フェードしない）、タイトルだけをテーマごとに同じ位置で差し替える。
+ * 背景箱は全ブロック・全テーマのタイトルが収まる共通サイズ・共通位置にする（区間が変わっても箱の見た目を変えない）。
+ * 各ブロックのテーマは隙間・重複なしに並べること（ブロック内で0秒の空白フレームを作らない）。
  *
- * @param {Array<{ id: string, title: string, startSec: number, endSec: number }>} sections 隙間・重複なし（normalizeTopicSectionsContinuous の結果）
- * @param {{ accent: string, displayWidth: number, displayHeight: number, accentMode?: 'label' | 'title', startSec: number, endSec: number }} p
+ * @param {Array<{ startSec: number, endSec: number, sections: Array<{ id: string, title: string, startSec: number, endSec: number }> }>} blocks
+ * @param {{ accent: string, displayWidth: number, displayHeight: number, accentMode?: 'label' | 'title' }} p
  * @returns {{ events: string[], geometry: { box: object, bar: object, label: object, title: object, titleSizes: number[] } | null }}
  */
-export function buildContinuousTopicEvents(sections, p) {
-  const fits = sections.map((s) => fitTopicTitle(s.title, p.displayWidth, p.displayHeight, { preferTwoLines: true }))
-  if (sections.length === 0 || fits.some((f) => f.lines.length === 0)) return { events: [], geometry: null }
+export function buildContinuousTopicBlockEvents(blocks, p) {
+  const all = blocks.flatMap((b) => b.sections)
+  const fits = all.map((s) => fitTopicTitle(s.title, p.displayWidth, p.displayHeight, { preferTwoLines: true }))
+  if (all.length === 0 || fits.some((f) => f.lines.length === 0)) return { events: [], geometry: null }
   const gs = fits.map((f) => computeTopicGeometry(f.lines, p.displayWidth, p.displayHeight, f.titleSize))
   const box = { x: gs[0].box.x, y: gs[0].box.y, w: Math.max(...gs.map((g) => g.box.w)), h: Math.max(...gs.map((g) => g.box.h)) }
   const bar = { ...gs[0].bar, h: box.h }
@@ -227,23 +229,33 @@ export function buildContinuousTopicEvents(sections, p) {
   const title = gs[0].title
   const accentMode = p.accentMode === 'title' ? 'title' : 'label'
   const accentBgr = p.accent.replace(/&H\d{2}/, '&H')
-  const start = formatAssTime(p.startSec)
-  const end = formatAssTime(p.endSec)
   const rect = (r) => `m 0 0 l ${r.w} 0 ${r.w} ${r.h} 0 ${r.h}`
-  const draw = (layer, r, colour, alpha) =>
-    `Dialogue: ${layer},${start},${end},${TOPIC_STYLE_BOX},,0,0,0,,{\\an7\\pos(${r.x},${r.y})\\p1\\bord0\\shad0\\1c${colour}\\1a${alpha}}${rect(r)}{\\p0}`
-  const events = [
-    draw(TOPIC_LAYER_BOX, box, BOX_COLOUR, BOX_ALPHA),
-    draw(TOPIC_LAYER_BAR, bar, accentBgr, '&H00&'),
-    `Dialogue: ${TOPIC_LAYER_TEXT},${start},${end},${TOPIC_STYLE_LABEL},,0,0,0,,{\\an7\\pos(${label.x},${label.y})}${escapeAssText(TOPIC_LABEL_TEXT)}`,
-  ]
-  sections.forEach((s, i) => {
-    const f = fits[i]
-    const text = f.lines.map((l) => escapeAssText(l)).join('\\N')
-    const tag = (accentMode === 'title' ? `\\1c${accentBgr}` : '') + (f.shrunk ? `\\fs${f.titleSize}` : '')
-    events.push(`Dialogue: ${TOPIC_LAYER_TEXT},${formatAssTime(s.startSec)},${formatAssTime(s.endSec)},${TOPIC_STYLE_TITLE},,0,0,0,,{\\an7\\pos(${title.x},${title.y})${tag}}${text}`)
-  })
+  const events = []
+  let k = 0
+  for (const b of blocks) {
+    if (b.sections.length === 0) continue
+    const start = formatAssTime(b.startSec)
+    const end = formatAssTime(b.endSec)
+    const draw = (layer, r, colour, alpha) =>
+      `Dialogue: ${layer},${start},${end},${TOPIC_STYLE_BOX},,0,0,0,,{\\an7\\pos(${r.x},${r.y})\\p1\\bord0\\shad0\\1c${colour}\\1a${alpha}}${rect(r)}{\\p0}`
+    events.push(
+      draw(TOPIC_LAYER_BOX, box, BOX_COLOUR, BOX_ALPHA),
+      draw(TOPIC_LAYER_BAR, bar, accentBgr, '&H00&'),
+      `Dialogue: ${TOPIC_LAYER_TEXT},${start},${end},${TOPIC_STYLE_LABEL},,0,0,0,,{\\an7\\pos(${label.x},${label.y})}${escapeAssText(TOPIC_LABEL_TEXT)}`,
+    )
+    for (const s of b.sections) {
+      const f = fits[k++]
+      const text = f.lines.map((l) => escapeAssText(l)).join('\\N')
+      const tag = (accentMode === 'title' ? `\\1c${accentBgr}` : '') + (f.shrunk ? `\\fs${f.titleSize}` : '')
+      events.push(`Dialogue: ${TOPIC_LAYER_TEXT},${formatAssTime(s.startSec)},${formatAssTime(s.endSec)},${TOPIC_STYLE_TITLE},,0,0,0,,{\\an7\\pos(${title.x},${title.y})${tag}}${text}`)
+    }
+  }
   return { events, geometry: { box, bar, label, title, titleSizes: fits.map((f) => f.titleSize) } }
+}
+
+/** 単一区間の常時表示（従来のAPI。内部では区間ブロック版を使う）。 */
+export function buildContinuousTopicEvents(sections, p) {
+  return buildContinuousTopicBlockEvents([{ startSec: p.startSec, endSec: p.endSec, sections }], p)
 }
 
 const parseAssTime = (t) => {
