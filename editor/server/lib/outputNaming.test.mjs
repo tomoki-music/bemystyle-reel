@@ -112,6 +112,16 @@ describe('buildComparisonOutputPath (旧方式/新方式の比較動画)', () =>
     expect(out).not.toBe(buildComparisonOutputPath('wide_caption_corrected_topic', dir, sourceReal, now))
   })
 
+  it('five_minute_topics は comparison_five_minute_topics_<timestamp>.mp4 で、既存の比較動画・完成動画と別名', () => {
+    const sourceReal = resolve(dir, 'なぜ社名.mp4')
+    writeFileSync(sourceReal, 'x')
+    const out = buildComparisonOutputPath('five_minute_topics', dir, sourceReal, now)
+    expect(out).toMatch(/comparison_five_minute_topics_20260923_220000\.mp4$/)
+    expect(out).not.toContain('なぜ社名')
+    writeFileSync(out, 'existing')
+    expect(buildComparisonOutputPath('five_minute_topics', dir, sourceReal, now)).not.toBe(out) // 既存を上書きしない
+  })
+
   it('mobile_large_text は comparison_mobile_large_text_<timestamp>.mp4 で、既存の比較動画と別名（衝突時はサフィックス）', () => {
     const sourceReal = resolve(dir, 'なぜ社名.mp4')
     writeFileSync(sourceReal, 'x')

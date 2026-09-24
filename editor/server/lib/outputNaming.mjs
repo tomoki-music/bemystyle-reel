@@ -97,13 +97,13 @@ export function buildPreviewOutputPath(jobId, outputRootRealPath, sourceRealPath
   return candidatePath
 }
 
-export const COMPARISON_KINDS = ['legacy', 'semantic', 'natural_timing', 'large_caption_topic', 'mobile_large_text', 'wide_caption_corrected_topic', 'extra_large_caption']
+export const COMPARISON_KINDS = ['legacy', 'semantic', 'natural_timing', 'large_caption_topic', 'mobile_large_text', 'wide_caption_corrected_topic', 'extra_large_caption', 'five_minute_topics']
 
 /**
  * 旧方式/新方式の比較検証用動画の出力ファイル名を作る。
  * `comparison_<kind>_<timestamp>.mp4`。元動画名は含めず、既存ファイルを上書きしない。
  *
- * @param {'legacy' | 'semantic' | 'natural_timing' | 'large_caption_topic' | 'mobile_large_text' | 'wide_caption_corrected_topic' | 'extra_large_caption'} kind
+ * @param {'legacy' | 'semantic' | 'natural_timing' | 'large_caption_topic' | 'mobile_large_text' | 'wide_caption_corrected_topic' | 'extra_large_caption' | 'five_minute_topics'} kind
  * @param {string} outputRootRealPath 検証済みの出力先ディレクトリ（realpath）
  * @param {string} sourceRealPath 検証済みの元動画パス（衝突防止用）
  * @param {Date} [now]

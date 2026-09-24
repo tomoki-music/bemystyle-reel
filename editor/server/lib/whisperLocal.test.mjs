@@ -120,3 +120,15 @@ describe('parseWhisperJson', () => {
     expect(parseWhisperJson(null).tokens).toEqual([])
   })
 })
+
+import { parseMaxRssFromTimeLog } from './whisperLocal.mjs'
+describe('最大メモリ(RSS)の取得 (/usr/bin/time -l)', () => {
+  it('macOSの time -l の出力から maximum resident set size(bytes) を取り出す', () => {
+    const log = '        3.20 real        30.10 user         1.00 sys\n   1289093120  maximum resident set size\n           0  average shared memory size\n'
+    expect(parseMaxRssFromTimeLog(log)).toBe(1289093120)
+  })
+  it('無ければ null（time経由でない起動）', () => {
+    expect(parseMaxRssFromTimeLog('whisper_print_timings: total time = 1 ms')).toBeNull()
+    expect(parseMaxRssFromTimeLog(undefined)).toBeNull()
+  })
+})

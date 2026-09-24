@@ -85,7 +85,8 @@ export function inkLines(gray, width, height, options = {}) {
 export async function measureCaptionRender(p) {
   const width = p.width ?? 1920
   const height = p.height ?? 1080
-  const cap = { startSec: 0, endSec: 1, captionType: 'normal', displayOrder: 0, ...p.caption }
+  // 測定用に、時刻は常に 0〜1 秒へ差し替える（本文・行・種別・強調は呼び出し側のまま）
+  const cap = { captionType: 'normal', displayOrder: 0, ...p.caption, startSec: 0, endSec: 1 }
   const assPath = join(p.tmpDir, `measure_${p.name ?? 'c'}.ass`)
   writeFileSync(assPath, buildAssContent({ width, height, captions: [cap] }, { captionFontScale: p.captionFontScale }), 'utf-8')
   const escaped = assPath.replace(/\\/g, '\\\\\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")

@@ -45,7 +45,8 @@ export function buildWhisperArgs(p) {
 
 /**
  * whisper-cli を実行する。
- * @returns {Promise<{ elapsedMs: number, vadSegments: Array<{ startSec: number, endSec: number }> }>}
+ * @returns {Promise<{ elapsedMs: number, vadSegments: Array<{ startSec: number, endSec: number }>, maxRssBytes: number | null }>}
+ *   maxRssBytes: `/usr/bin/time -l` 経由で起動した場合の子プロセス最大メモリ(bytes)。取得できなければ null。
  */
 export function runWhisperCli(args, { spawnFn = realSpawn, timeoutMs = 20 * 60 * 1000 } = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -66,9 +67,15 @@ export function runWhisperCli(args, { spawnFn = realSpawn, timeoutMs = 20 * 60 *
       clearTimeout(timer)
       if (timedOut) return reject(new Error('whisper-cliがタイムアウトしました'))
       if (code !== 0) return reject(new Error(`whisper-cliが終了コード${code}で失敗しました`))
-      resolvePromise({ elapsedMs: Date.now() - startedAt, vadSegments: parseVadSegmentsFromLog(stderr) })
+      resolvePromise({ elapsedMs: Date.now() - startedAt, vadSegments: parseVadSegmentsFromLog(stderr), maxRssBytes: parseMaxRssFromTimeLog(stderr) })
     })
   })
+}
+
+/** macOS の `/usr/bin/time -l` が出す "N  maximum resident set size"（bytes）を取り出す。無ければ null。 */
+export function parseMaxRssFromTimeLog(log) {
+  const m = /(\d+)\s+maximum resident set size/.exec(log ?? '')
+  return m ? Number(m[1]) : null
 }
 
 /** stderr の "VAD segment N: start = X, end = Y" 行を解析する。 */

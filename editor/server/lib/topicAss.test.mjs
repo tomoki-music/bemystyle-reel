@@ -463,3 +463,64 @@ describe('テーマ表示の不変性（字幕サイズを変えてもテーマ�
     expect(ds.find((d) => d.style === 'TopicTitle').text.match(/\\N/g)).toHaveLength(1)
   })
 })
+
+describe('複数テーマの切り替え（5分動画）', () => {
+  const T = (id, title, a, b) => sec(id, title, a, b)
+  // 3テーマ（隣接・間あり）。冒頭0〜4秒と終盤はテーマ未設定。
+  const topics = [T('topic-001', 'メンバーとの距離の取り方', 4, 100), T('topic-002', 'ライブ準備の進め方', 100.3, 200), T('topic-003', '次の活動計画について', 215, 290)]
+  const captions = [cap(1, 3, 'はじめに', ['はじめに']), cap(99, 101, '境界をまたぐ字幕', ['境界をまたぐ字幕']), cap(295, 299, 'おわりに', ['おわりに'])]
+  const ass = buildAssContent({ width: W, height: H, captions }, { topicSections: topics })
+  const ds = dialogues(ass)
+  const titles = ds.filter((d) => d.style === 'TopicTitle')
+
+  it('テーマごとに背景・縦ライン・小見出し・タイトルの4イベント、時刻は各テーマの表示時間', () => {
+    expect(titles).toHaveLength(3)
+    expect(ds.filter((d) => d.layer >= TOPIC_LAYER_BOX)).toHaveLength(12)
+    expect(titles.map((d) => [d.start, d.end])).toEqual([[4, 100], [100.3, 200], [215, 290]])
+  })
+
+  it('どの時刻でも、表示されるテーマは最大1つ（前後のテーマが重複表示されない）', () => {
+    for (let t = 0; t <= 300; t += 0.05) {
+      const shown = titles.filter((d) => t >= d.start && t < d.end)
+      expect(shown.length).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('テーマ未設定区間（冒頭・テーマ間の隙間・終盤）では何も表示しない', () => {
+    for (const t of [0, 2, 205, 295]) expect(ds.filter((d) => d.layer >= TOPIC_LAYER_BOX && t >= d.start && t < d.end)).toHaveLength(0)
+  })
+
+  it('各テーマに200msのフェード（イベント単位）。通常字幕にはフェードが付かない', () => {
+    for (const d of ds.filter((x) => x.layer >= TOPIC_LAYER_BOX)) expect(d.text).toContain('\\fad(200,200)')
+    for (const d of ds.filter((x) => x.layer === 0)) expect(d.text).not.toContain('\\fad')
+  })
+
+  it('テーマの切り替え境界をまたぐ通常字幕は、テーマの切り替えと同時に表示され（別レイヤー）、字幕の行は変わらない', () => {
+    const c = ds.find((d) => d.layer === 0 && d.start === 99)
+    expect(c.start).toBeLessThan(100)
+    expect(c.end).toBeGreaterThan(100)
+    const without = dialogues(buildAssContent({ width: W, height: H, captions })).filter((d) => d.layer === 0)
+    expect(ds.filter((d) => d.layer === 0)).toEqual(without)
+  })
+
+  it('テーマ名ごとに最大2行・既定84px。長いタイトルは語境界で2行、必要な場合のみ縮小(72px以上)', () => {
+    for (const t of topics) {
+      const r = fitTopicTitle(t.title, W, H)
+      expect(r.lines.length).toBeLessThanOrEqual(2)
+      expect(r.titleSize).toBeGreaterThanOrEqual(72)
+      expect(r.fits).toBe(true)
+    }
+    const long = fitTopicTitle('サークル運営とバンド活動を無理なく両立させる方法', W, H)
+    expect(long.lines).toHaveLength(2)
+  })
+
+  it('各テーマの箱は左上の安全領域にあり、頭部の領域(x=640〜)に届かない', () => {
+    for (const t of topics) {
+      const r = fitTopicTitle(t.title, W, H)
+      const g = computeTopicGeometry(r.lines, W, H, r.titleSize)
+      expect(g.box.x).toBeGreaterThanOrEqual(W * 0.05)
+      expect(g.box.x + g.box.w).toBeLessThanOrEqual(W * 0.41)
+      expect(g.box.y + g.box.h).toBeLessThanOrEqual(H * 0.33)
+    }
+  })
+})

@@ -50,6 +50,7 @@ import { selectPreviewWindow, buildSyntheticPreviewWindow, buildPreviewAssView, 
 import { checkDiskSpace } from './lib/diskSpace.mjs'
 import { checkJapaneseFontAvailable } from './lib/fontCheck.mjs'
 import { buildUniqueOutputPath, buildPreviewOutputPath } from './lib/outputNaming.mjs'
+import { createFiveMinuteAnalysisRouter } from './fiveMinuteAnalysisRoutes.mjs'
 
 export const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v'])
 export const MAX_AUDIO_BYTES = 24 * 1024 * 1024
@@ -163,6 +164,9 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
   }
 
   // ── 入力フォルダ一覧 / ディレクトリブラウズ ──────────────────────
+
+  // 5分比較用のテーマ・部分強調の確認/手動修正（既存ジョブJSONには触れない。AI APIは呼ばない）
+  router.use('/:id/five-minute', createFiveMinuteAnalysisRouter({ dataDir: resolve(jobsDir, '..', 'local_caption_comparisons', 'five_minute') }))
 
   router.get('/roots', (_req, res) => {
     const configuredRoots = getAllowedInputRoots()

@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react'
 import { useLocalCaptionVideo } from './useLocalCaptionVideo'
 import { useOutputFileInfo } from './useOutputFileInfo'
 import { SourceVideoPanel, PreviewVideoPanel, FinalVideoPanel } from './VideoPanels'
+import { FiveMinuteAnalysisPanel } from './FiveMinuteAnalysisPanel'
 import type { Caption, CaptionType, LocalCaptionJob } from './types'
 import './LocalCaptionVideoMode.css'
 
@@ -374,6 +375,8 @@ export function LocalCaptionVideoMode() {
               {currentJob.status === 'completed' && currentJob.outputPath && (
                 <FinalVideoPanel jobId={currentJob.id} outputInfo={outputInfo} />
               )}
+
+              <FiveMinuteAnalysisPanel jobId={currentJob.id} />
 
               <section className="lcv-panel">
                 <h2>字幕（{sortedCaptions.length}件）</h2>

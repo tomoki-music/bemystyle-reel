@@ -15,6 +15,7 @@ import { assignEmphasis } from './emphasisSelector.mjs'
  *   tokens: Array<{ text: string, startSec: number, endSec: number, p?: number }>,
  *   silences: Array<{ startSec: number, endSec: number }>,
  *   emphasisCandidates?: string[],
+ *   timing?: object, // 区間単位のアラインメント結果（省略時は tokens 全体を1回でアラインする）
  *   splitOptions?: object,
  * }} p
  */
@@ -31,7 +32,7 @@ export function buildNaturalCaptions(p) {
     idx += c.text.length
   }
 
-  const timing = alignCanonicalToTokens(canonicalText, tokens, silences, bounds)
+  const timing = p.timing ?? alignCanonicalToTokens(canonicalText, tokens, silences, bounds)
   const pages = splitTextIntoNaturalPages(canonicalText, timing, bounds, { ...(p.splitOptions ?? {}), legacyRanges })
 
   const base = pages.map((pg, i) => ({
