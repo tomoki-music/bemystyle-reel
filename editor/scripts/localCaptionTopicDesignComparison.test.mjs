@@ -73,4 +73,10 @@ describe('localCaptionTopicDesignComparison: 安全性(静的確認)', () => {
     expect(/JSON\.stringify\(summary/.test(src)).toBe(true)
     expect(src).not.toMatch(/summary\.[a-zA-Z]+\s*=\s*(args\.topicTitle|topicSections\[0\]\.title)/)
   })
+
+  it('サイズ候補の比較(--compare-scales)とcaptionType別の実描画を行う', () => {
+    expect(src).toContain('--compare-scales')
+    expect(src).toContain('sizeComparison')
+    expect(src).toContain('byCaptionType')
+  })
 })

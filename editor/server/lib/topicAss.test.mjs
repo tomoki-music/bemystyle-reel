@@ -37,21 +37,21 @@ describe('通常字幕の採用サイズ・セーフエリア・二重適用な�
   const normalOf = (scale) => getCaptionStyleDefs(W, H, scale).normal
   const marginH = Math.round(W * 0.06)
 
-  it('採用サイズは 1080p で normal=100px（基準56px × CAPTION_FONT_SCALE 1.78）', () => {
-    expect(CAPTION_FONT_SCALE).toBe(1.78)
+  it('採用サイズは 1080p で normal=116px（基準56px × CAPTION_FONT_SCALE 2.066）', () => {
+    expect(CAPTION_FONT_SCALE).toBe(2.066)
     expect(getCaptionStyleDefs(W, H, 1).normal.fontsize).toBe(56)
-    expect(normalOf().fontsize).toBe(100)
+    expect(normalOf().fontsize).toBe(116)
   })
 
-  it('候補 94 / 100 / 104px は倍率だけで表現でき、倍率と固定pxが二重に掛からない（ASSのFontsizeは1回分、Dialogueに \\fs なし）', () => {
-    for (const [scale, px] of [[1.67, 94], [1.78, 100], [1.85, 104]]) {
+  it('候補 112 / 116 / 120px は倍率だけで表現でき、倍率と固定pxが二重に掛からない（ASSのFontsizeは1回分、Dialogueに \\fs なし）', () => {
+    for (const [scale, px] of [[1.994, 112], [2.066, 116], [2.137, 120]]) {
       expect(normalOf(scale).fontsize).toBe(px)
       const ass = buildAssContent({ width: W, height: H, captions: [] }, { captionFontScale: scale })
       expect(styleFontsize(ass, 'Normal')).toBe(px)
     }
     const ass = buildAssContent({ width: W, height: H, captions: [cap(0, 2, 'あ', ['あ'])] })
     expect(dialogues(ass)[0].text).not.toMatch(/\\fs|\\fscx|\\fscy/)
-    expect(normalOf(CAPTION_FONT_SCALE * CAPTION_FONT_SCALE).fontsize).toBe(100) // 範囲外の倍率は既定へ戻り、二重適用にならない
+    expect(normalOf(CAPTION_FONT_SCALE * CAPTION_FONT_SCALE).fontsize).toBe(116) // 範囲外の倍率は既定へ戻り、二重適用にならない
   })
 
   it('不正な倍率は既定へ戻す（極端な値で画面外へ出さない）', () => {
@@ -77,7 +77,7 @@ describe('通常字幕の採用サイズ・セーフエリア・二重適用な�
     expect(text).not.toMatch(/\\fs|\\fscx|\\fscy|\\b\d|\\fn|\\bord/)
     expect(text).toContain('{\\c004AB3F0&}とても{\\r}')
     const ass = buildAssContent({ width: W, height: H, captions: [cap(0, 2, 'これはとても大事ですね', ['これはとても', '大事ですね'], 'とても大事')] })
-    expect(styleFontsize(ass, 'Normal')).toBe(100)
+    expect(styleFontsize(ass, 'Normal')).toBe(116)
   })
 })
 
@@ -439,5 +439,27 @@ describe('修正後のテーマ「メンバーとの距離の取り方」（既�
     expect(ass).toContain('Style: TopicLabel,')
     expect(ass.split('\n').find((l) => l.startsWith('Style: TopicLabel,')).split(',')[3]).toBe('&H004AB3F0&')
     expect(ass.split('\n').find((l) => l.startsWith('Style: TopicTitle,')).split(',')[3]).toBe('&H00FFFFFF&')
+  })
+})
+
+describe('テーマ表示の不変性（字幕サイズを変えてもテーマは変わらない）', () => {
+  const TITLE = 'メンバーとの距離の取り方'
+  const topics = [sec('topic-001', TITLE, 1.38, 60)]
+  const themeLines = (scale) =>
+    buildAssContent({ width: W, height: H, captions: [cap(1.4, 3, 'こんにちは', ['こんにちは'])] }, { topicSections: topics, captionFontScale: scale })
+      .split('\n')
+      .filter((l) => /Topic|,1[0-2],/.test(l) || l.startsWith('Dialogue: 1'))
+  it('字幕倍率が 1.0 / 1.994 / 2.066 / 2.137 のどれでも、テーマのStyle・Dialogueは完全に同一', () => {
+    const base = themeLines(2.066)
+    expect(base.length).toBeGreaterThanOrEqual(7)
+    for (const s of [1, 1.994, 2.137]) expect(themeLines(s)).toEqual(base)
+  })
+  it('テーマは 84px / 40px、左上配置、2行、琥珀色の小見出し・白タイトル・時刻 1.38〜60 秒のまま', () => {
+    const ass = buildAssContent({ width: W, height: H, captions: [] }, { topicSections: topics })
+    expect(styleFontsize(ass, 'TopicTitle')).toBe(84)
+    expect(styleFontsize(ass, 'TopicLabel')).toBe(40)
+    const ds = dialogues(ass).filter((d) => d.layer >= 10)
+    expect(ds.every((d) => d.start === 1.38 && d.end === 60)).toBe(true)
+    expect(ds.find((d) => d.style === 'TopicTitle').text.match(/\\N/g)).toHaveLength(1)
   })
 })

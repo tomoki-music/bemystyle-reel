@@ -19,13 +19,13 @@ const DEFAULT_FONT_FAMILY = 'Noto Sans CJK JP'
  * 字幕サイズの倍率。フォントサイズ・縁取り・影の「大きさ」だけに、ここで一度だけ掛ける
  * （位置・余白・行数は掛けない。固定pxとの二重適用をしない）。基準は 1080p で normal=56px（1.00）。
  *
- * 1.78 → normal 100px（基本サイズ）。スマホの横長表示でも明確に読める大きさ。長い行だけが
- * captionFit.mjs の動的縮小（下限82px）で小さくなる。
- * サイズの比は倍率によらず一定: main は normal の約1.08倍、sub は約0.94倍、emphasis は normal と同じ。
- * （履歴: 56px(1.00) → 67px(1.20) → 82px(1.46) → 100px(1.78)）
+ * 2.066 → normal 116px（基本サイズ）。実描画の測定で、1行16文字が画面幅の約70%、20文字が約87%になる大きさ。
+ * 長い行だけが captionFit.mjs の動的縮小（116→108→100→94→88→82、下限82px）で小さくなる。
+ * サイズの比は倍率によらず一定: main は normal の約1.05倍（122px）、sub は約0.94倍（109px）、emphasis は normal と同じ。
+ * （履歴: 56px(1.00) → 67px(1.20) → 82px(1.46) → 100px(1.78) → 116px(2.066)）
  */
-export const CAPTION_FONT_SCALE = 1.78
-export const CAPTION_FONT_SCALE_MAX = 2
+export const CAPTION_FONT_SCALE = 2.066
+export const CAPTION_FONT_SCALE_MAX = 2.5
 
 /** 倍率を検証する。不正値は既定倍率へ戻す（極端な値で画面外へ出さない）。 */
 export function resolveCaptionFontScale(scale) {
@@ -100,7 +100,7 @@ export function getCaptionStyleDefs(displayWidth, displayHeight, fontScale = CAP
       ...base,
       name: 'Main',
       // 全面バナーにせず、normalより少し大きくする程度に留める。
-      fontsize: Math.max(20, Math.round(shortSide * 0.056)), // normalの約1.08倍
+      fontsize: Math.max(20, Math.round(shortSide * 0.0545)), // normalの約1.05倍（極端に大きくしない）
       outline: o(3.2),
     },
     sub: {
@@ -252,7 +252,7 @@ export function planCaptionFits(captions, displayWidth, displayHeight, fontScale
     const text = typeof c?.text === 'string' ? c.text : ''
     const lines = Array.isArray(c?.lines) && c.lines.length > 1 && c.lines.join('') === text ? c.lines : [text]
     const baseSize = defs[type].fontsize
-    const fit = fitCaptionFontSize({ lines, baseSize, minSize: limits.minSizePx, maxWidthPx: limits.maxWidthPx })
+    const fit = fitCaptionFontSize({ lines, baseSize, minSize: limits.minSizePx, maxWidthPx: limits.maxWidthPx, ladderPx: limits.ladderPx })
     return { type, baseSize, ...fit }
   })
 }

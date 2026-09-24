@@ -60,6 +60,7 @@ function parseArgs(argv) {
     else if (a === '--kind') out.kind = argv[++i]
     else if (a === '--require-terms') out.requireTerms = argv[++i].split(',').map((x) => x.trim()).filter(Boolean)
     else if (a === '--measure') out.measure = true
+    else if (a === '--compare-scales') out.compareScales = argv[++i].split(',').map(Number).filter(Number.isFinite)
     else if (a === '--mobile-widths') out.mobileWidths = argv[++i].split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0)
     else if (a === '--stills-dir') out.stillsDir = argv[++i]
     else if (a === '--stills') out.stills = argv[++i].split(',').map(Number).filter(Number.isFinite)
@@ -218,6 +219,28 @@ async function main() {
           bottomMarginPx: r.bottomMarginPx,
         })
       }
+      // captionType別（normal/main/sub/emphasis）の実描画（1行16文字・2行30文字）
+      const typeRows = []
+      for (const type of ['normal', 'main', 'sub', 'emphasis']) {
+        for (const lines of [[L(16)], [L(15), L(15)]]) {
+          const cap = { text: lines.join(''), lines, captionType: type, emphasisText: null }
+          const plan = planCaptionFits([cap], W, H)[0]
+          const r = await measureCaptionRender({ caption: cap, width: W, height: H, tmpDir, ffmpegBin: process.env.FFMPEG_BIN, name: `ty${typeRows.length}` })
+          typeRows.push({ type, lines: lines.length, fontSizePx: plan.size, shrunk: plan.shrunk, measuredWidthPx: r.measuredWidthPx, usagePercent: round(r.usageRatio * 100, 1), minSideMarginPx: Math.min(r.leftMarginPx, r.rightMarginPx), overflow: r.overflow, topPercent: round((r.topPx / H) * 100, 1), bottomMarginPx: r.bottomMarginPx })
+        }
+      }
+      // サイズ候補の比較（--compare-scales）: 1行16文字・20文字の実描画の使用率
+      const sizeComparison = []
+      for (const scale of args.compareScales ?? []) {
+        const row = { scale, normalPx: getCaptionStyleDefs(W, H, scale).normal.fontsize }
+        for (const n of [16, 20]) {
+          const cap = { text: L(n), lines: [L(n)], emphasisText: null }
+          const plan = planCaptionFits([cap], W, H, scale)[0]
+          const r = await measureCaptionRender({ caption: cap, width: W, height: H, tmpDir, ffmpegBin: process.env.FFMPEG_BIN, name: `sc${sizeComparison.length}_${n}`, captionFontScale: scale })
+          row[`chars${n}`] = { fontSizePx: plan.size, shrunk: plan.shrunk, usagePercent: round(r.usageRatio * 100, 1), minSideMarginPx: Math.min(r.leftMarginPx, r.rightMarginPx) }
+        }
+        sizeComparison.push(row)
+      }
       const real = []
       for (const [i, c] of captions.entries()) {
         const { plan, r } = await measureOne(`r${i}`, { lines: c.lines, emphasisText: c.emphasisText })
@@ -226,6 +249,8 @@ async function main() {
       const usage = real.map((x) => x.r.usageRatio)
       renderMeasure = {
         synthetic: rows,
+        byCaptionType: typeRows,
+        sizeComparison,
         real: {
           captionCount: real.length,
           fontSizeHistogramPx: real.reduce((h, x) => ({ ...h, [x.plan.size]: (h[x.plan.size] ?? 0) + 1 }), {}),
@@ -240,8 +265,8 @@ async function main() {
           twoLineTopPercentMin: round((Math.min(...real.filter((x) => x.r.lineCount === 2).map((x) => x.r.topPx)) / H) * 100, 1),
         },
       }
-      const minMargin = W * 0.06
-      const bad = [...rows.map((r) => ({ o: r.overflow, m: r.minSideMarginPx, u: r.usagePercent })), ...real.map((x) => ({ o: x.r.overflow, m: Math.min(x.r.leftMarginPx, x.r.rightMarginPx), u: x.r.usageRatio * 100 }))]
+      const minMargin = Math.floor(W * 0.06) // 6%（整数pxへ切り下げ。ink端は±1pxの丸めを含む）
+      const bad = [...typeRows.map((r) => ({ o: r.overflow, m: r.minSideMarginPx, u: r.usagePercent })), ...rows.map((r) => ({ o: r.overflow, m: r.minSideMarginPx, u: r.usagePercent })), ...real.map((x) => ({ o: x.r.overflow, m: Math.min(x.r.leftMarginPx, x.r.rightMarginPx), u: x.r.usageRatio * 100 }))]
       if (bad.some((b) => b.o || b.m < minMargin || b.u > 88)) problems.push('実描画で、はみ出し・左右6%未満の余白・使用幅88%超の字幕があります')
     }
 

@@ -45,9 +45,44 @@ const conditions = [
   { name: '部分強調を含む1行', lines: ['これはとても大事な話です'], emphasisText: 'とても大事' },
   { name: '部分強調を含む2行', lines: ['これはとても大事な', 'ですよね本当に'], emphasisText: 'とても大事' },
   { name: '24文字(縮小)', lines: [L(24)] },
+  { name: '21文字(1段階縮小)', lines: [L(21)] },
 ]
 
 describe.skipIf(!canRender)('実表示幅の検証（実フォント + libass 描画）', () => {
+  it('基本116px: 1行16文字は画面幅の68〜75%、1行20文字は88%以内（縮小なし）', async () => {
+    await withTempDir('lcv-measure-test-', async (tmpDir) => {
+      const m = async (n, name) => {
+        const cap = { text: L(n), lines: [L(n)], emphasisText: null }
+        expect(planCaptionFits([cap], W, H)[0]).toMatchObject({ size: 116, shrunk: false })
+        return measureCaptionRender({ caption: cap, width: W, height: H, tmpDir, ffmpegBin: process.env.FFMPEG_BIN, name })
+      }
+      const r16 = await m(16, 'u16')
+      const r20 = await m(20, 'u20')
+      expect(r16.usageRatio).toBeGreaterThanOrEqual(0.68)
+      expect(r16.usageRatio).toBeLessThanOrEqual(0.75)
+      expect(r20.usageRatio).toBeLessThanOrEqual(0.88)
+      expect(r20.usageRatio).toBeGreaterThan(r16.usageRatio)
+    })
+  }, 60000)
+
+  it('captionType別(normal/main/sub/emphasis): 1行16文字・2行30文字が88%以内・6%余白・最大2行に収まる', async () => {
+    await withTempDir('lcv-measure-test-', async (tmpDir) => {
+      for (const type of ['normal', 'main', 'sub', 'emphasis']) {
+        for (const lines of [[L(16)], [L(15), L(15)]]) {
+          const cap = { text: lines.join(''), lines, captionType: type, emphasisText: null }
+          const plan = planCaptionFits([cap], W, H)[0]
+          const r = await measureCaptionRender({ caption: cap, width: W, height: H, tmpDir, ffmpegBin: process.env.FFMPEG_BIN, name: `${type}${lines.length}` })
+          expect(r.overflow, `${type}/${lines.length}`).toBe(false)
+          expect(r.usageRatio, `${type}/${lines.length}`).toBeLessThanOrEqual(0.88)
+          expect(Math.min(r.leftMarginPx, r.rightMarginPx), `${type}/${lines.length}`).toBeGreaterThanOrEqual(Math.floor(W * 0.06))
+          expect(r.lineCount).toBe(lines.length)
+          expect(r.topPx, `${type}/${lines.length}`).toBeGreaterThanOrEqual(H * 0.65)
+          expect(plan.size).toBeGreaterThanOrEqual(94)
+        }
+      }
+    })
+  }, 90000)
+
   it('全条件で、88%以内・左右6%以上の余白・最大2行・下部35%以内・下端5%以上の余白に収まる', async () => {
     const rows = []
     await withTempDir('lcv-measure-test-', async (tmpDir) => {
@@ -61,11 +96,12 @@ describe.skipIf(!canRender)('実表示幅の検証（実フォント + libass �
     for (const { c, plan, r } of rows) {
       expect(r.overflow, c.name).toBe(false)
       expect(r.usageRatio, c.name).toBeLessThanOrEqual(0.88)
-      expect(Math.min(r.leftMarginPx, r.rightMarginPx), c.name).toBeGreaterThanOrEqual(W * 0.06)
+      expect(Math.min(r.leftMarginPx, r.rightMarginPx), c.name).toBeGreaterThanOrEqual(Math.floor(W * 0.06)) // 6%（整数pxへ切り下げ。ink端は±1pxの丸めを含む）
       expect(r.lineCount, c.name).toBe(c.lines.length)
       expect(r.topPx, c.name).toBeGreaterThanOrEqual(H * 0.65)
       expect(r.bottomMarginPx, c.name).toBeGreaterThanOrEqual(H * 0.05)
       expect(plan.size, c.name).toBeGreaterThanOrEqual(82)
+      expect([116, 108, 100, 94, 88, 82], c.name).toContain(plan.size) // 段階値のみ
     }
   }, 60000)
 

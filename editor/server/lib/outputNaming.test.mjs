@@ -104,6 +104,14 @@ describe('buildComparisonOutputPath (旧方式/新方式の比較動画)', () =>
     expect(out).not.toBe(buildComparisonOutputPath('mobile_large_text', dir, sourceReal, now))
   })
 
+  it('extra_large_caption は comparison_extra_large_caption_<timestamp>.mp4 で、他の比較動画と別名', () => {
+    const sourceReal = resolve(dir, 'なぜ社名.mp4')
+    writeFileSync(sourceReal, 'x')
+    const out = buildComparisonOutputPath('extra_large_caption', dir, sourceReal, now)
+    expect(out).toMatch(/comparison_extra_large_caption_20260923_220000\.mp4$/)
+    expect(out).not.toBe(buildComparisonOutputPath('wide_caption_corrected_topic', dir, sourceReal, now))
+  })
+
   it('mobile_large_text は comparison_mobile_large_text_<timestamp>.mp4 で、既存の比較動画と別名（衝突時はサフィックス）', () => {
     const sourceReal = resolve(dir, 'なぜ社名.mp4')
     writeFileSync(sourceReal, 'x')
