@@ -15,18 +15,22 @@ export const CAPTION_TYPES = ['normal', 'main', 'sub', 'emphasis', 'heading', 'a
 const DEFAULT_FONT_FAMILY = 'Noto Sans CJK JP'
 
 /**
- * 字幕フォントサイズの倍率（全captionTypeの基準サイズへ一律に掛ける）。
- * 一律に掛けるので normal / main / sub の大きさの比は変わらない（mainだけ極端に大きくならない）。
+ * 字幕サイズの倍率。フォントサイズ・縁取り・影の「大きさ」だけに、ここで一度だけ掛ける
+ * （位置・余白・行数は掛けない。固定pxとの二重適用をしない）。基準は 1080p で normal=56px（1.00）。
+ * normal / main / sub の比は倍率によらず一定（mainはnormalの約1.08倍）。
  * 部分強調は色のオーバーライドのみでサイズを変えない。
  *
- * 1.20 は 1920x1080 の静止フレーム比較（1.00 / 1.15 / 1.20）で採用した値。1.00 は小さく、1.15 と 1.20 はともに
- * セーフエリア内。読みやすさで 1.20 を選んだ。
+ * 1.46 → normal 82px。スマホで横長動画を見ても読める大きさとして採用した値。
+ * 候補 78px(1.39) / 82px(1.46) / 84px(1.50) を比較し、84px は「20文字ハード上限を全角=1em で見積もった幅」が
+ * 使える幅(1690px)に対して10pxしか余裕が無いため見送り、余裕のある 82px を採用した。
+ * （履歴: 56px(1.00) → 67px(1.20) → 82px(1.46)）
  */
-export const CAPTION_FONT_SCALE = 1.2
+export const CAPTION_FONT_SCALE = 1.46
+export const CAPTION_FONT_SCALE_MAX = 1.6
 
 /** 倍率を検証する。不正値は既定倍率へ戻す（極端な値で画面外へ出さない）。 */
 export function resolveCaptionFontScale(scale) {
-  return Number.isFinite(scale) && scale >= 0.5 && scale <= 1.5 ? scale : CAPTION_FONT_SCALE
+  return Number.isFinite(scale) && scale >= 0.5 && scale <= CAPTION_FONT_SCALE_MAX ? scale : CAPTION_FONT_SCALE
 }
 
 export function getFontFamily() {
@@ -60,8 +64,12 @@ const ALIGNMENT = {
  * これにより縦動画(9:16)・横動画のどちらでも破綻しないサイズ/位置になる。
  */
 export function getCaptionStyleDefs(displayWidth, displayHeight, fontScale = CAPTION_FONT_SCALE) {
-  // フォントサイズだけ倍率を掛ける（余白・位置は元の解像度基準のまま）。
-  const shortSide = Math.min(displayWidth, displayHeight) * resolveCaptionFontScale(fontScale)
+  // 大きさ（フォントサイズ・縁取り・影）だけに倍率を掛ける。余白・位置は元の解像度基準のまま。
+  // 倍率はこの関数の入口で一度だけ適用する（下の fontsize は shortSide に掛け済みの値から計算するので、
+  // 個別に倍率を掛け直さない）。縁取り・影は px 指定なので、同じ倍率を o() で一度だけ掛ける。
+  const scale = resolveCaptionFontScale(fontScale)
+  const shortSide = Math.min(displayWidth, displayHeight) * scale
+  const o = (px) => Math.round(px * scale * 10) / 10
   const safeMarginH = Math.max(20, Math.round(displayWidth * 0.06))
   const safeMarginV = Math.max(24, Math.round(displayHeight * 0.06))
 
@@ -74,8 +82,8 @@ export function getCaptionStyleDefs(displayWidth, displayHeight, fontScale = CAP
     backColour: COLOR.softShadow,
     bold: 1,
     borderStyle: 1,
-    outline: 3,
-    shadow: 1,
+    outline: o(3),
+    shadow: o(1),
     alignment: ALIGNMENT.bottomCenter,
     marginL: safeMarginH,
     marginR: safeMarginH,
@@ -93,17 +101,17 @@ export function getCaptionStyleDefs(displayWidth, displayHeight, fontScale = CAP
       ...base,
       name: 'Main',
       // 全面バナーにせず、normalより少し大きくする程度に留める。
-      fontsize: Math.max(20, Math.round(shortSide * 0.058)),
-      outline: 3.5,
+      fontsize: Math.max(20, Math.round(shortSide * 0.056)), // normalの約1.08倍
+      outline: o(3.2),
     },
     sub: {
       ...base,
       name: 'Sub',
       // mainより明確に小さく、説明文として読みやすい控えめなデザイン。
-      fontsize: Math.max(13, Math.round(shortSide * 0.038)),
+      fontsize: Math.max(13, Math.round(shortSide * 0.042)), // normalの約0.81倍（極端な差を付けない）
       primaryColour: COLOR.paleGray,
       bold: 0,
-      outline: 2,
+      outline: o(2),
       shadow: 0,
       marginV: Math.max(16, Math.round(safeMarginV * 0.6)),
     },
@@ -111,15 +119,15 @@ export function getCaptionStyleDefs(displayWidth, displayHeight, fontScale = CAP
       ...base,
       name: 'Emphasis',
       // 文全体をアクセント色にしない（不自然になるため）。見た目はmain相当で、強調は部分オーバーライドで行う。
-      fontsize: Math.max(20, Math.round(shortSide * 0.058)),
-      outline: 3.5,
+      fontsize: Math.max(20, Math.round(shortSide * 0.056)),
+      outline: o(3.2),
     },
     heading: {
       ...base,
       name: 'Heading',
       // 本当の話題転換だけに使う。上部の大きな黒帯は廃止し、縁取り文字のみ・やや大きめにする。
       fontsize: Math.max(22, Math.round(shortSide * 0.064)),
-      outline: 3.5,
+      outline: o(3.5),
       alignment: ALIGNMENT.topCenter,
     },
     annotation: {
@@ -127,7 +135,7 @@ export function getCaptionStyleDefs(displayWidth, displayHeight, fontScale = CAP
       name: 'Annotation',
       fontsize: Math.max(12, Math.round(shortSide * 0.03)),
       bold: 0,
-      outline: 1.5,
+      outline: o(1.5),
       shadow: 0,
       alignment: ALIGNMENT.bottomRight,
       marginL: Math.max(16, Math.round(safeMarginH * 0.5)),

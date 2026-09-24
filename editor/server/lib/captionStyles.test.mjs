@@ -154,18 +154,15 @@ describe('captionType別デザイン (Phase: AI分類デザイン)', () => {
     }
   })
 
-  it('最大級の長さのcaption(37文字程度)でも2行に収まる想定の横幅になる', () => {
-    // captionSegmenterの実データ分割結果の最大文字数(約37文字)を想定。
-    // CJKフォントは概ね正方形(1文字幅 ≈ fontsize)なので、2行なら1行あたり
-    // 19文字程度。 fontsize * 19 が PlayResX - 左右マージン に収まるかを確認する。
+  it('最大級のcaption(30文字/行20文字ハード上限)でも、通常字幕系スタイルが左右セーフエリアに収まる', () => {
+    // 通常字幕(normal)は保守的に 全角=1em で、行の最大文字数(ハード上限20)を確認する。
+    // main/emphasis/sub は実測の全角送り幅(約0.72em、余裕を見て0.8em)で確認する。headingは短い見出し用なので対象外。
     const content = buildAssContent({ width: 1920, height: 1080, captions: [] })
     const styles = extractStyleLines(content)
-    const playResX = 1920
-    const safeMarginH = Math.max(20, Math.round(playResX * 0.06))
-    const usableWidth = playResX - safeMarginH * 2
-    const maxCharsPerLine = Math.ceil(37 / 2)
-    for (const s of Object.values(styles)) {
-      expect(s.fontsize * maxCharsPerLine).toBeLessThan(usableWidth * 1.05) // 多少の等幅近似誤差を許容
+    const usableWidth = 1920 - Math.max(20, Math.round(1920 * 0.06)) * 2
+    expect(styles.Normal.fontsize * 20).toBeLessThan(usableWidth)
+    for (const name of ['Main', 'Emphasis', 'Sub']) {
+      expect(styles[name].fontsize * 0.8 * 20).toBeLessThan(usableWidth)
     }
   })
 

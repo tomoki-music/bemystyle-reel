@@ -37,21 +37,30 @@ const BOX_ALPHA = '&H50&' // 約69%不透明の黒 → 白壁の上でも読め�
 const WHITE = '&H00FFFFFF&'
 const BLACK = '&H00000000&'
 
+/** 1080p でのテーマタイトル既定サイズ(px)と、自動縮小の下限(px)。 */
+export const TOPIC_TITLE_BASE_PX = 84
+export const TOPIC_TITLE_MIN_PX = 72
+/** 箱の右端の上限（画面幅に対する比率）。顔のある画面中央(50%)へ張り出さないための上限。 */
+export const TOPIC_BOX_MAX_RIGHT_RATIO = 0.47
+
 /**
- * 表示解像度に対するテーマ表示のレイアウトを決める（すべて比率ベース）。
+ * 表示解像度に対するテーマ表示のレイアウトを決める（すべて比率ベース。1080p で title=84 / label=40）。
  * @param {number} displayWidth
  * @param {number} displayHeight
+ * @param {number} [titleSizeOverride] 自動縮小後のタイトルサイズ(px)
  */
-export function getTopicLayout(displayWidth, displayHeight) {
+export function getTopicLayout(displayWidth, displayHeight, titleSizeOverride) {
   const shortSide = Math.min(displayWidth, displayHeight)
   const marginX = Math.max(24, Math.round(displayWidth * 0.05)) // 左のセーフマージン
   const marginTop = Math.max(24, Math.round(displayHeight * 0.06)) // 上のセーフマージン
-  const titleSize = Math.max(22, Math.round(shortSide * 0.06))
-  const labelSize = Math.max(14, Math.round(shortSide * 0.03))
-  const pad = Math.max(10, Math.round(shortSide * 0.018))
-  const barWidth = Math.max(4, Math.round(shortSide * 0.007))
-  const gap = Math.max(6, Math.round(shortSide * 0.008)) // ラベルとタイトルの間
-  return { marginX, marginTop, titleSize, labelSize, pad, barWidth, gap }
+  const titleBase = Math.max(22, Math.round(shortSide * (TOPIC_TITLE_BASE_PX / 1080)))
+  const titleSize = titleSizeOverride ?? titleBase
+  const labelSize = Math.max(14, Math.round(shortSide * (40 / 1080)))
+  const pad = Math.max(10, Math.round(shortSide * (28 / 1080)))
+  const barWidth = Math.max(4, Math.round(shortSide * (12 / 1080)))
+  const gap = Math.max(6, Math.round(shortSide * (13 / 1080))) // ラベルとタイトルの間
+  const titleMin = Math.max(20, Math.round(shortSide * (TOPIC_TITLE_MIN_PX / 1080)))
+  return { marginX, marginTop, titleBase, titleMin, titleSize, labelSize, pad, barWidth, gap, maxRight: Math.round(displayWidth * TOPIC_BOX_MAX_RIGHT_RATIO) }
 }
 
 /** 文字列の描画幅(px)の近似。全角=CJK送り幅、それ以外=半角送り幅。 */
@@ -68,9 +77,10 @@ export function estimateTextWidthPx(text, fontsize) {
  * @param {string[]} lines タイトル行（1〜2）
  * @param {number} displayWidth
  * @param {number} displayHeight
+ * @param {number} [titleSize] タイトルサイズ(px)。省略時は既定サイズ
  */
-export function computeTopicGeometry(lines, displayWidth, displayHeight) {
-  const L = getTopicLayout(displayWidth, displayHeight)
+export function computeTopicGeometry(lines, displayWidth, displayHeight, titleSize) {
+  const L = getTopicLayout(displayWidth, displayHeight, titleSize)
   const labelW = estimateTextWidthPx(TOPIC_LABEL_TEXT, L.labelSize) + TOPIC_LABEL_TEXT.length * 1 // 字間1px
   const titleW = Math.max(0, ...lines.map((l) => estimateTextWidthPx(l, L.titleSize)))
   const labelH = L.labelSize * LINE_HEIGHT_PER_FONTSIZE
@@ -91,6 +101,30 @@ export function computeTopicGeometry(lines, displayWidth, displayHeight) {
 }
 
 /**
+ * タイトルが箱からはみ出さない（右端が maxRight 以内）ように行とサイズを決める。
+ * 1. 自然な語境界で最大2行にする（breakTopicTitle）。
+ * 2. 箱は本文幅に合わせて広がるが、右端は画面中央へ張り出さない上限(maxRight)まで。
+ * 3. それでも収まらないときだけ、既定サイズから下限まで縮小する。短いタイトルは既定サイズのまま。
+ *
+ * @param {string} title
+ * @param {number} displayWidth
+ * @param {number} displayHeight
+ * @returns {{ lines: string[], titleSize: number, shrunk: boolean, fits: boolean }}
+ */
+export function fitTopicTitle(title, displayWidth, displayHeight) {
+  const lines = breakTopicTitle(title)
+  const L = getTopicLayout(displayWidth, displayHeight)
+  const rightAt = (size) => {
+    const g = computeTopicGeometry(lines, displayWidth, displayHeight, size)
+    return g.box.x + g.box.w
+  }
+  for (let size = L.titleBase; size >= L.titleMin; size -= 1) {
+    if (rightAt(size) <= L.maxRight) return { lines, titleSize: size, shrunk: size < L.titleBase, fits: true }
+  }
+  return { lines, titleSize: L.titleMin, shrunk: L.titleMin < L.titleBase, fits: rightAt(L.titleMin) <= L.maxRight }
+}
+
+/**
  * [V4+ Styles] に追加するテーマ用スタイル行3つ。
  * Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut,
  *         ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
@@ -105,7 +139,7 @@ export function buildTopicStyleLines(p) {
     `Style: ${[name, p.fontFamily, size, primary, BLACK, BLACK, '&H80000000&', bold, 0, 0, 0, 100, 100, spacing, 0, 1, outline, shadow, 7, L.marginX, L.marginX, L.marginTop, 1].join(',')}`
   return [
     row(TOPIC_STYLE_LABEL, L.labelSize, p.accent, 1, 0, 0, 1),
-    row(TOPIC_STYLE_TITLE, L.titleSize, accentMode === 'title' ? p.accent : WHITE, 1, 2, 0, 0),
+    row(TOPIC_STYLE_TITLE, L.titleSize, accentMode === 'title' ? p.accent : WHITE, 1, 3, 0, 0),
     row(TOPIC_STYLE_BOX, 20, WHITE, 0, 0, 0, 0),
   ]
 }
@@ -130,9 +164,10 @@ const fadeTag = (ms) => `\\fad(${ms},${ms})`
  * @returns {string[]}
  */
 export function buildTopicEvents(section, p) {
-  const lines = breakTopicTitle(section.title)
+  const fit = fitTopicTitle(section.title, p.displayWidth, p.displayHeight)
+  const lines = fit.lines
   if (lines.length === 0) return []
-  const g = computeTopicGeometry(lines, p.displayWidth, p.displayHeight)
+  const g = computeTopicGeometry(lines, p.displayWidth, p.displayHeight, fit.titleSize)
   const start = formatAssTime(section.startSec)
   const end = formatAssTime(section.endSec)
   const durMs = Math.max(0, (section.endSec - section.startSec) * 1000)
@@ -144,7 +179,7 @@ export function buildTopicEvents(section, p) {
     `Dialogue: ${layer},${start},${end},${TOPIC_STYLE_BOX},,0,0,0,,{\\an7\\pos(${r.x},${r.y})\\p1\\bord0\\shad0\\1c${colour}\\1a${alpha}${fade}}${rect(r)}{\\p0}`
   const accentBgr = p.accent.replace(/&H\d{2}/, '&H') // &H00BBGGRR& → &HBBGGRR&
   const title = lines.map((l) => escapeAssText(l)).join('\\N')
-  const titleColourTag = accentMode === 'title' ? `\\1c${accentBgr}` : ''
+  const titleColourTag = (accentMode === 'title' ? `\\1c${accentBgr}` : '') + (fit.shrunk ? `\\fs${fit.titleSize}` : '') // 縮小したときだけ、このイベントに限ってサイズを指定
 
   return [
     draw(TOPIC_LAYER_BOX, g.box, BOX_COLOUR, BOX_ALPHA),

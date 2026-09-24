@@ -2,8 +2,11 @@
 //
 // 使い方（editor/ で実行。.env の FFMPEG_BIN / FFPROBE_BIN / VIDEO_INPUT_ROOTS / VIDEO_OUTPUT_ROOT を使用）:
 //   node scripts/localCaptionTopicDesignComparison.mjs --job <jobId> --start <sec> [--duration 60]
-//        --captions <natural_timing_comparison_*.json> --topic-title <テーマ名>
-//        [--stills-dir <dir> --stills <t1,t2,...>]  [--skip-render]
+//        --captions <natural_timing_comparison_*.json> (--topic-title <テーマ名> | --topic-from <large_caption_topic_comparison_*.json>)
+//        [--kind large_caption_topic|mobile_large_text] [--stills-dir <dir> --stills <t1,t2,...> [--mobile-widths 390,430]] [--skip-render]
+//
+// --topic-from: 前回の比較データからテーマ名・表示時刻をそのまま引き継ぐ（サイズだけ変える確認用）。時刻・名称が
+//   スナップ後も前回と一致することを検証する。
 //
 // 承認済みの自然タイミング(natural_timing_comparison_*.json の naturalCaptions)をそのまま使う。
 // 発話アラインメント・ページ遷移・強調は再計算しない（タイミング仕様は変更しない）。
@@ -34,14 +37,14 @@ import { buildComparisonOutputPath } from '../server/lib/outputNaming.mjs'
 import { readWavPcm16Mono, detectSilences, computeFrameDb } from '../server/lib/silenceDetector.mjs'
 import { measureSyncAgainstAudio } from '../server/lib/comparisonMetrics.mjs'
 import { resolveTopicSections, validateTopicTitle } from '../server/lib/topicSections.mjs'
-import { estimateTextWidthPx } from '../server/lib/topicAss.mjs'
+import { estimateTextWidthPx, fitTopicTitle, getTopicLayout } from '../server/lib/topicAss.mjs'
 
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const EDITOR_ROOT = resolve(__dirname, '..')
 
 function parseArgs(argv) {
-  const out = { duration: 60, skipRender: false }
+  const out = { duration: 60, skipRender: false, kind: 'large_caption_topic', mobileWidths: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--job') out.job = argv[++i]
@@ -49,6 +52,9 @@ function parseArgs(argv) {
     else if (a === '--duration') out.duration = Number(argv[++i])
     else if (a === '--captions') out.captions = argv[++i]
     else if (a === '--topic-title') out.topicTitle = argv[++i]
+    else if (a === '--topic-from') out.topicFrom = argv[++i]
+    else if (a === '--kind') out.kind = argv[++i]
+    else if (a === '--mobile-widths') out.mobileWidths = argv[++i].split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0)
     else if (a === '--stills-dir') out.stillsDir = argv[++i]
     else if (a === '--stills') out.stills = argv[++i].split(',').map(Number).filter(Number.isFinite)
     else if (a === '--skip-render') out.skipRender = true
@@ -66,7 +72,8 @@ async function main() {
   if (!args.job) throw new Error('--job <jobId> を指定してください')
   if (!Number.isFinite(args.start)) throw new Error('--start <sec> を指定してください（前回と同じ区間を使う）')
   if (!args.captions) throw new Error('--captions <natural_timing_comparison_*.json> を指定してください（承認済みのタイミング）')
-  if (!args.topicTitle) throw new Error('--topic-title <テーマ名> を指定してください')
+  if (!args.topicTitle && !args.topicFrom) throw new Error('--topic-title <テーマ名> または --topic-from <前回の比較データ> を指定してください')
+  if (!['large_caption_topic', 'mobile_large_text'].includes(args.kind)) throw new Error('--kind が不正です')
   if (!process.env.FFMPEG_BIN || !process.env.FFPROBE_BIN) {
     throw new Error('FFMPEG_BIN / FFPROBE_BIN が未設定です（システムのffmpegには頼りません）')
   }
@@ -97,14 +104,27 @@ async function main() {
   const captionsHashBefore = sha256(JSON.stringify(captions.map((c) => [c.startSec, c.endSec, c.text, c.lines, c.emphasisText])))
 
   // ── 比較専用 TopicSection（60秒ぶんを代表する1件。caption境界へスナップ） ──
-  const titleCheck = validateTopicTitle(args.topicTitle)
-  if (!titleCheck.ok) throw new Error(`テーマ名が不正です: ${titleCheck.errors.join(' / ')}`)
-  const resolved = resolveTopicSections({
-    manual: [{ id: 'topic-001', title: args.topicTitle.trim(), startSec: captions[0].startSec, endSec: captions[captions.length - 1].endSec, source: 'manual' }],
-    captions,
-  })
+  // --topic-from のときは前回のテーマ名・時刻を引き継ぎ、スナップ後も前回と一致することを確認する。
+  let prevTopics = null
+  let topicInput
+  if (args.topicFrom) {
+    const prevFile = resolve(EDITOR_ROOT, 'data/local_caption_comparisons', args.topicFrom.replace(/[^a-zA-Z0-9._-]/g, ''))
+    prevTopics = JSON.parse(readFileSync(prevFile, 'utf-8')).topicSections
+    topicInput = prevTopics.map((t) => ({ ...t }))
+  } else {
+    topicInput = [{ id: 'topic-001', title: args.topicTitle.trim(), startSec: captions[0].startSec, endSec: captions[captions.length - 1].endSec, source: 'manual' }]
+  }
+  for (const t of topicInput) {
+    const tv = validateTopicTitle(t.title)
+    if (!tv.ok) throw new Error(`テーマ名が不正です: ${tv.errors.join(' / ')}`)
+  }
+  const resolved = resolveTopicSections({ manual: topicInput, captions })
   if (!resolved.ok) throw new Error(`TopicSectionが不正です: ${resolved.errors.join(' / ')}`)
   const topicSections = resolved.sections
+  const topicKey = (arr) => JSON.stringify(arr.map((t) => [t.id, t.title, t.startSec, t.endSec, t.source]))
+  const topicIdenticalToPrevious = prevTopics ? topicKey(prevTopics) === topicKey(topicSections) : null
+  if (prevTopics && !topicIdenticalToPrevious) throw new Error('TopicSectionが前回と一致しません（テーマ名・時刻は変更しない）')
+  const fits = topicSections.map((t) => fitTopicTitle(t.title, job.width, job.height))
 
   // ── 機械的な検証（本文・改行・行数・強調・拡大後のセーフエリア） ──
   const problems = []
@@ -146,7 +166,7 @@ async function main() {
     if (!args.skipRender && problems.length === 0) {
       const assPath = join(tmpDir, 'large_caption_topic.ass')
       writeFileSync(assPath, buildAssContent({ width: W, height: H, captions }, { topicSections, topicAccentMode: 'label' }), 'utf-8')
-      outputPath = buildComparisonOutputPath('large_caption_topic', outputRoot, sourceRealPath)
+      outputPath = buildComparisonOutputPath(args.kind, outputRoot, sourceRealPath)
       try {
         await renderPreviewClip({ sourceRealPath, assPath, outputPath, startSec: windowStart, clipDurationSec: windowDuration })
       } catch (err) {
@@ -154,7 +174,7 @@ async function main() {
         throw err
       }
       const probe = await runFfprobe(outputPath)
-      outputs = { large_caption_topic: { filename: outputPath.split('/').pop(), durationSec: round(probe.durationSec, 3), sizeBytes: statSync(outputPath).size } }
+      outputs = { [args.kind]: { filename: outputPath.split('/').pop(), durationSec: round(probe.durationSec, 3), sizeBytes: statSync(outputPath).size } }
 
       // 代表フレームを「完成した比較動画」から抽出する（目視確認用。stills-dir は git 管理外を指定する）
       if (args.stillsDir && args.stills?.length) {
@@ -163,6 +183,12 @@ async function main() {
           const png = join(args.stillsDir, `frame_${String(t).replace('.', '_')}s.png`)
           await execFileAsync(process.env.FFMPEG_BIN, ['-y', '-loglevel', 'error', '-ss', String(t), '-i', outputPath, '-frames:v', '1', png])
           stillsWritten.push(png.split('/').pop())
+          // スマートフォン相当の縮小画像（16:9維持）。高さは幅から自動（偶数）。
+          for (const w of args.mobileWidths) {
+            const small = png.replace(/\.png$/, `_m${w}.png`)
+            await execFileAsync(process.env.FFMPEG_BIN, ['-y', '-loglevel', 'error', '-i', png, '-vf', `scale=${w}:-2:flags=lanczos`, small])
+            stillsWritten.push(small.split('/').pop())
+          }
         }
       }
     }
@@ -190,6 +216,12 @@ async function main() {
         maxLineChars: Math.max(...captions.flatMap((c) => c.lines.map((l) => Array.from(l).length))),
         maxPageChars: Math.max(...captions.map((c) => Array.from(c.text).length)),
       },
+      topicLayout: {
+        titlePx: getTopicLayout(W, H).titleBase,
+        labelPx: getTopicLayout(W, H).labelSize,
+        fit: fits.map((f) => ({ lines: f.lines.length, titlePx: f.titleSize, shrunk: f.shrunk, fits: f.fits })),
+        identicalToPrevious: topicIdenticalToPrevious,
+      },
       topicSections: topicSections.map((s) => ({ id: s.id, startSec: s.startSec, endSec: s.endSec, source: s.source, titleChars: Array.from(s.title).length })),
       invariantProblems: problems,
     }
@@ -198,7 +230,7 @@ async function main() {
     const saveDir = resolve(EDITOR_ROOT, 'data/local_caption_comparisons')
     mkdirSync(saveDir, { recursive: true })
     const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
-    const saveName = `large_caption_topic_comparison_${stamp}.json`
+    const saveName = `${args.kind}_comparison_${stamp}.json`
     writeFileSync(
       resolve(saveDir, saveName),
       JSON.stringify({ createdAt: new Date().toISOString(), jobId: job.id, basedOn: args.captions, metrics: summary.metrics, topicSections, outputs }, null, 2),

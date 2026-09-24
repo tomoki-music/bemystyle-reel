@@ -96,6 +96,17 @@ describe('buildComparisonOutputPath (旧方式/新方式の比較動画)', () =>
     expect(out).not.toBe(buildComparisonOutputPath('natural_timing', dir, sourceReal, now))
   })
 
+  it('mobile_large_text は comparison_mobile_large_text_<timestamp>.mp4 で、既存の比較動画と別名（衝突時はサフィックス）', () => {
+    const sourceReal = resolve(dir, 'なぜ社名.mp4')
+    writeFileSync(sourceReal, 'x')
+    const first = buildComparisonOutputPath('mobile_large_text', dir, sourceReal, now)
+    expect(first).toMatch(/comparison_mobile_large_text_20260923_220000\.mp4$/)
+    writeFileSync(first, 'existing')
+    const second = buildComparisonOutputPath('mobile_large_text', dir, sourceReal, now)
+    expect(second).not.toBe(first) // 既存を上書きしない
+    expect(second).not.toBe(buildComparisonOutputPath('large_caption_topic', dir, sourceReal, now))
+  })
+
   it('natural_timing は comparison_natural_timing_<timestamp>.mp4 で、旧2方式と別名', () => {
     const sourceReal = resolve(dir, 'なぜ社名.mp4')
     writeFileSync(sourceReal, 'x')
