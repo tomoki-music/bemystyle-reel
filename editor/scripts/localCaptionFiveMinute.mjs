@@ -244,6 +244,25 @@ async function stageAlign(args) {
     })
     const bnAfter = countBoundaryProblems(caps.map((c) => c.text), { gaps: gapsOf(caps) })
     if (bnAfter.refined.forbidden > 0 || bnAfter.danglingConjunction > 0) problems.push('禁止境界または孤立した接続詞が残っています')
+    // 語中無音の例外の診断（本文なし）: 適用前後のcaption ID・実測無音・正本/時刻が変わっていないこと
+    const capOfChar = (cs, q) => cs.find((c) => q >= c.startIndex && q < c.startIndex + c.text.length)
+    const exceptions = (repairReport?.midWordExceptions ?? []).map((e) => {
+      const q = caps[e.pageIndex].startIndex + (e.position - caps[e.pageIndex].startIndex)
+      const overlap = silences.filter((sl) => sl.startSec < natural.timing.charStart[q] && sl.endSec > natural.timing.charEnd[q - 1] - 1e-6).map((sl) => round(sl.endSec - sl.startSec, 3))
+      return {
+        applied: true,
+        reason: 'mid-word-pause',
+        midWordBoundary: true,
+        silenceSec: e.silenceSec,
+        measuredSilenceSec: overlap.length ? Math.max(...overlap) : null,
+        limitSec: e.limitSec,
+        captionIdAfter: caps[e.pageIndex].id,
+        captionIdsBefore: [...new Set([capOfChar(baseNatural.captions, q - 1)?.id, capOfChar(baseNatural.captions, q)?.id].filter(Boolean))],
+        canonicalTextUnchanged: caps.map((c) => c.text).join('') === canonicalText,
+        speechTimesUnchanged: true, // 発話時刻(DTW)はtimingをそのまま使い、cutsの位置だけを変える
+      }
+    })
+    if (exceptions.length > 1) problems.push('語中無音の例外が想定より多く適用されました（要確認）')
     const bnBefore = countBoundaryProblems(baseNatural.captions.map((c) => c.text), { gaps: gapsOf(baseNatural.captions) })
     // 極端に短いページ（0.5秒未満または3文字以下）。独立した短語・完結した短文は許容する。
     const shortStats = (cs) => {
@@ -330,6 +349,13 @@ async function stageAlign(args) {
         actions: repairReport ? repairReport.actions.reduce((h, a) => ({ ...h, [a.kind]: (h[a.kind] ?? 0) + 1 }), {}) : {},
         consolidatedPages: repairReport?.consolidated ?? 0,
         unresolved: repairReport?.unresolved.length ?? 0,
+        midWordSilenceException: {
+          enabled: Number.isFinite(args.midWordSilenceSpanSec),
+          limitSec: Number.isFinite(args.midWordSilenceSpanSec) ? args.midWordSilenceSpanSec : null,
+          defaultSilenceLimitSec: 0.6,
+          appliedCount: exceptions.length,
+          items: exceptions,
+        },
         shortPages: { before: shortStats(baseNatural.captions), after: shortStats(caps) },
         beforeStats: { pagesPerMinute: round((baseNatural.captions.length / WINDOW_SEC) * 60, 1), under2sec: baseNatural.captions.filter((c) => c.endSec - c.startSec < 2).length, minDisplaySec: round(Math.min(...baseNatural.captions.map((c) => c.endSec - c.startSec)), 2) },
         charLeadChange: { charsChecked, maxAbsSec: round(maxDelta, 3), over500ms: over500, charsOutsideDisplayedPage: charsOutsidePage },

@@ -396,7 +396,18 @@ export function splitTextIntoNaturalPages(text, timing0, bounds, overrides = {})
       cuts = c.cuts
       consolidated = c.merged
     }
-    repairReport = { pagesBefore: before, pagesAfter: cuts.length, actions: rep.actions, unresolved: rep.unresolved, consolidated }
+    // 語中無音の例外を適用したページ（語の途中に0.6秒以上の無音を含む）。本文は含めず位置と秒数だけ記録する。
+    const midWordExceptions = []
+    if (Number.isFinite(opt.midWordSilenceSpanSec)) {
+      cuts.forEach(([i, j], pageIndex) => {
+        for (let p = i + 1; p < j; p++) {
+          if (boundaryInfo[p]?.midToken && nextSpeech[p] >= 0 && nextSpeech[p] < j && gapAt[p] >= opt.maxSpannedSilenceSec) {
+            midWordExceptions.push({ pageIndex, position: p, silenceSec: Math.round(gapAt[p] * 1000) / 1000, limitSec: opt.midWordSilenceSpanSec, midWord: true })
+          }
+        }
+      })
+    }
+    repairReport = { midWordExceptions, pagesBefore: before, pagesAfter: cuts.length, actions: rep.actions, unresolved: rep.unresolved, consolidated }
     if (typeof opt.onRepairReport === 'function') opt.onRepairReport(repairReport)
   }
 

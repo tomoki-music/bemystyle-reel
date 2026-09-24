@@ -226,6 +226,36 @@ describe('語の途中で話者が0.6秒以上の間を置いた場合（無音�
   })
 })
 
+describe('語中無音の例外は通常の無音境界には適用しない', () => {
+  it('文節間・文章間の0.6〜0.9秒の無音は、例外を有効にしても従来どおり分割する。適用は語中のみで、メタ情報に本文を含めない', () => {
+    const text = 'これから始めます今日は大切な話をしますそのあとで準備をします'
+    const gaps = { [text.indexOf('今日')]: 0.8, [text.indexOf('そのあと')]: 0.75 }
+    const t2 = uniformTiming(text, { gaps })
+    let report = null
+    const pages = splitTextIntoNaturalPages(text, t2, bounds(t2.total), { repair: true, midWordSilenceSpanSec: 0.9, onRepairReport: (r) => { report = r } })
+    expect(pages.some((p) => p.startIndex === text.indexOf('今日'))).toBe(true)
+    expect(pages.some((p) => p.startIndex === text.indexOf('そのあと'))).toBe(true)
+    expect(report.midWordExceptions).toEqual([])
+  })
+  it('語中の例外を適用したときは、位置・無音秒数・上限だけを記録する（本文なし）', () => {
+    const text = '今日の準備が大変で全部なくなっちゃったんですけど、また明日から頑張ります。'
+    const t2 = uniformTiming(text, { gaps: { [text.indexOf('ど、')]: 0.7 } })
+    let report = null
+    splitTextIntoNaturalPages(text, t2, bounds(t2.total), { repair: true, midWordSilenceSpanSec: 0.9, onRepairReport: (r) => { report = r } })
+    expect(report.midWordExceptions).toHaveLength(1)
+    expect(report.midWordExceptions[0]).toMatchObject({ silenceSec: 0.7, limitSec: 0.9, midWord: true })
+    expect(JSON.stringify(report.midWordExceptions)).not.toContain('今日')
+  })
+  it('1.0秒の語中無音は上限0.9秒を超えるため適用しない（unresolvedとして残る）', () => {
+    const text = '今日の準備が大変で全部なくなっちゃったんですけど、また明日から頑張ります。'
+    const t2 = uniformTiming(text, { gaps: { [text.indexOf('ど、')]: 1.0 } })
+    let report = null
+    splitTextIntoNaturalPages(text, t2, bounds(t2.total), { repair: true, midWordSilenceSpanSec: 0.9, onRepairReport: (r) => { report = r } })
+    expect(report.midWordExceptions).toEqual([])
+    expect(report.unresolved.length).toBe(1)
+  })
+})
+
 describe('極端に短いページの再配分（表示時間を機械的に延ばさない）', () => {
   // ctx は最小の合成: 各文字0.14秒。極端に短い = 3文字以下（独立短語を除く）
   const text = 'これは大切な話ですけれどもね今日はここまでにします'
