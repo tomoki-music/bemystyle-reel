@@ -87,6 +87,15 @@ describe('buildComparisonOutputPath (旧方式/新方式の比較動画)', () =>
     expect(legacy + semantic).not.toContain('なぜ社名')
   })
 
+  it('large_caption_topic は comparison_large_caption_topic_<timestamp>.mp4 で、他の比較動画と別名', () => {
+    const sourceReal = resolve(dir, 'なぜ社名.mp4')
+    writeFileSync(sourceReal, 'x')
+    const out = buildComparisonOutputPath('large_caption_topic', dir, sourceReal, now)
+    expect(out).toMatch(/comparison_large_caption_topic_20260923_220000\.mp4$/)
+    expect(out).not.toContain('なぜ社名')
+    expect(out).not.toBe(buildComparisonOutputPath('natural_timing', dir, sourceReal, now))
+  })
+
   it('natural_timing は comparison_natural_timing_<timestamp>.mp4 で、旧2方式と別名', () => {
     const sourceReal = resolve(dir, 'なぜ社名.mp4')
     writeFileSync(sourceReal, 'x')

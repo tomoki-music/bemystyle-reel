@@ -8,10 +8,26 @@
 // "Noto Sans CJK JP"）。
 
 import { escapeAssText } from './assText.mjs'
+import { buildTopicStyleLines, buildTopicEvents } from './topicAss.mjs'
 
 export const CAPTION_TYPES = ['normal', 'main', 'sub', 'emphasis', 'heading', 'annotation']
 
 const DEFAULT_FONT_FAMILY = 'Noto Sans CJK JP'
+
+/**
+ * 字幕フォントサイズの倍率（全captionTypeの基準サイズへ一律に掛ける）。
+ * 一律に掛けるので normal / main / sub の大きさの比は変わらない（mainだけ極端に大きくならない）。
+ * 部分強調は色のオーバーライドのみでサイズを変えない。
+ *
+ * 1.20 は 1920x1080 の静止フレーム比較（1.00 / 1.15 / 1.20）で採用した値。1.00 は小さく、1.15 と 1.20 はともに
+ * セーフエリア内。読みやすさで 1.20 を選んだ。
+ */
+export const CAPTION_FONT_SCALE = 1.2
+
+/** 倍率を検証する。不正値は既定倍率へ戻す（極端な値で画面外へ出さない）。 */
+export function resolveCaptionFontScale(scale) {
+  return Number.isFinite(scale) && scale >= 0.5 && scale <= 1.5 ? scale : CAPTION_FONT_SCALE
+}
 
 export function getFontFamily() {
   const v = process.env.CAPTION_VIDEO_FONT_FAMILY
@@ -43,8 +59,9 @@ const ALIGNMENT = {
  * 動画の表示解像度 (rotation 補正済み) に対する比率でスタイルを定義する。
  * これにより縦動画(9:16)・横動画のどちらでも破綻しないサイズ/位置になる。
  */
-function buildStyleDefs(displayWidth, displayHeight) {
-  const shortSide = Math.min(displayWidth, displayHeight)
+export function getCaptionStyleDefs(displayWidth, displayHeight, fontScale = CAPTION_FONT_SCALE) {
+  // フォントサイズだけ倍率を掛ける（余白・位置は元の解像度基準のまま）。
+  const shortSide = Math.min(displayWidth, displayHeight) * resolveCaptionFontScale(fontScale)
   const safeMarginH = Math.max(20, Math.round(displayWidth * 0.06))
   const safeMarginV = Math.max(24, Math.round(displayHeight * 0.06))
 
@@ -207,13 +224,16 @@ export function buildDialogueText(caption, highlightColour) {
  * ジョブと字幕配列から .ass ファイルの全文を生成する。
  *
  * @param {{ width: number, height: number, captions: Array<{ startSec: number, endSec: number, text: string, captionType?: string, emphasisText?: string | null }> }} job
+ * @param {{ captionFontScale?: number, topicSections?: Array<{ id: string, title: string, startSec: number, endSec: number }>, topicAccentMode?: 'label' | 'title' }} [options]
+ *   topicSections: 左上「現在のトークテーマ」（別スタイル・別レイヤー。ジョブ本体には保存しない）
  * @returns {string}
  */
-export function buildAssContent(job) {
+export function buildAssContent(job, options = {}) {
   const displayWidth = Math.max(1, Math.round(Number(job?.width) || 1080))
   const displayHeight = Math.max(1, Math.round(Number(job?.height) || 1920))
   const fontFamily = getFontFamily()
-  const styleDefs = buildStyleDefs(displayWidth, displayHeight)
+  const styleDefs = getCaptionStyleDefs(displayWidth, displayHeight, options.captionFontScale)
+  const topicSections = Array.isArray(options.topicSections) ? options.topicSections : []
 
   const scriptInfo = [
     '[Script Info]',
@@ -233,6 +253,9 @@ export function buildAssContent(job) {
   for (const type of CAPTION_TYPES) {
     stylesHeader.push(styleLine(styleDefs[type], fontFamily))
   }
+  if (topicSections.length > 0) {
+    stylesHeader.push(...buildTopicStyleLines({ fontFamily, accent: COLOR.highlight, displayWidth, displayHeight, accentMode: options.topicAccentMode }))
+  }
   const styles = stylesHeader.join('\n') + '\n'
 
   const events = [
@@ -249,6 +272,12 @@ export function buildAssContent(job) {
     const end = formatAssTime(caption.endSec)
     const text = buildDialogueText(caption, def.highlightColour || COLOR.highlight)
     events.push(`Dialogue: 0,${start},${end},${def.name},,0,0,0,,${text}`)
+  }
+
+  // トークテーマは通常字幕と別レイヤー(10〜12)。時刻順に出力し、同時に表示されても字幕と競合しない。
+  const orderedTopics = [...topicSections].sort((a, b) => a.startSec - b.startSec)
+  for (const section of orderedTopics) {
+    events.push(...buildTopicEvents(section, { accent: COLOR.highlight, displayWidth, displayHeight, accentMode: options.topicAccentMode }))
   }
 
   return `${scriptInfo}\n${styles}\n${events.join('\n')}\n`
