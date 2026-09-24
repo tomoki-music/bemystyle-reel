@@ -58,6 +58,29 @@ export function saveAttemptDiagnostics(p) {
   return { saved: true, mode: '0600' }
 }
 
+export const revalidationDiagnosticsPath = (dir, key, attempt, version) => join(diagnosticsDir(dir), `${key}.attempt-${attempt}.revalidation-v${version}.json`)
+
+/**
+ * 再検証の結果（検証版つき）を保存する。元の診断ファイルは変更しない。既に同じ版の記録がある場合は上書きせず、
+ * 連番つきの別ファイルへ保存して履歴を残す。
+ */
+export function saveRevalidationRecord(p) {
+  ensureDiagnosticsDir(p.dir)
+  const body = JSON.stringify(p.record, null, 2)
+  if (/Bearer\s+sk-[A-Za-z0-9_-]{8,}|\bsk-[A-Za-z0-9_-]{20,}/.test(body)) throw new Error('診断データにAPIキーらしい文字列が含まれているため保存しません')
+  let path = revalidationDiagnosticsPath(p.dir, p.key, p.attempt, p.validationVersion)
+  for (let n = 2; existsSync(path); n++) path = path.replace(/(\.revalidation-v\d+)(-\d+)?\.json$/, `$1-${n}.json`)
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`
+  try {
+    writeFileSync(tmp, body, { encoding: 'utf-8', mode: 0o600, flag: 'wx' })
+    renameSync(tmp, path)
+  } catch (err) {
+    rmSync(tmp, { force: true })
+    throw err
+  }
+  return { saved: true, file: path.split('/').pop() }
+}
+
 /** 保存済みの診断を読む（無ければ null）。 */
 export function loadAttemptDiagnostics(dir, key, attempt) {
   const p = attemptDiagnosticsPath(dir, key, attempt)

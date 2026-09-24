@@ -651,3 +651,106 @@ describe('手動修正UIの保証（範囲外の根拠ID・正本にない強調
     expect(materializeAnalysis(merged, captions).captions[63].emphasisText).toBeNull()
   })
 })
+
+describe('validationVersion 2: テーマ範囲全体でのgrounding（evidenceは代表例として保持）', () => {
+  const resp = () => goodResponse()
+
+  it('タイトルの対象語が各evidenceに無くても、テーマ範囲全体の本文にあり、evidenceが範囲内・実在・1件以上なら採用する', () => {
+    const r = resp()
+    // 「メンバー」を含まない根拠captionだけを挙げる（範囲内のcaption本文の一部にはある）
+    const caps = captions.map((c) => ({ ...c }))
+    caps[2].text = '距離の話をします2'
+    caps[10].text = '準備の話です10'
+    r.topics[0].evidenceCaptionIds = [id(2), id(10)]
+    const v2 = validateAnalysisCandidates(r, caps)
+    expect(v2.topics).toHaveLength(2)
+    expect(v2.topics[0].evidenceCaptionIds).toEqual([id(2), id(10)]) // 代表例として保持
+    expect(v2.validationVersion).toBe(2)
+    // 旧基準(v1)では、evidenceの本文だけで確認するため拒否される
+    const v1 = validateAnalysisCandidates(r, caps, { validationVersion: 1 })
+    expect(v1.reasons.topics).toEqual({ 'title-not-grounded': 1 })
+  })
+  it('テーマ範囲全体にも対象語が無ければ拒否する（別概念への置き換え）', () => {
+    const r = resp()
+    r.topics[0].title = '活動との距離の取り方' // 「活動」は範囲0〜49の本文に無い
+    const v = validateAnalysisCandidates(r, captions)
+    expect(v.reasons.topics).toEqual({ 'title-not-grounded': 1 })
+    expect(v.topics.map((t) => t.startCaptionId)).toEqual([id(50)])
+  })
+  it('対象語が「範囲外」にしか無い場合は、evidenceが範囲内でも拒否する', () => {
+    const r = resp()
+    r.topics[0].title = 'ライブ準備の話' // ライブは50以降にしか無い
+    expect(validateAnalysisCandidates(r, captions).reasons.topics).toEqual({ 'title-not-grounded': 1 })
+  })
+  it('evidenceが範囲外・0件のテーマは、範囲全体にタイトル語があっても従来どおり扱う（範囲外IDは除外、0件なら拒否）', () => {
+    const r = resp()
+    r.topics[0].evidenceCaptionIds = [id(2), id(70)]
+    expect(validateAnalysisCandidates(r, captions).topics[0].evidenceCaptionIds).toEqual([id(2)])
+    r.topics[0].evidenceCaptionIds = [id(70)]
+    expect(validateAnalysisCandidates(r, captions).reasons.topics).toEqual({ 'no-valid-evidence': 1 })
+  })
+  it('テーマ同士が重複しない・過剰な細分化でない条件は維持される', () => {
+    const r = resp()
+    r.topics[1].startCaptionId = id(45)
+    r.topics[1].evidenceCaptionIds = [id(60)]
+    expect(validateAnalysisCandidates(r, captions).reasons.topics).toEqual({ overlap: 1 })
+    const r2 = resp()
+    r2.topics[0].endCaptionId = id(3)
+    r2.topics[0].evidenceCaptionIds = [id(1)]
+    expect(validateAnalysisCandidates(r2, captions).reasons.topics).toEqual({ 'span-too-short': 1 })
+  })
+})
+
+describe('revalidateSavedResponse（追加APIなし・履歴保持・元応答の不変性）', () => {
+  const sha = (p) => createHash('sha256').update(readFileSync(p)).digest('hex')
+  const strictFail = () => {
+    const r = goodResponse()
+    r.emphasis = r.emphasis.slice(0, 1)
+    return r
+  }
+
+  it('試行2相当の不合格応答を、検証版2で再検証する。元の診断は変更されず、再検証結果は別ファイルに履歴として残る', async () => {
+    const caps = captions.map((c) => ({ ...c }))
+    caps[2].text = '距離の話をします2'
+    const resp = strictFail()
+    resp.topics[0].evidenceCaptionIds = [id(2)]
+    // 旧基準の不合格を作る: v1 で保存された不合格応答（診断）を模擬する
+    const original = { attemptId: 'x', attempt: 2, createdAt: '2026-01-01T00:00:00.000Z', model: 'gpt-4o-mini', inputSha256: hashAnalysisInput(caps), captionsFingerprint: fingerprintCaptions(caps), httpRequestCount: 1, status: 'validation-failed', httpStatus: 200, rawResponseText: JSON.stringify(resp), validation: { validationVersion: 1, adopted: false } }
+    saveAttemptDiagnostics({ dir, key: KEY, attempt: 2, record: original })
+    const p = attemptDiagnosticsPath(dir, KEY, 2)
+    const before = sha(p)
+    let fetched = 0
+    const g = globalThis.fetch
+    globalThis.fetch = async () => { fetched += 1 }
+    try {
+      const r = revalidateSavedResponse({ dir, key: KEY, captions: caps, attempt: 2, manualEmphasisExpected: true })
+      expect(r).toMatchObject({ requestCount: 0, adopted: true, saved: true })
+      expect(r.validation.counts).toMatchObject({ topicsAccepted: 2, emphasisAccepted: 1 })
+    } finally {
+      globalThis.fetch = g
+    }
+    expect(fetched).toBe(0)
+    expect(sha(p)).toBe(before) // 元レスポンス・不合格の記録は改変されない
+    const v2file = join(diagnosticsDir(dir), `${KEY}.attempt-2.revalidation-v2.json`)
+    const rec = JSON.parse(readFileSync(v2file, 'utf-8'))
+    expect(rec).toMatchObject({ validationVersion: 2, originalValidationVersion: 1, originalStatus: 'validation-failed', httpRequestCount: 0, analysisSaved: true })
+    expect(JSON.stringify(rec)).not.toMatch(/rawResponseText|距離|メンバー/)
+    const saved = JSON.parse(readFileSync(analysisPath(dir, KEY), 'utf-8'))
+    expect(saved).toMatchObject({ validationVersion: 2, revalidatedFromDiagnostics: true, attempt: 2 })
+    expect(saved.emphasis).toHaveLength(1) // 有効なAI強調だけを維持（不足分は手動で追加する）
+    expect(saved.emphasis[0].source).toBe('ai')
+    // もう一度再検証しても履歴は上書きされず、別ファイルに残る
+    revalidateSavedResponse({ dir, key: KEY, captions: caps, attempt: 2, manualEmphasisExpected: true })
+    expect(readdirSync(diagnosticsDir(dir)).filter((n) => n.includes('revalidation')).sort()).toEqual([`${KEY}.attempt-2.revalidation-v2-2.json`, `${KEY}.attempt-2.revalidation-v2.json`].sort())
+    expect(sha(p)).toBe(before)
+    expect(readdirSync(diagnosticsDir(dir)).filter((n) => n.includes('.tmp-'))).toEqual([])
+  })
+
+  it('manualEmphasisExpected が無ければ、有効強調3件未満のため採用・保存しない', () => {
+    const resp = strictFail()
+    saveAttemptDiagnostics({ dir, key: KEY, attempt: 2, record: { attempt: 2, inputSha256: hashAnalysisInput(captions), rawResponseText: JSON.stringify(resp), status: 'validation-failed' } })
+    const r = revalidateSavedResponse({ dir, key: KEY, captions, attempt: 2 })
+    expect(r).toMatchObject({ adopted: false, saved: false, requestCount: 0 })
+    expect(existsSync(analysisPath(dir, KEY))).toBe(false)
+  })
+})

@@ -4,7 +4,7 @@
 //   node scripts/localCaptionFiveMinute.mjs select  --job <jobId> [--reference-start 671.48 --reference-sec 60]
 //   node scripts/localCaptionFiveMinute.mjs align   --job <jobId> [--start <sec>]
 //   node scripts/localCaptionFiveMinute.mjs analyze --job <jobId> --allow-api --attempt <N>   # gpt-4o-mini を1回だけ（累計上限2回）
-//   node scripts/localCaptionFiveMinute.mjs revalidate --job <jobId> --attempt <N>             # 保存済み応答の再検証（HTTPなし）
+//   node scripts/localCaptionFiveMinute.mjs revalidate --job <jobId> --attempt <N> [--manual-emphasis]   # 保存済み応答の再検証（HTTPなし・.envを読まない）
 //   node scripts/localCaptionFiveMinute.mjs render  --job <jobId> [--stills-dir <dir>] [--mobile-widths 390,430]
 //   node scripts/localCaptionFiveMinute.mjs check   --job <jobId> [--stills-dir <dir>]      # AI結果なし・動画は生成しない（字幕サイズ/位置の実描画確認）
 //
@@ -44,6 +44,7 @@ import { measureCaptionRender } from '../server/lib/assRenderMeasure.mjs'
 import { getCaptionFitLimits } from '../server/lib/captionFit.mjs'
 import { runAnalysisOnce, revalidateSavedResponse, loadAnalysis, materializeAnalysis, fingerprintCaptions, AnalysisError } from '../server/lib/topicAnalysis.mjs'
 import { fitTopicTitle } from '../server/lib/topicAss.mjs'
+import { validateTopicSections } from '../server/lib/topicSections.mjs'
 
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -66,6 +67,7 @@ function parseArgs(argv) {
     else if (a === '--reference-sec') out.referenceSec = Number(argv[++i])
     else if (a === '--allow-api') out.allowApi = true
     else if (a === '--from-cache') out.fromCache = true
+    else if (a === '--manual-emphasis') out.manualEmphasis = true
     else if (a === '--dry-run') out.dryRun = true
     else if (a === '--midword-silence-span-sec') out.midWordSilenceSpanSec = Number(argv[++i])
     else if (a === '--attempt') out.attempt = Number(argv[++i])
@@ -457,8 +459,8 @@ async function stageRevalidate(args) {
   if (!Number.isInteger(args.attempt)) throw new Error('--attempt <試行番号> を指定してください')
   const { key, pages } = loadPagesFor(args)
   try {
-    const r = revalidateSavedResponse({ dir: DATA_DIR, key, captions: pages.captions, attempt: args.attempt })
-    console.log(JSON.stringify({ stage: 'revalidate', apiRequestsThisRun: 0, attempt: args.attempt, adopted: r.adopted, saved: r.saved, validation: reportOf(r.validation) }, null, 2))
+    const r = revalidateSavedResponse({ dir: DATA_DIR, key, captions: pages.captions, attempt: args.attempt, manualEmphasisExpected: Boolean(args.manualEmphasis) })
+    console.log(JSON.stringify({ stage: 'revalidate', apiRequestsThisRun: 0, attempt: args.attempt, adopted: r.adopted, saved: r.saved, revalidationRecord: r.revalidationRecord, validation: reportOf(r.validation) }, null, 2))
   } catch (err) {
     if (err instanceof AnalysisError) {
       console.error(`[localCaptionFiveMinute] 再検証を停止しました (${err.kind}): ${err.message}`)
@@ -500,6 +502,12 @@ async function stageRender(args) {
   const problems = []
   if (captions.some((c) => c.text !== original.find((o) => o.id === c.id).text)) problems.push('分析の反映でcaption本文が変わりました')
   if (captions.some((c) => c.emphasisText && !c.text.includes(c.emphasisText))) problems.push('強調語が本文に存在しません')
+  if (!checkOnly) {
+    // 動画を生成する条件: 有効テーマ2件以上（重複なし）・有効な部分強調合計3件以上（本文の完全な部分文字列）
+    if (topicSections.length < 2) problems.push('有効なテーマが2件未満です')
+    if (!validateTopicSections(topicSections).ok) problems.push('テーマが重複・不正です')
+    if (mat.emphasisCount < 3) problems.push('有効な部分強調が合計3件未満です')
+  }
   const fitPlan = planCaptionFits(captions, W, H)
   const limits = getCaptionFitLimits(W, H)
   if (fitPlan.some((f) => !f.fits)) problems.push('動的縮小(下限)でも使用可能幅に収まらない字幕があります')
@@ -685,8 +693,9 @@ async function stageRender(args) {
 }
 
 async function main() {
-  dotenv.config({ path: resolve(EDITOR_ROOT, '.env'), quiet: true })
   const args = parseArgs(process.argv.slice(2))
+  // revalidate は保存済みの応答をローカルで再検証するだけなので、APIキーを含む .env を読み込まない。
+  if (args.stage !== 'revalidate') dotenv.config({ path: resolve(EDITOR_ROOT, '.env'), quiet: true })
   if (!args.job) throw new Error('--job <jobId> を指定してください')
   if (args.stage === 'select') return stageSelect(args)
   if (args.stage === 'align') return stageAlign(args)

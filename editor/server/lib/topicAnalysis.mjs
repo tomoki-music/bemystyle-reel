@@ -26,10 +26,17 @@ import { join } from 'path'
 import { validateEmphasis } from './emphasisSelector.mjs'
 import { restoreEmphasisText } from './emphasisRestore.mjs'
 import { validateTopicTitle, checkTopicTitleGrounding, mergeTopicSections, validateTopicSections } from './topicSections.mjs'
-import { loadAttemptDiagnostics, saveAttemptDiagnostics } from './analysisDiagnostics.mjs'
+import { loadAttemptDiagnostics, saveAttemptDiagnostics, saveRevalidationRecord } from './analysisDiagnostics.mjs'
 
 export const ANALYSIS_MODEL = 'gpt-4o-mini'
 export const ANALYSIS_VERSION = 2
+/**
+ * 検証ロジックの版。
+ *  1: タイトルの対象語を「根拠(evidence)captionの本文」だけで確認する（試行2の実行時の基準）。
+ *  2: タイトルの対象語を「テーマ範囲(start〜end)全体の本文」で確認する。evidenceCaptionIds はテーマの代表例として保持し、
+ *     範囲内・実在・1件以上であることだけを求める（タイトルの全対象語が各evidenceに含まれることは求めない）。
+ */
+export const ANALYSIS_VALIDATION_VERSION = 2
 export const ANALYSIS_TIMEOUT_MS = 90000
 /** 累計の試行回数の上限。1回目=前回（検証不合格）、2回目=今回だけ許可された追加の1回。3回目以降は拒否する。 */
 export const ANALYSIS_ATTEMPT_LIMIT = 2
@@ -231,7 +238,7 @@ function emphasisProblemCode(problem) {
  *
  * @param {unknown} resp
  * @param {Array<{ id: string, text: string, startSec: number, endSec: number }>} captions
- * @param {{ limits?: typeof ANALYSIS_LIMITS }} [opts]
+ * @param {{ limits?: typeof ANALYSIS_LIMITS, validationVersion?: number }} [opts]
  */
 export function validateAnalysisCandidates(resp, captions, opts = {}) {
   const L = opts.limits ?? ANALYSIS_LIMITS
@@ -247,6 +254,7 @@ export function validateAnalysisCandidates(resp, captions, opts = {}) {
     droppedEvidence.forEach((r) => bump(reasons.evidenceIdsDropped, r.code))
     const adopted = formatOk && topics.length >= L.topics.min && topics.length <= L.topics.max && emphasis.length >= L.emphasis.min
     return {
+      validationVersion: opts.validationVersion ?? ANALYSIS_VALIDATION_VERSION,
       formatOk,
       adopted,
       topics,
@@ -299,7 +307,11 @@ export function validateAnalysisCandidates(resp, captions, opts = {}) {
       }
     }
     if (evidence.length === 0) return reject('no-valid-evidence')
-    const g = checkTopicTitleGrounding(String(t.title).trim(), evidence.map((eid) => captions[idx.get(eid)].text).join(''))
+    // validationVersion 2: 主要対象語は、テーマ範囲全体の本文に存在すること（範囲全体にも無ければ拒否）。1: 根拠captionの本文のみ。
+    const groundingText = (opts.validationVersion ?? ANALYSIS_VALIDATION_VERSION) >= 2
+      ? captions.slice(si, ei + 1).map((c) => c.text).join('')
+      : evidence.map((eid) => captions[idx.get(eid)].text).join('')
+    const g = checkTopicTitleGrounding(String(t.title).trim(), groundingText)
     if (!g.ok) return reject('title-not-grounded')
     if (captions[ei].endSec - captions[si].startSec < L.topics.minSpanSec) return reject('span-too-short')
     passed.push({ index: i, title: String(t.title).trim(), startCaptionId: t.startCaptionId, endCaptionId: t.endCaptionId, evidenceCaptionIds: evidence, confidence: t.confidence, si, ei })
@@ -399,7 +411,7 @@ export function buildAnalysisRecord(validated, captions, meta = {}) {
 
 /** 診断・報告用の検証要約（本文・テーマ名・強調語を含まない）。 */
 export function summarizeValidation(v) {
-  return { formatOk: v.formatOk, adopted: v.adopted, counts: v.counts, reasons: v.reasons, warnings: v.warnings }
+  return { validationVersion: v.validationVersion, formatOk: v.formatOk, adopted: v.adopted, counts: v.counts, reasons: v.reasons, warnings: v.warnings }
 }
 
 /**
@@ -489,8 +501,11 @@ export async function runAnalysisOnce(p) {
 }
 
 /**
- * 保存済みの診断（生応答）を、HTTPなしで現在の検証ロジックで再検証する。採用条件を満たし、まだ分析結果が無ければ保存する。
- * 入力の指紋が保存時と一致しない場合は拒否する。リクエストは送らない。
+ * 保存済みの診断（生応答）を、HTTPなしで現在の検証ロジックで再検証する。
+ * - 元の診断ファイル（不合格の記録・生応答）は変更しない。再検証の結果は「検証版つきの別ファイル」へ追記保存する（履歴として残る）。
+ * - 採用条件を満たし、まだ分析結果が無ければ分析結果を保存する。
+ *   manualEmphasisExpected:true のときは、強調の最低件数を求めない（不足分は手動で追加する前提。合計3件以上は描画時に確認する）。
+ * - 入力の指紋が保存時と一致しない場合は拒否する。リクエストは送らない。APIキーも読まない。
  */
 export function revalidateSavedResponse(p) {
   const record = loadAttemptDiagnostics(p.dir, p.key, p.attempt)
@@ -502,13 +517,30 @@ export function revalidateSavedResponse(p) {
   } catch {
     throw new AnalysisError('保存済みの応答をJSONとして解析できませんでした', 'parse')
   }
-  const v = validateAnalysisCandidates(parsed, p.captions)
+  const validationVersion = p.validationVersion ?? ANALYSIS_VALIDATION_VERSION
+  const limits = p.manualEmphasisExpected ? { ...ANALYSIS_LIMITS, emphasis: { ...ANALYSIS_LIMITS.emphasis, min: 0 } } : ANALYSIS_LIMITS
+  const v = validateAnalysisCandidates(parsed, p.captions, { validationVersion, limits })
   let saved = false
   if (v.adopted && !loadAnalysis(p.dir, p.key)) {
-    writeJsonAtomic(analysisPath(p.dir, p.key), { ...buildAnalysisRecord(v, p.captions, { now: p.now, attempt: p.attempt }), revalidatedFromDiagnostics: true })
+    writeJsonAtomic(analysisPath(p.dir, p.key), { ...buildAnalysisRecord(v, p.captions, { now: p.now, attempt: p.attempt }), validationVersion, revalidatedFromDiagnostics: true })
     saved = true
   }
-  return { requestCount: 0, adopted: v.adopted, saved, validation: summarizeValidation(v) }
+  const now = p.now ?? new Date()
+  const revalidationRecord = {
+    attemptId: record.attemptId,
+    attempt: p.attempt,
+    revalidatedAt: now.toISOString(),
+    validationVersion,
+    originalValidationVersion: record.validation?.validationVersion ?? 1,
+    originalStatus: record.status,
+    inputSha256: record.inputSha256,
+    httpRequestCount: 0,
+    manualEmphasisExpected: Boolean(p.manualEmphasisExpected),
+    validation: summarizeValidation(v),
+    analysisSaved: saved,
+  }
+  const file = saveRevalidationRecord({ dir: p.dir, key: p.key, attempt: p.attempt, validationVersion, record: revalidationRecord })
+  return { requestCount: 0, adopted: v.adopted, saved, validation: summarizeValidation(v), revalidationRecord: file }
 }
 
 // ────────────────────────────────────────────────────────────────

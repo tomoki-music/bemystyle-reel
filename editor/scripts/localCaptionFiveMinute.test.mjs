@@ -37,6 +37,14 @@ describe('localCaptionFiveMinute: 安全性(静的確認)', () => {
     expect(src).toContain('renameSync(tmp, path)')
   })
 
+  it('revalidate は .env（APIキー）を読み込まず、HTTPを送らない。render は有効テーマ2件・強調3件未満なら動画を作らない', () => {
+    expect(src).toContain("if (args.stage !== 'revalidate') dotenv.config(")
+    const reval = src.slice(src.indexOf('async function stageRevalidate'), src.indexOf('// render:'))
+    expect(/fetch|runAnalysisOnce|requestAnalysisOnce|OPENAI_API_KEY/.test(reval)).toBe(false)
+    expect(src).toContain("problems.push('有効なテーマが2件未満です')")
+    expect(src).toContain("problems.push('有効な部分強調が合計3件未満です')")
+  })
+
   it('既存ジョブJSONは読み取り専用（書き込み・削除・リネーム対象にしない）', () => {
     expect(/writeFileSync\(\s*(file|jobFile)\b|rmSync\(\s*(file|jobFile)\b|renameSync\(\s*(file|jobFile)\b|unlinkSync/.test(src)).toBe(false)
     for (const k of ['jobFileByteIdentical', 'captionsRawSegmentsClassificationUnchanged', 'sourceUnchanged', 'existingOutputFilesModifiedOrRemoved']) expect(src).toContain(k)

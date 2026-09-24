@@ -5,10 +5,10 @@ export default defineConfig({
   plugins: [react()],
   publicDir: '../public',
   server: {
-    port: 3001,
+    port: Number(process.env.VITE_DEV_PORT || 3001),
     proxy: {
       '/api': {
-        target: 'http://localhost:3002',
+        target: `http://localhost:${process.env.API_PORT || 3002}`,
         changeOrigin: true,
       },
     },
