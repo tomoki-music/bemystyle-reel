@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, existsSync, writeFileSync } from 'fs'
+import { mkdtempSync, existsSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { buildNaturalCaptions } from './naturalCaptionPipeline.mjs'
@@ -91,6 +91,14 @@ describe('buildNaturalCaptions', () => {
 describe('既存データを変更しない・一時ファイルを消す', () => {
   it('比較動画は既存ファイルを上書きせず、出力先直下の別名 comparison_natural_timing_*.mp4 になる', () => {
     const root = mkdtempSync(join(tmpdir(), 'lcv-nat-out-'))
+    try {
+      checkNaming(root)
+    } finally {
+      rmSync(root, { recursive: true, force: true }) // テスト用の出力先も残さない
+    }
+  })
+
+  function checkNaming(root) {
     const now = new Date('2026-09-24T10:00:00')
     const a = buildComparisonOutputPath('natural_timing', root, '/nonexistent/src.mp4', now)
     expect(a).toMatch(/comparison_natural_timing_\d{8}_\d{6}\.mp4$/)
@@ -98,7 +106,7 @@ describe('既存データを変更しない・一時ファイルを消す', () =
     const b = buildComparisonOutputPath('natural_timing', root, '/nonexistent/src.mp4', now)
     expect(b).not.toBe(a)
     expect(existsSync(a)).toBe(true)
-  })
+  }
 
   it('処理中に作った一時ファイルは、成功時も例外時もディレクトリごと削除される', async () => {
     let seen = null
