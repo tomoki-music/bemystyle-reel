@@ -5,7 +5,7 @@ import { join } from 'path'
 import { EventEmitter } from 'events'
 import {
   COMPOSITION_DEFAULTS, resolveCompositionConfig, validateCompositionConfig, selectDigestClips, planTimeline, shiftMainCaptions, digestCaptions,
-  mainThemeBlock, digestThemeBlocks, buildFinalAss, buildCompositionArgs, buildDigestStemArgs, qrLayout, lineTextLayout, buildLineEvents, mainToFinal, RENDER_GLYPH_SUBSTITUTIONS,
+  mainThemeBlock, digestThemeBlocks, buildFinalAss, buildCompositionArgs, planQrWindows, sectionShowsQr, QR_MISSING_MESSAGE, buildDigestStemArgs, qrLayout, lineTextLayout, buildLineEvents, mainToFinal, RENDER_GLYPH_SUBSTITUTIONS,
 } from './finalComposition.mjs'
 import { inspectAsset, resolveCompositionAssets, renderCompositionToFile, checkFreeSpace, FULL_RENDER_MIN_FREE_BYTES } from './compositionRender.mjs'
 import { normalizeTopicSectionsContinuous } from './topicSections.mjs'
@@ -31,13 +31,15 @@ const cfgFull = resolveCompositionConfig({ digest: { bgm: { path: '/x/bgm.mp3' }
 const digest = () => selectDigestClips({ captions, themes, config: cfgFull.digest })
 const W = 1920
 const H = 1080
+const QR_SIZE = { width: 554, height: 518 }
 
 describe('デフォルト設定と有効/無効', () => {
   it('完成動画の既定はすべてON。秒数・BGM・クレジット・白黒の既定値', () => {
     const c = resolveCompositionConfig({})
     expect(c.digest).toMatchObject({ enabled: true, grayscale: true, minSec: 20, maxSec: 30 })
-    expect(c.lineIntro).toMatchObject({ enabled: true, durationSec: 30, showQr: false })
+    expect(c.lineIntro).toMatchObject({ enabled: true, durationSec: 30, showQr: true })
     expect(c.lineOutro).toMatchObject({ enabled: true, showQr: true })
+    expect(c.qr.enabled).toBe(true) // 完成動画は冒頭・末尾ともQR表示が既定
     expect(c.lineOutro.durationSec).toBeGreaterThanOrEqual(10)
     expect(c.lineOutro.durationSec).toBeLessThanOrEqual(15)
     expect(c.digest.bgm.credit).toEqual({ title: 'The maze of aqua', composer: '蒲鉾さちこ（Kamaboko Sachiko）' })
@@ -62,12 +64,12 @@ describe('デフォルト設定と有効/無効', () => {
     expect(COMPOSITION_DEFAULTS.digest.bgm.volume).toBeLessThan(0.5)
     expect(() => { COMPOSITION_DEFAULTS.digest.enabled = false }).toThrow()
   })
-  it('設定の検証: 秒数・音量の範囲、末尾LINE案内はQR必須', () => {
+  it('設定の検証: 秒数・音量の範囲。QRは冒頭・末尾を個別にOFFできる', () => {
     expect(validateCompositionConfig(resolveCompositionConfig({})).ok).toBe(true)
     expect(validateCompositionConfig(resolveCompositionConfig({ digest: { bgm: { volume: 2 } } })).ok).toBe(false)
     expect(validateCompositionConfig(resolveCompositionConfig({ lineIntro: { durationSec: 1 } })).ok).toBe(false)
-    expect(validateCompositionConfig(resolveCompositionConfig({ lineOutro: { showQr: false } })).errors.join()).toContain('QR')
-    expect(validateCompositionConfig(resolveCompositionConfig({ lineOutro: { enabled: false, showQr: false } })).ok).toBe(true)
+    expect(validateCompositionConfig(resolveCompositionConfig({ lineOutro: { showQr: false } })).ok).toBe(true)
+    expect(validateCompositionConfig(resolveCompositionConfig({ lineIntro: { showQr: false }, qr: { enabled: false } })).ok).toBe(true)
   })
 })
 
@@ -242,31 +244,46 @@ describe('最終ASS（LINE案内・テーマ・字幕）', () => {
   })
 })
 
-describe('QR（quiet zone・画面内・テキストと重ならない）', () => {
-  it('画面内に収まり、周囲に白いquiet zone（QRの一辺の6%以上）を持つ', () => {
+describe('QR（縦横比・quiet zone・画面内・テキストと重ならない）', () => {
+  it('画面内に収まり、周囲に白いquiet zone（QR長辺の6%以上）を持つ', () => {
     for (const [w, h] of [[1920, 1080], [1280, 720], [3840, 2160]]) {
-      const q = qrLayout(w, h)
+      const q = qrLayout(w, h, QR_SIZE.width, QR_SIZE.height)
       expect(q.x).toBeGreaterThanOrEqual(0)
       expect(q.y).toBeGreaterThanOrEqual(0)
-      expect(q.x + q.total).toBeLessThanOrEqual(w)
-      expect(q.y + q.total).toBeLessThanOrEqual(h)
-      expect(q.quiet / q.inner).toBeGreaterThanOrEqual(0.06)
-      expect(q.total).toBe(q.inner + q.quiet * 2)
-      expect(q.inner / h).toBeGreaterThan(0.4) // スマホ表示でも読めるよう大きく
+      expect(q.x + q.totalW).toBeLessThanOrEqual(w)
+      expect(q.y + q.totalH).toBeLessThanOrEqual(h)
+      expect(q.quiet / Math.max(q.innerW, q.innerH)).toBeGreaterThanOrEqual(0.06)
+      expect(q.totalW).toBe(q.innerW + (q.quiet + q.frame) * 2)
+      expect(q.totalH).toBe(q.innerH + (q.quiet + q.frame) * 2)
+      expect(Math.max(q.innerW, q.innerH) / h).toBeGreaterThan(0.4) // スマホ表示でも読めるよう大きく
     }
   })
-  it('末尾LINE案内のテキストはQR（quiet zone含む）と重ならず、余白がある', () => {
+  it('元画像の縦横比を維持する（正方形へ引き伸ばさない）。縦長・正方形でも維持する', () => {
+    for (const [iw, ih] of [[554, 518], [518, 554], [500, 500], [800, 300]]) {
+      const q = qrLayout(W, H, iw, ih)
+      expect(Math.abs(q.innerW / q.innerH - iw / ih)).toBeLessThan(0.01)
+    }
+    const q = qrLayout(W, H, 554, 518)
+    expect(q.innerW).not.toBe(q.innerH) // 554×518 は正方形ではない
+  })
+  it('冒頭・末尾のLINE案内のテキストはQR（quiet zone・枠を含む最大占有領域）と重ならず、余白がある', () => {
     for (const [w, h] of [[1920, 1080], [1280, 720]]) {
-      const q = qrLayout(w, h)
-      const { items, textRight } = lineTextLayout(w, h, cfgFull.line.text, true)
-      expect(textRight).toBeLessThan(q.x - Math.round(w * 0.02))
-      for (const it of items) {
-        expect(it.y + it.heightPx).toBeLessThanOrEqual(h)
-        expect(it.x + it.widthPx).toBeLessThan(q.x)
+      for (const dims of [[554, 518], [518, 554], [undefined, undefined]]) {
+        const q = qrLayout(w, h, ...dims)
+        const worst = qrLayout(w, h) // 寸法不明=最大占有領域（テキストはこれを避ける）
+        expect(q.x).toBeGreaterThanOrEqual(worst.x)
+        const { items, textRight } = lineTextLayout(w, h, cfgFull.line.text, true)
+        expect(textRight).toBeLessThan(worst.x - Math.round(w * 0.02))
+        for (const it of items) {
+          expect(it.y + it.heightPx).toBeLessThanOrEqual(h)
+          expect(it.x + it.widthPx).toBeLessThan(worst.x)
+        }
       }
     }
   })
-  it('QRなしの冒頭案内は中央揃えで、画面内に収まる', () => {
+  it('QRありのLINE案内は左揃え（QRは右）。QRなしの案内は中央揃えで画面内', () => {
+    const withQr = buildLineEvents(1920, 1080, cfgFull.line.text, { startSec: 0, endSec: 30 }, true, [0, 0.33, 0.66])
+    expect(withQr.every((l) => l.includes('\\an7'))).toBe(true)
     const { items } = lineTextLayout(1920, 1080, cfgFull.line.text, false)
     for (const it of items) {
       expect(it.x).toBe(960)
@@ -275,13 +292,21 @@ describe('QR（quiet zone・画面内・テキストと重ならない）', () =
     const ev = buildLineEvents(1920, 1080, cfgFull.line.text, { startSec: 0, endSec: 30 }, false, [0, 0.33, 0.66])
     expect(ev.every((l) => l.includes('\\an8'))).toBe(true)
   })
+  it('完成動画の既定で、冒頭・末尾のLINE案内はどちらも左揃え+QR（3段階表示は維持）', () => {
+    const sel = digest()
+    const timeline = planTimeline(cfgFull, { mainStartSec: 1100, mainEndSec: 1130, digestClips: sel.clips })
+    const ass = buildFinalAss({ width: W, height: H, cfg: cfgFull, timeline, mainCaptions: [], digestCaps: [], themeBlocks: [] })
+    const lines = ass.split('\n').filter((l) => l.startsWith('Dialogue: 20,') && /LineHead|LineBody/.test(l))
+    expect(lines).toHaveLength(6) // 冒頭3段階 + 末尾3段階
+    expect(lines.every((l) => l.includes('\\an7'))).toBe(true)
+  })
 })
 
 describe('ffmpeg引数（白黒・BGM・QRの範囲）', () => {
   const sel = digest()
   const main = { mainStartSec: 1100, mainEndSec: 1130 }
   const timeline = planTimeline(cfgFull, { ...main, digestClips: sel.clips })
-  const built = buildCompositionArgs({ cfg: cfgFull, timeline, width: W, height: H, sourcePath: '/src/video.mov', ...main, digestClips: sel.clips, bgmPath: '/x/bgm.mp3', qrPath: '/x/qr.png', assPath: '/tmp/a.ass', outputPath: '/out/.rendering.mp4' })
+  const built = buildCompositionArgs({ cfg: cfgFull, timeline, width: W, height: H, sourcePath: '/src/video.mov', ...main, digestClips: sel.clips, bgmPath: '/x/bgm.mp3', qrPath: '/x/qr.png', qrSize: QR_SIZE, assPath: '/tmp/a.ass', outputPath: '/out/.rendering.mp4' })
   const f = built.filterComplex
 
   it('spawn用のargv配列で、shell文字列連結・元動画への書き込みをしない', () => {
@@ -304,7 +329,7 @@ describe('ffmpeg引数（白黒・BGM・QRの範囲）', () => {
     expect(f).not.toMatch(/hue=s=0[^;]*;[^;]*(ass|overlay)/) // 白黒チェーンの直後に字幕/QRを続けない
   })
   it('白黒OFFなら白黒フィルタを使わない', () => {
-    const off = buildCompositionArgs({ cfg: resolveCompositionConfig({ digest: { grayscale: false } }), timeline, width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, bgmPath: '/b', assPath: '/a', outputPath: '/o' })
+    const off = buildCompositionArgs({ cfg: resolveCompositionConfig({ digest: { grayscale: false } }), timeline, width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, bgmPath: '/b', qrPath: '/q', qrSize: QR_SIZE, assPath: '/a', outputPath: '/o' })
     expect(off.filterComplex).not.toContain('hue=')
   })
   it('BGMはダイジェスト長で切り、フェードイン/アウトを付け、声とミックス（ducking）。本編・LINE案内へ入らない', () => {
@@ -321,9 +346,9 @@ describe('ffmpeg引数（白黒・BGM・QRの範囲）', () => {
     expect(concatAudioIn.startsWith('[dvid][dA][liv][lia][mv][ma][lov][loa]concat=n=4')).toBe(true)
   })
   it('BGMなし・ducking OFFの場合の音声チェーン', () => {
-    const noBgm = buildCompositionArgs({ cfg: cfgFull, timeline, width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, assPath: '/a', outputPath: '/o' })
+    const noBgm = buildCompositionArgs({ cfg: cfgFull, timeline, width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, qrPath: '/q', qrSize: QR_SIZE, assPath: '/a', outputPath: '/o' })
     expect(noBgm.filterComplex).not.toContain('sidechaincompress')
-    const fixed = buildCompositionArgs({ cfg: resolveCompositionConfig({ digest: { bgm: { duck: false } } }), timeline, width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, bgmPath: '/b', assPath: '/a', outputPath: '/o' })
+    const fixed = buildCompositionArgs({ cfg: resolveCompositionConfig({ digest: { bgm: { duck: false } } }), timeline, width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, bgmPath: '/b', qrPath: '/q', qrSize: QR_SIZE, assPath: '/a', outputPath: '/o' })
     expect(fixed.filterComplex).not.toContain('sidechaincompress')
     expect(fixed.filterComplex).toContain('[dvoice][bgm]amix')
   })
@@ -332,17 +357,64 @@ describe('ffmpeg引数（白黒・BGM・QRの範囲）', () => {
     const chains = f.split(';')
     expect(chains.filter((c) => c.includes('anullsrc'))).toHaveLength(2) // 冒頭・末尾
   })
-  it('QRは字幕の後に、末尾LINE案内の時間帯だけ重ねる（冒頭はQRなし）。QRには白黒・字幕を適用しない', () => {
+  const buildWith = (cfg, extra = {}) => buildCompositionArgs({ cfg, timeline: planTimeline(cfg, { ...main, digestClips: sel.clips }), width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, qrPath: '/q', qrSize: QR_SIZE, assPath: '/a', outputPath: '/o', ...extra })
+  it('QRは字幕の後に、冒頭・末尾のLINE案内の全時間帯へ重ねる（開始〜終了と一致）。QRには白黒・字幕を適用しない', () => {
+    const intro = timeline.sections.find((s) => s.kind === 'lineIntro')
     const outro = timeline.sections.find((s) => s.kind === 'lineOutro')
     const overlays = f.split(';').filter((c) => c.includes('overlay='))
-    expect(overlays).toHaveLength(1)
-    expect(overlays[0]).toContain(`between(t,${outro.startSec},${outro.endSec})`)
+    expect(overlays).toHaveLength(2)
+    expect(overlays[0]).toContain(`between(t,${intro.startSec},${intro.endSec})`)
+    expect(overlays[1]).toContain(`between(t,${outro.startSec},${outro.endSec})`)
     expect(f.indexOf('overlay=')).toBeGreaterThan(f.indexOf('ass='))
-    const q = qrLayout(W, H)
-    expect(f).toContain(`pad=${q.total}:${q.total}:${q.quiet}:${q.quiet}:color=white`)
+    const q = qrLayout(W, H, QR_SIZE.width, QR_SIZE.height)
+    expect(f).toContain(`scale=${q.innerW}:${q.innerH}:flags=bicubic,pad=${q.innerW + q.quiet * 2}:${q.innerH + q.quiet * 2}:${q.quiet}:${q.quiet}:color=white`)
     expect(f).toContain(`overlay=${q.x}:${q.y}`)
-    const introQr = buildCompositionArgs({ cfg: resolveCompositionConfig({ lineIntro: { showQr: true } }), timeline, width: W, height: H, sourcePath: '/s', ...main, digestClips: sel.clips, qrPath: '/q', assPath: '/a', outputPath: '/o' })
-    expect(introQr.filterComplex.split(';').filter((c) => c.includes('overlay=')).length).toBe(2)
+  })
+  it('QR表示区間（planQrWindows）は冒頭・末尾のLINE案内の開始・終了時刻と一致し、最終フレーム付近まで続く', () => {
+    const w = planQrWindows(cfgFull, timeline)
+    expect(w.map((x) => x.kind)).toEqual(['lineIntro', 'lineOutro'])
+    for (const x of w) {
+      const s = timeline.sections.find((t) => t.kind === x.kind)
+      expect([x.startSec, x.endSec]).toEqual([s.startSec, s.endSec])
+    }
+    expect(w[0].endSec - w[0].startSec).toBeCloseTo(30, 3)
+    expect(w[1].endSec - w[1].startSec).toBeCloseTo(12, 3)
+    const lastFrameSec = timeline.totalSec - 1 / cfgFull.fps
+    expect(w[1].endSec).toBeGreaterThanOrEqual(lastFrameSec) // 動画の最終フレームでもQRが出ている
+    expect(w[1].endSec).toBe(timeline.totalSec)
+  })
+  it('冒頭と末尾を個別にON/OFFできる。全体スイッチ qr.enabled=false で両方消える', () => {
+    const only = (over) => planQrWindows(resolveCompositionConfig(over), planTimeline(resolveCompositionConfig(over), { ...main, digestClips: sel.clips })).map((x) => x.kind)
+    expect(only({})).toEqual(['lineIntro', 'lineOutro'])
+    expect(only({ lineIntro: { showQr: false } })).toEqual(['lineOutro'])
+    expect(only({ lineOutro: { showQr: false } })).toEqual(['lineIntro'])
+    expect(only({ qr: { enabled: false } })).toEqual([])
+    expect(only({ lineIntro: { enabled: false } })).toEqual(['lineOutro'])
+    const noneQr = buildWith(resolveCompositionConfig({ qr: { enabled: false } }), { qrPath: undefined, qrSize: undefined })
+    expect(noneQr.filterComplex).not.toContain('overlay=')
+    expect(noneQr.args).not.toContain('-loop')
+  })
+  it('QRは元画像の縦横比のまま、周囲に白いquiet zone。半透明・フェード・白黒化・ぼかし・透過は適用しない', () => {
+    const qrChain = f.split(';').find((c) => /^\[\d+:v\]scale=/.test(c) && c.includes('pad='))
+    const overlays = f.split(';').filter((c) => c.includes('overlay='))
+    const scope = [qrChain, ...overlays].join(';')
+    for (const bad of ['fade', 'hue', 'gray', 'colorchannelmixer', 'colorlevels', 'eq=', 'boxblur', 'gblur', 'avgblur', 'geq', 'alpha', 'format=rgba', 'format=yuva', 'lut', 'curves', 'negate', 'colorkey', 'chromakey', 'noise']) expect(scope).not.toContain(bad)
+    const m = qrChain.match(/scale=(\d+):(\d+)/)
+    expect(Math.abs(Number(m[1]) / Number(m[2]) - QR_SIZE.width / QR_SIZE.height)).toBeLessThan(0.01)
+    expect(qrChain).toContain('color=white')
+    // QRの入力は白黒チェーン(hue)の下流ではなく、独立した入力
+    expect(f.split(';').filter((c) => c.includes('hue=s=0')).every((c) => !c.includes('overlay'))).toBe(true)
+  })
+  it('QR表示ONで素材（パス・寸法）が無い場合は、QRを省略せずレンダー前に失敗する', () => {
+    expect(() => buildWith(cfgFull, { qrPath: undefined })).toThrow(QR_MISSING_MESSAGE)
+    expect(() => buildWith(cfgFull, { qrSize: undefined })).toThrow(/寸法/)
+  })
+  it('短時間プレビューの既定は従来どおり構成なし（QRも出ない）', () => {
+    const pc = resolveCompositionConfig({}, { mode: 'preview' })
+    const pt = planTimeline(pc, { ...main })
+    expect(planQrWindows(pc, pt)).toEqual([])
+    expect(sectionShowsQr(pc, 'lineIntro')).toBe(false)
+    expect(sectionShowsQr(pc, 'lineOutro')).toBe(false)
   })
   it('出力のdurationは全区間の合計。映像と音声を同じ長さで書き出す', () => {
     expect(built.args[built.args.indexOf('-t', built.args.indexOf('-movflags'))+1]).toBe(String(timeline.totalSec))
@@ -408,15 +480,20 @@ describe('素材の確認・レンダー（安全なエラー・一時ファイ�
     const r = await resolveCompositionAssets(cfg, [dir])
     expect(r.ok).toBe(false)
     expect(r.errors.length).toBe(2)
+    expect(r.errors).toContain(QR_MISSING_MESSAGE) // ユーザー向けの明確なエラー
     expect(JSON.stringify(r.errors)).not.toContain(dir)
     const noNeed = resolveCompositionConfig({ digest: { enabled: false }, lineOutro: { enabled: false, showQr: false }, lineIntro: { showQr: false } })
     expect((await resolveCompositionAssets(noNeed, [dir])).ok).toBe(true)
+    const qrOff = resolveCompositionConfig({ digest: { enabled: false }, qr: { enabled: false } })
+    expect((await resolveCompositionAssets(qrOff, [dir])).ok).toBe(true) // 全体スイッチOFFなら素材は不要
+    const introOnly = resolveCompositionConfig({ digest: { enabled: false }, lineOutro: { showQr: false } })
+    expect((await resolveCompositionAssets(introOnly, [dir])).errors).toEqual([QR_MISSING_MESSAGE])
   })
   const base = () => {
     const sel = digest()
     const main = { mainStartSec: 1100, mainEndSec: 1130 }
     const timeline = planTimeline(cfgFull, { ...main, digestClips: sel.clips })
-    return { cfg: cfgFull, timeline, width: W, height: H, sourcePath: '/src.mov', ...main, digestClips: sel.clips, bgmPath: '/b', qrPath: '/q', assText: '[Script Info]\n' }
+    return { cfg: cfgFull, timeline, width: W, height: H, sourcePath: '/src.mov', ...main, digestClips: sel.clips, bgmPath: '/b', qrPath: '/q', qrSize: QR_SIZE, assText: '[Script Info]\n' }
   }
   it('成功: 隠し一時ファイルへ書いてからrename。ASS・一時動画は残らない', async () => {
     const tmpDir = join(dir, 'tmp')

@@ -770,6 +770,7 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
         digestClips: composed.digest.clips,
         bgmPath: composed.assets.bgm?.realPath,
         qrPath: composed.assets.qr?.realPath,
+        qrSize: composed.assets.qr ? { width: composed.assets.qr.width, height: composed.assets.qr.height } : undefined,
         assText: composed.assText,
         tmpDir: tmpRoot,
         finalPath: finalOutputPath, // 一時ファイルへ書き、成功後にだけ最終名へrenameする（renderCompositionToFile内）

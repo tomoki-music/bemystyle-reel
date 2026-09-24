@@ -43,9 +43,11 @@ describe('設定の受け渡し', () => {
     expect(o.lineOutro).toEqual({})
     expect(sanitizeCompositionOverrides(null)).toEqual({})
   })
-  it('素材パスは環境設定から。両方そろったときだけ「環境設定で構成を適用」', () => {
+  it('素材パスは環境設定から。どちらか指定されていれば「環境設定で構成を適用」（足りない素材は準備時にエラー）', () => {
     expect(getCompositionEnvOverrides({})).toEqual({})
-    expect(isCompositionConfiguredByEnv({ COMPOSITION_BGM_PATH: '/a.mp3' })).toBe(false)
+    expect(isCompositionConfiguredByEnv({})).toBe(false)
+    expect(isCompositionConfiguredByEnv({ COMPOSITION_BGM_PATH: '/a.mp3' })).toBe(true)
+    expect(isCompositionConfiguredByEnv({ COMPOSITION_QR_PATH: '/q.png' })).toBe(true)
     expect(isCompositionConfiguredByEnv({ COMPOSITION_BGM_PATH: '/a.mp3', COMPOSITION_QR_PATH: '/q.png' })).toBe(true)
   })
 })
@@ -96,10 +98,22 @@ describe('prepareJobComposition（ジョブから構成を準備）', () => {
     expect(p.timeline.sections.map((s) => s.kind)).toEqual(['main', 'lineOutro'])
     expect(p.assText).not.toContain('TALK THEME')
   })
-  it('不正な設定（末尾LINE案内でQR非表示）は拒否する', async () => {
-    const env = assets()
-    const err = await prepareJobComposition(job, { lineOutro: { showQr: false } }, [dir], { env, spawnFn: probe() }).catch((e) => e)
+  it('QR画像が見つからない場合は、レンダー前に明確なエラー（QRを省略して続行しない）。BGMだけの環境設定でも同じ', async () => {
+    const bgmOnly = { COMPOSITION_BGM_PATH: assets().COMPOSITION_BGM_PATH }
+    const err = await prepareJobComposition(job, {}, [dir], { env: bgmOnly, spawnFn: probe() }).catch((e) => e)
     expect(err.status).toBe(400)
+    expect(err.message).toContain('LINE QR画像が見つかりません。QR画像の設定を確認してください。')
+    expect(err.message).not.toContain(dir)
+  })
+  it('QRの表示は冒頭・末尾を個別にOFFでき、全体スイッチOFFなら素材なしでも準備できる（既定は両方ON）', async () => {
+    const env = assets()
+    const both = await prepareJobComposition(job, {}, [dir], { env, spawnFn: probe() })
+    expect([both.cfg.qr.enabled, both.cfg.lineIntro.showQr, both.cfg.lineOutro.showQr]).toEqual([true, true, true])
+    const introOff = await prepareJobComposition(job, { lineIntro: { showQr: false } }, [dir], { env, spawnFn: probe() })
+    expect([introOff.cfg.lineIntro.showQr, introOff.cfg.lineOutro.showQr]).toEqual([false, true])
+    const bgmOnly = { COMPOSITION_BGM_PATH: env.COMPOSITION_BGM_PATH }
+    const off = await prepareJobComposition(job, { qr: { enabled: false } }, [dir], { env: bgmOnly, spawnFn: probe() })
+    expect(off.assets.qr).toBeNull()
   })
 })
 

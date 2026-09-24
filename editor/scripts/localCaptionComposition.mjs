@@ -110,7 +110,7 @@ async function stageRender(args) {
     const finalPath = buildComparisonOutputPath('composition_check', outputRoot, sourceRealPath)
     await renderCompositionToFile({
       cfg, timeline, width: W, height: H, sourcePath: sourceRealPath, mainStartSec, mainEndSec,
-      digestClips: sel.clips, bgmPath: assets.bgm?.realPath, qrPath: assets.qr?.realPath, assText, tmpDir, finalPath,
+      digestClips: sel.clips, bgmPath: assets.bgm?.realPath, qrPath: assets.qr?.realPath, qrSize: assets.qr ? { width: assets.qr.width, height: assets.qr.height } : undefined, assText, tmpDir, finalPath,
     })
     finalName = finalPath.split('/').pop()
   })

@@ -12,7 +12,7 @@ import { existsSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } fr
 import { extname, dirname, resolve } from 'path'
 import { validateSourcePath, PathValidationError } from './pathValidator.mjs'
 import { getFreeBytes } from './diskSpace.mjs'
-import { buildCompositionArgs } from './finalComposition.mjs'
+import { buildCompositionArgs, sectionShowsQr, QR_MISSING_MESSAGE } from './finalComposition.mjs'
 
 export const FULL_RENDER_MIN_FREE_BYTES = 15 * 1024 ** 3
 export const AUDIO_EXTS = ['.mp3', '.wav', '.m4a', '.aac', '.flac']
@@ -71,14 +71,14 @@ export async function resolveCompositionAssets(cfg, allowedRoots, deps = {}) {
   const errors = []
   let bgm = null
   let qr = null
-  const needQr = (cfg.lineOutro.enabled && cfg.lineOutro.showQr) || (cfg.lineIntro.enabled && cfg.lineIntro.showQr)
+  const needQr = sectionShowsQr(cfg, 'lineIntro') || sectionShowsQr(cfg, 'lineOutro')
   if (cfg.digest.enabled && cfg.digest.bgm.path) {
     bgm = await inspectAsset(cfg.digest.bgm.path, 'bgm', allowedRoots, deps)
     if (!bgm.ok) errors.push(bgm.error)
   }
   if (needQr) {
     qr = await inspectAsset(cfg.line.qrPath, 'qr', allowedRoots, deps)
-    if (!qr.ok) errors.push(qr.error)
+    if (!qr.ok) errors.push(QR_MISSING_MESSAGE) // 素材の絶対パス・詳細は出さない。QRを省略してレンダーを続けない
   }
   return { ok: errors.length === 0, errors, bgm, qr }
 }

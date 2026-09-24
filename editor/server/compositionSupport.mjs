@@ -20,9 +20,12 @@ export function getCompositionEnvOverrides(env = process.env) {
   return { ...(bgm ? { digest: { bgm: { path: bgm } } } : {}), ...(qr ? { line: { qrPath: qr } } : {}) }
 }
 
-/** 環境設定でBGM・QRの両方が指定されているか（完成動画レンダーで構成を自動適用する条件）。 */
+/**
+ * 環境設定でBGMまたはQRのどちらかが指定されているか（完成動画レンダーで構成を自動適用する条件）。
+ * 片方だけの指定でも構成を適用し、足りない素材は prepareJobComposition が明確なエラーで止める（黙ってQRを省略しない）。
+ */
 export function isCompositionConfiguredByEnv(env = process.env) {
-  return Boolean(String(env.COMPOSITION_BGM_PATH || '').trim() && String(env.COMPOSITION_QR_PATH || '').trim())
+  return Boolean(String(env.COMPOSITION_BGM_PATH || '').trim() || String(env.COMPOSITION_QR_PATH || '').trim())
 }
 
 /** UIから受け取る上書きのうち、許可する項目だけを取り出す（素材パスの上書きは環境設定側のみ）。 */
@@ -35,6 +38,7 @@ export function sanitizeCompositionOverrides(body) {
     digest: strip({ enabled: bool(body.digest?.enabled), durationSec: num(body.digest?.durationSec), grayscale: bool(body.digest?.grayscale), bgm: strip({ volume: num(body.digest?.bgm?.volume), fadeInSec: num(body.digest?.bgm?.fadeInSec), fadeOutSec: num(body.digest?.bgm?.fadeOutSec) }) }),
     lineIntro: strip({ enabled: bool(body.lineIntro?.enabled), durationSec: num(body.lineIntro?.durationSec), showQr: bool(body.lineIntro?.showQr) }),
     lineOutro: strip({ enabled: bool(body.lineOutro?.enabled), durationSec: num(body.lineOutro?.durationSec), showQr: bool(body.lineOutro?.showQr) }),
+    qr: strip({ enabled: bool(body.qr?.enabled) }),
     preview: strip({ digest: bool(body.preview?.digest), lineIntro: bool(body.preview?.lineIntro), lineOutro: bool(body.preview?.lineOutro) }),
   }
 }
