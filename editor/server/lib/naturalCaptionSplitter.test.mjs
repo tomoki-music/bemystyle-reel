@@ -179,3 +179,25 @@ describe('alignCanonicalToTokens: 対応情報の出力（DTW時刻の利用）'
     expect(r.charStart[3]).toBeGreaterThanOrEqual(r.charEnd[2] - 1e-9) // 前後の対応済みトークンの間だけで補間
   })
 })
+
+describe('修正（repair）: 低信頼区間の推定時刻は、無音による複合語の免除の根拠にしない', () => {
+  const T2 = '今日は皆さんにコミュニティの管理運営についてお話をします。とても大事な話です。'
+  const at = T2.indexOf('運営')
+  const run = (matched) => {
+    const tm = uniformTiming(T2, { gaps: { [at]: 0.7 }, matched }) // 0.6秒以上の無音は絶対にまたげないので、必ずここで割れる
+    let report = null
+    const pages = splitTextIntoNaturalPages(T2, tm, bounds(tm.total), { repair: true, onRepairReport: (r) => { report = r } })
+    return { pages, report }
+  }
+  it('実測できた0.7秒の無音の位置では、複合語らしい境界でも許す（未解決なし）', () => {
+    const { pages, report } = run(true)
+    expect(pages.map((x) => x.text).join('')).toBe(T2)
+    expect(pages.some((x) => x.text.endsWith('管理'))).toBe(true)
+    expect(report.unresolved).toEqual([])
+  })
+  it('低信頼（時刻が推定）の同じ位置では、無音を免除の根拠にせず、未解決の禁止境界として報告する（本文は変えない）', () => {
+    const { pages, report } = run(false)
+    expect(pages.map((x) => x.text).join('')).toBe(T2)
+    expect(report.unresolved.some((u) => u.reasons.includes('compound'))).toBe(true)
+  })
+})

@@ -524,6 +524,14 @@ describe('ffmpeg引数（白黒・BGM・QRの範囲）', () => {
     expect(fixed.filterComplex).not.toContain('sidechaincompress')
     expect(fixed.filterComplex).toContain('[dvoice][bgm]amix')
   })
+  it('本編・ダイジェストの音声は先頭を映像の起点(0秒)へそろえる（音声トラックが遅れて始まる元動画でも音声だけ早くならない）', () => {
+    const chains = f.split(';')
+    const mainA = chains.find((c) => c.endsWith('[ma]'))
+    expect(mainA).toContain('aresample=48000:first_pts=0')
+    const digestA = chains.filter((c) => /\[da\d+\]$/.test(c))
+    expect(digestA.length).toBe(sel.clips.length)
+    expect(digestA.every((c) => c.includes('aresample=48000:first_pts=0'))).toBe(true)
+  })
   it('独立したLINE案内区間（末尾）の音声は無音（BGMを流さない）', () => {
     expect(f).toContain('anullsrc')
     const chains = f.split(';')

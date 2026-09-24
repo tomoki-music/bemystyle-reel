@@ -533,6 +533,9 @@ export function buildCompositionArgs(p) {
   const concatIn = []
   const fmtV = `scale=${width}:${height}:flags=bicubic,setsar=1,fps=${F},format=yuv420p`
   const fmtA = `aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo`
+  // 元動画の音声トラックが映像より遅れて始まる場合（例: 音声の開始が映像より0.067秒後）、PTS-STARTPTS で先頭を詰めると音声だけが
+  // 早く聞こえる。映像と同じ起点（0秒）に合わせるため、先頭を無音で埋める（first_pts=0）。ダイジェストのクリップ・本編の音声に使う。
+  const fmtAV = `aresample=${SR}:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo`
 
   if (digestOn) {
     const D = timeline.digestSec
@@ -548,7 +551,7 @@ export function buildCompositionArgs(p) {
       const d = round3(c.durationSec)
       const gray = cfg.digest.grayscale ? ',hue=s=0' : ''
       chain.push(`[${n}:v]trim=0:${d},setpts=PTS-STARTPTS,${fmtV}${gray}[dv${k}]`)
-      chain.push(`[${n}:a]${fmtA},atrim=0:${d},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.04,afade=t=out:st=${round3(Math.max(0, d - 0.04))}:d=0.04[da${k}]`)
+      chain.push(`[${n}:a]${fmtAV},atrim=0:${d},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.04,afade=t=out:st=${round3(Math.max(0, d - 0.04))}:d=0.04[da${k}]`)
       vs.push(`[dv${k}]`)
       as.push(`[da${k}]`)
     })
@@ -586,7 +589,7 @@ export function buildCompositionArgs(p) {
   const mi = idx++
   const md = round3(p.mainEndSec - p.mainStartSec)
   chain.push(`[${mi}:v]trim=0:${md},setpts=PTS-STARTPTS,${fmtV}[mv]`)
-  chain.push(`[${mi}:a]${fmtA},atrim=0:${md},asetpts=PTS-STARTPTS[ma]`)
+  chain.push(`[${mi}:a]${fmtAV},atrim=0:${md},asetpts=PTS-STARTPTS[ma]`)
   concatIn.push('[mv]', '[ma]')
   if (outro) panel('lo', outro)
 

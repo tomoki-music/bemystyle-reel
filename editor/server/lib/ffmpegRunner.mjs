@@ -114,6 +114,9 @@ export function extractAudioSegmentWav(sourceRealPath, outWavPath, startSec, dur
       '-i', sourceRealPath,
       '-t', String(Math.max(0.1, durationSec)),
       '-vn',
+      // 音声トラックが映像より遅れて始まる元動画（例: 開始0.067秒）でも、区間の先頭を無音で埋めて「メディアの時刻=wavの時刻」にそろえる
+      // （埋めないと、0秒から始まる区間の字幕時刻がその分だけ早くなる）。
+      '-af', 'aresample=first_pts=0',
       '-ac', '1',
       '-ar', '16000',
       '-c:a', 'pcm_s16le',

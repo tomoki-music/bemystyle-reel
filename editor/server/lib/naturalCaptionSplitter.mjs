@@ -367,9 +367,12 @@ export function splitTextIntoNaturalPages(text, timing0, bounds, overrides = {})
       return c
     }
     const ctx = {
-      reasonsAt: (p) => (p > 0 && p < n ? refineForbidden(text, p, boundaryInfo[p], { gapSec: gapAt[p] }) : []),
+      // 実測の無音による免除は、時刻を実測できた文字だけに使う（低信頼区間の時刻は元時刻からの推定なので、無音の根拠にしない）。
+      reasonsAt: (p) => (p > 0 && p < n ? refineForbidden(text, p, boundaryInfo[p], { gapSec: lowConf[p - 1] || lowConf[p] ? 0 : gapAt[p] }) : []),
       pageOk,
-      dangling: (i, j) => j < n && endsWithDanglingConjunction(text.slice(i, j)),
+      // 直後に0.6秒以上の実測の無音がある位置は、どの切り方でもそこでページが分かれる（無音をまたげない）ため、末尾の「でも」等を
+      // 孤立した接続詞として扱わない（話者がそこで間を置いている）。
+      dangling: (i, j) => j < n && endsWithDanglingConjunction(text.slice(i, j)) && !(!(lowConf[j - 1] || lowConf[j]) && gapAt[j] >= opt.maxSpannedSilenceSec),
       isShort: (i, j) => {
         const est = speechDur(i, j) + opt.leadSec + opt.tailSec
         if (est >= opt.shortPageSec && speechChars(i, j) > opt.shortPageChars) return false

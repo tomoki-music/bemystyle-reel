@@ -21,6 +21,13 @@ export const SILENCE_EXEMPT = ['compound', 'okurigana']
 /** 語の途中で切っていると数える理由（厳密版・補正版で共通）。 */
 export const MID_WORD_REASONS = ['midtoken', 'compound', 'okurigana', 'fragment', 'bound', 'smallkana']
 export const REFINE_SILENCE_SEC = 0.3
+/**
+ * 独立した副詞で、直後に漢字の語が続いても「複合語の途中」ではないもの（ICUは語を分けているが、漢字が隣り合うだけで
+ * 'compound' と判定される過検出）。例:「是非｜興味のある方は」「是非｜分かって」。直前が漢字でない（=語頭）ときだけ免除する。
+ */
+export const STANDALONE_ADVERBS = ['是非']
+const KANJI_CHAR = /[一-鿿々]/
+const endsWithStandaloneAdverb = (text, p) => STANDALONE_ADVERBS.some((w) => text.slice(p - w.length, p) === w && !KANJI_CHAR.test(text[p - w.length - 1] ?? ''))
 
 /** 位置 p（p文字目の直前）が「節の頭」か（直前が句点・読点、または句点+閉じ括弧）。 */
 export function isClauseStart(text, p) {
@@ -42,6 +49,7 @@ export function refineForbidden(text, p, info, opts = {}) {
   let reasons = [...info.forbidden]
   if (isClauseStart(text, p)) reasons = reasons.filter((r) => !CLAUSE_START_EXEMPT.includes(r))
   if ((opts.gapSec ?? 0) >= REFINE_SILENCE_SEC) reasons = reasons.filter((r) => !SILENCE_EXEMPT.includes(r))
+  if (reasons.length === 1 && reasons[0] === 'compound' && endsWithStandaloneAdverb(text, p)) reasons = []
   return reasons
 }
 
@@ -63,7 +71,8 @@ export function countBoundaryProblems(pageTexts, opts = {}) {
   for (let i = 0; i < pageTexts.length - 1; i++) {
     pos += pageTexts[i].length
     const b = info[pos]
-    if (endsWithDanglingConjunction(pageTexts[i])) dangling += 1
+    // 直後に0.6秒以上の実測の無音がある場合は、そこで必ずページが分かれる（間を置いている）ので孤立した接続詞とみなさない
+    if (endsWithDanglingConjunction(pageTexts[i]) && !((opts.gaps?.[i] ?? 0) >= 0.6)) dangling += 1
     if (!b) continue
     const add = (t, reasons) => {
       if (reasons.length === 0) return
