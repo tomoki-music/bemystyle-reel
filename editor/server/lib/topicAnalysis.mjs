@@ -595,6 +595,34 @@ export function editTopic(analysis, topicId, patch, captions) {
   return { ok: true, analysis: { ...analysis, topics }, errors: [] }
 }
 
+/**
+ * テーマを手動修正し、修正前後（タイトル・開始/終了秒）を分析データの manualEdits に記録する。
+ * 記録にはテーマ名が含まれるため、分析データと同じ git 管理外の領域にだけ保存すること（報告・コミットには載せない）。
+ */
+export function editTopicLogged(analysis, topicId, patch, captions, now = new Date()) {
+  const before = analysis.topics.find((t) => t.id === topicId)
+  const r = editTopic(analysis, topicId, patch, captions)
+  if (!r.ok) return r
+  const idx = capIndex(captions)
+  const sec = (t) => ({ startSec: captions[idx.get(t.startCaptionId)].startSec, endSec: captions[idx.get(t.endCaptionId)].endSec })
+  const after = r.analysis.topics.find((t) => t.id === topicId)
+  const entry = {
+    at: now.toISOString(),
+    topicId,
+    sourceBefore: before.source,
+    titleBefore: before.title,
+    titleAfter: after.title,
+    startCaptionIdBefore: before.startCaptionId,
+    startCaptionIdAfter: after.startCaptionId,
+    endCaptionIdBefore: before.endCaptionId,
+    endCaptionIdAfter: after.endCaptionId,
+    before: sec(before),
+    after: sec(after),
+    startShiftSec: Math.round((sec(after).startSec - sec(before).startSec) * 1000) / 1000,
+  }
+  return { ok: true, errors: [], analysis: { ...r.analysis, manualEdits: [...(analysis.manualEdits ?? []), entry] }, entry }
+}
+
 export function setTopicDecision(analysis, topicId, decision) {
   if (!decisionOk(decision) || !analysis.topics.some((t) => t.id === topicId)) return { ok: false, analysis, errors: ['対象または判断が不正です'] }
   return { ok: true, analysis: { ...analysis, topics: analysis.topics.map((t) => (t.id === topicId ? { ...t, decision } : t)) }, errors: [] }

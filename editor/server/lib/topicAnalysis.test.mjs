@@ -21,6 +21,7 @@ import {
   requestMarkerPath,
   writeJsonAtomic,
   editTopic,
+  editTopicLogged,
   setTopicDecision,
   upsertEmphasis,
   removeEmphasis,
@@ -752,5 +753,26 @@ describe('revalidateSavedResponse（追加APIなし・履歴保持・元応答�
     const r = revalidateSavedResponse({ dir, key: KEY, captions, attempt: 2 })
     expect(r).toMatchObject({ adopted: false, saved: false, requestCount: 0 })
     expect(existsSync(analysisPath(dir, KEY))).toBe(false)
+  })
+})
+
+describe('editTopicLogged（手動修正の前後を記録する）', () => {
+  it('タイトルだけ変更すると manual になり、修正前後のタイトル・秒数・開始のずれ(0秒)を記録する。caption本文・時刻は変わらない', async () => {
+    const a = (await runAnalysisOnce({ dir, key: KEY, captions, apiKey: 'sk-test', fetchFn: okFetch(goodResponse()) })).analysis
+    const frozen = JSON.stringify(captions)
+    const r = editTopicLogged(a, 'topic-002', { title: 'ライブ準備の確認と進行' }, captions, new Date('2026-01-01T00:00:00Z'))
+    expect(r.ok).toBe(true)
+    expect(r.analysis.topics[1]).toMatchObject({ source: 'manual', title: 'ライブ準備の確認と進行' })
+    expect(r.entry).toMatchObject({ topicId: 'topic-002', sourceBefore: 'ai', startShiftSec: 0, titleBefore: 'ライブ準備の進め方' })
+    expect(r.entry.before).toEqual(r.entry.after)
+    expect(r.analysis.manualEdits).toHaveLength(1)
+    expect(a.manualEdits).toBeUndefined() // 入力は変更しない
+    expect(JSON.stringify(captions)).toBe(frozen)
+  })
+  it('境界を動かすと開始のずれ(秒)を記録する。不正な修正は記録せず拒否する', async () => {
+    const a = (await runAnalysisOnce({ dir, key: KEY, captions, apiKey: 'sk-test', fetchFn: okFetch(goodResponse()) })).analysis
+    const r = editTopicLogged(a, 'topic-002', { startCaptionId: id(52) }, captions)
+    expect(r.entry.startShiftSec).toBeCloseTo(6, 3)
+    expect(editTopicLogged(a, 'topic-002', { title: '' }, captions).ok).toBe(false)
   })
 })

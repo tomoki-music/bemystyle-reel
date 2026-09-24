@@ -267,3 +267,48 @@ export function editTopicTitle(sections, id, newTitle) {
 
 /** 確定値(手動)か、編集可能な候補(AI)か。 */
 export const isTopicCandidate = (section) => section?.source === 'ai'
+
+/**
+ * レンダー用の「常時表示」TopicSection[]へ正規化する（入力は変更しない。保存済みのAI候補・手動修正データは壊さない）。
+ * - 最初のテーマの開始 = rangeStart、各テーマの終了 = 次のテーマの開始、最後のテーマの終了 = rangeEnd
+ * - 結果は隙間・重複が無く、任意の時刻で表示テーマがちょうど1件になる（カバー率100%）
+ * - テーマの開始時刻（=切り替え位置）とタイトルは変更しない。元の開始・終了は originalStartSec/originalEndSec に残す
+ *
+ * @param {Array<{ id: string, title: string, startSec: number, endSec: number, source: string }>} sections
+ * @param {{ startSec: number, endSec: number }} range
+ */
+export function normalizeTopicSectionsContinuous(sections, range) {
+  const ordered = [...(sections ?? [])].filter((s) => s && Number.isFinite(s.startSec) && Number.isFinite(s.endSec)).sort((a, b) => a.startSec - b.startSec)
+  const before = ordered.reduce((a, s) => a + Math.max(0, Math.min(s.endSec, range.endSec) - Math.max(s.startSec, range.startSec)), 0)
+  const out = ordered.map((s, i) => ({
+    ...s,
+    originalStartSec: s.startSec,
+    originalEndSec: s.endSec,
+    startSec: i === 0 ? range.startSec : s.startSec,
+    endSec: i === ordered.length - 1 ? range.endSec : ordered[i + 1].startSec,
+  }))
+  const total = range.endSec - range.startSec
+  const after = out.reduce((a, s) => a + (s.endSec - s.startSec), 0)
+  let gap = 0
+  let overlap = 0
+  out.forEach((s, i) => {
+    const prevEnd = i === 0 ? range.startSec : out[i - 1].endSec
+    if (s.startSec > prevEnd) gap += s.startSec - prevEnd
+    if (s.startSec < prevEnd) overlap += prevEnd - s.startSec
+  })
+  if (out.length && out[out.length - 1].endSec < range.endSec) gap += range.endSec - out[out.length - 1].endSec
+  const r3 = (v) => Math.round(v * 1000) / 1000
+  return {
+    sections: out,
+    stats: {
+      totalSec: r3(total),
+      beforeDisplayedSec: r3(before),
+      beforeCoverage: total > 0 ? r3(before / total) : 0,
+      afterDisplayedSec: r3(after),
+      afterCoverage: total > 0 ? r3(after / total) : 0,
+      undisplayedSec: r3(gap),
+      overlapSec: r3(overlap),
+      sections: out.map((s) => ({ id: s.id, beforeSec: r3(s.originalEndSec - s.originalStartSec), afterSec: r3(s.endSec - s.startSec), startSec: r3(s.startSec), endSec: r3(s.endSec) })),
+    },
+  }
+}

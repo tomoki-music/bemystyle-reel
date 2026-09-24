@@ -112,9 +112,10 @@ export function computeTopicGeometry(lines, displayWidth, displayHeight, titleSi
  * @param {string} title
  * @param {number} displayWidth
  * @param {number} displayHeight
+ * @param {{ preferTwoLines?: boolean }} [options] preferTwoLines: 6文字以上は1行にせず2行にする（常時表示で背景箱の幅を狭く保ち、顔・髪から離すため）
  * @returns {{ lines: string[], titleSize: number, shrunk: boolean, fits: boolean }}
  */
-export function fitTopicTitle(title, displayWidth, displayHeight) {
+export function fitTopicTitle(title, displayWidth, displayHeight, options = {}) {
   const t = typeof title === 'string' ? title.trim() : ''
   const L = getTopicLayout(displayWidth, displayHeight)
   const rightOf = (lines, size) => {
@@ -126,7 +127,7 @@ export function fitTopicTitle(title, displayWidth, displayHeight) {
 
   // 1. 1行
   const singleLimit = Math.round(displayWidth * TOPIC_BOX_SINGLE_LINE_RIGHT_RATIO)
-  if (n <= TOPIC_TITLE_LINE_HARD_MAX_CHARS && rightOf([t], L.titleBase) <= singleLimit) {
+  if (!(options.preferTwoLines && n >= 6) && n <= TOPIC_TITLE_LINE_HARD_MAX_CHARS && rightOf([t], L.titleBase) <= singleLimit) {
     return { lines: [t], titleSize: L.titleBase, shrunk: false, fits: true }
   }
 
@@ -205,4 +206,87 @@ export function buildTopicEvents(section, p) {
     `Dialogue: ${TOPIC_LAYER_TEXT},${start},${end},${TOPIC_STYLE_LABEL},,0,0,0,,{\\an7\\pos(${g.label.x},${g.label.y})${fade}}${escapeAssText(TOPIC_LABEL_TEXT)}`,
     `Dialogue: ${TOPIC_LAYER_TEXT},${start},${end},${TOPIC_STYLE_TITLE},,0,0,0,,{\\an7\\pos(${g.title.x},${g.title.y})${titleColourTag}${fade}}${title}`,
   ]
+}
+
+/**
+ * 常時表示版のDialogue行。背景・縦ライン・`TALK THEME` は区間全体で1組だけ出し（消さない・フェードしない）、
+ * タイトルだけをテーマごとに同じ位置で差し替える。切り替えで空白フレームが生じないよう、タイトルは隙間・重複なしに並べる。
+ * 背景は全テーマのタイトルが収まる共通サイズ（最大幅・最大高さ）にする。
+ *
+ * @param {Array<{ id: string, title: string, startSec: number, endSec: number }>} sections 隙間・重複なし（normalizeTopicSectionsContinuous の結果）
+ * @param {{ accent: string, displayWidth: number, displayHeight: number, accentMode?: 'label' | 'title', startSec: number, endSec: number }} p
+ * @returns {{ events: string[], geometry: { box: object, bar: object, label: object, title: object, titleSizes: number[] } | null }}
+ */
+export function buildContinuousTopicEvents(sections, p) {
+  const fits = sections.map((s) => fitTopicTitle(s.title, p.displayWidth, p.displayHeight, { preferTwoLines: true }))
+  if (sections.length === 0 || fits.some((f) => f.lines.length === 0)) return { events: [], geometry: null }
+  const gs = fits.map((f) => computeTopicGeometry(f.lines, p.displayWidth, p.displayHeight, f.titleSize))
+  const box = { x: gs[0].box.x, y: gs[0].box.y, w: Math.max(...gs.map((g) => g.box.w)), h: Math.max(...gs.map((g) => g.box.h)) }
+  const bar = { ...gs[0].bar, h: box.h }
+  const label = gs[0].label
+  const title = gs[0].title
+  const accentMode = p.accentMode === 'title' ? 'title' : 'label'
+  const accentBgr = p.accent.replace(/&H\d{2}/, '&H')
+  const start = formatAssTime(p.startSec)
+  const end = formatAssTime(p.endSec)
+  const rect = (r) => `m 0 0 l ${r.w} 0 ${r.w} ${r.h} 0 ${r.h}`
+  const draw = (layer, r, colour, alpha) =>
+    `Dialogue: ${layer},${start},${end},${TOPIC_STYLE_BOX},,0,0,0,,{\\an7\\pos(${r.x},${r.y})\\p1\\bord0\\shad0\\1c${colour}\\1a${alpha}}${rect(r)}{\\p0}`
+  const events = [
+    draw(TOPIC_LAYER_BOX, box, BOX_COLOUR, BOX_ALPHA),
+    draw(TOPIC_LAYER_BAR, bar, accentBgr, '&H00&'),
+    `Dialogue: ${TOPIC_LAYER_TEXT},${start},${end},${TOPIC_STYLE_LABEL},,0,0,0,,{\\an7\\pos(${label.x},${label.y})}${escapeAssText(TOPIC_LABEL_TEXT)}`,
+  ]
+  sections.forEach((s, i) => {
+    const f = fits[i]
+    const text = f.lines.map((l) => escapeAssText(l)).join('\\N')
+    const tag = (accentMode === 'title' ? `\\1c${accentBgr}` : '') + (f.shrunk ? `\\fs${f.titleSize}` : '')
+    events.push(`Dialogue: ${TOPIC_LAYER_TEXT},${formatAssTime(s.startSec)},${formatAssTime(s.endSec)},${TOPIC_STYLE_TITLE},,0,0,0,,{\\an7\\pos(${title.x},${title.y})${tag}}${text}`)
+  })
+  return { events, geometry: { box, bar, label, title, titleSizes: fits.map((f) => f.titleSize) } }
+}
+
+const parseAssTime = (t) => {
+  const m = /^(\d+):(\d\d):(\d\d)\.(\d\d)$/.exec(t)
+  return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 100 : NaN
+}
+
+/**
+ * 生成済みASS本文から、テーマ表示の被覆を実際のDialogueイベントで検証する（JSONの時刻ではなくASSを読む）。
+ * @param {string} assText
+ * @param {{ startSec: number, endSec: number }} range
+ */
+export function analyzeTopicAssEvents(assText, range) {
+  const ev = { box: [], label: [], title: [] }
+  for (const line of assText.split('\n')) {
+    const m = /^Dialogue: (\d+),([^,]+),([^,]+),([^,]*),/.exec(line)
+    if (!m) continue
+    const [, , st, en, style] = m
+    const iv = [parseAssTime(st), parseAssTime(en)]
+    if (style === TOPIC_STYLE_BOX) ev.box.push({ layer: Number(m[1]), iv })
+    else if (style === TOPIC_STYLE_LABEL) ev.label.push({ iv })
+    else if (style === TOPIC_STYLE_TITLE) ev.title.push({ iv })
+  }
+  const covered = (ivs) => {
+    const sorted = ivs.map((x) => x.iv).sort((a, b) => a[0] - b[0])
+    let cur = range.startSec
+    let gap = 0
+    let overlap = 0
+    for (const [a, b] of sorted) {
+      if (a > cur + 1e-6) gap += a - cur
+      if (a < cur - 1e-6) overlap += cur - a
+      cur = Math.max(cur, b)
+    }
+    if (cur < range.endSec) gap += range.endSec - cur
+    return { coveredSec: sorted.reduce((s, [a, b]) => s + (b - a), 0), gapSec: Math.round(gap * 1000) / 1000, overlapSec: Math.round(overlap * 1000) / 1000, count: sorted.length, firstStart: sorted[0]?.[0] ?? null, lastEnd: sorted[sorted.length - 1]?.[1] ?? null }
+  }
+  const boxes = ev.box
+  const titles = ev.title.map((x) => x.iv).sort((a, b) => a[0] - b[0])
+  return {
+    background: covered(boxes.filter((b) => b.layer === TOPIC_LAYER_BOX)),
+    accentBar: covered(boxes.filter((b) => b.layer === TOPIC_LAYER_BAR)),
+    label: covered(ev.label),
+    title: covered(ev.title),
+    boundaries: titles.slice(1).map((iv, i) => ({ atSec: iv[0], previousEnd: titles[i][1], exact: Math.abs(iv[0] - titles[i][1]) < 1e-6 })),
+  }
 }

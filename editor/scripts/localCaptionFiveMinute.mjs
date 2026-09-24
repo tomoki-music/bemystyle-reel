@@ -43,8 +43,8 @@ import { measureSyncAgainstAudio, measureCaptionTiming, readabilityStats, countF
 import { measureCaptionRender } from '../server/lib/assRenderMeasure.mjs'
 import { getCaptionFitLimits } from '../server/lib/captionFit.mjs'
 import { runAnalysisOnce, revalidateSavedResponse, loadAnalysis, materializeAnalysis, fingerprintCaptions, AnalysisError } from '../server/lib/topicAnalysis.mjs'
-import { fitTopicTitle } from '../server/lib/topicAss.mjs'
-import { validateTopicSections } from '../server/lib/topicSections.mjs'
+import { fitTopicTitle, buildContinuousTopicEvents, analyzeTopicAssEvents } from '../server/lib/topicAss.mjs'
+import { validateTopicSections, normalizeTopicSectionsContinuous } from '../server/lib/topicSections.mjs'
 
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -68,6 +68,7 @@ function parseArgs(argv) {
     else if (a === '--allow-api') out.allowApi = true
     else if (a === '--from-cache') out.fromCache = true
     else if (a === '--manual-emphasis') out.manualEmphasis = true
+    else if (a === '--continuous-topics') out.continuousTopics = true
     else if (a === '--dry-run') out.dryRun = true
     else if (a === '--midword-silence-span-sec') out.midWordSilenceSpanSec = Number(argv[++i])
     else if (a === '--attempt') out.attempt = Number(argv[++i])
@@ -477,6 +478,74 @@ async function ffmpegNullDecode(sourceOrOut, startSec, durSec) {
   await execFileAsync(process.env.FFMPEG_BIN, ['-v', 'error', '-ss', String(startSec), '-i', sourceOrOut, '-t', String(durSec), '-f', 'null', '-'])
 }
 
+
+/**
+ * 完成MP4の全フレームを読み、テーマ表示（琥珀色の縦ライン・TALK THEMEラベル・タイトル）が存在するかを画素で確認する。
+ * ASSのイベントではなく、実際に焼き込まれた映像を測る。字幕本文は扱わない（数値のみ）。
+ */
+async function verifyThemeFramesInVideo(videoPath, geometry, sections, startSecInClip = 0) {
+  const { stdout: probeOut } = await execFileAsync(process.env.FFPROBE_BIN, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=avg_frame_rate,nb_frames,width,height', '-of', 'json', videoPath])
+  const st = JSON.parse(probeOut).streams[0]
+  const [fn, fd] = String(st.avg_frame_rate).split('/').map(Number)
+  const fps = fn / (fd || 1)
+  const run = async (crop, w, h, fmt) => {
+    const { stdout } = await execFileAsync(process.env.FFMPEG_BIN, ['-v', 'error', '-i', videoPath, '-an', '-vf', `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${w}:${h}:flags=area,format=${fmt}`, '-f', 'rawvideo', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1 << 30 })
+    const per = w * h * (fmt === 'rgb24' ? 3 : 1)
+    return { buf: stdout, per, frames: Math.floor(stdout.length / per) }
+  }
+  const { box, bar, label, title } = geometry
+  const barR = await run({ x: bar.x, y: bar.y, w: bar.w, h: bar.h }, 1, 1, 'rgb24')
+  const titleR = await run({ x: title.x, y: title.y, w: Math.max(8, box.w - (title.x - box.x) - 8), h: Math.round(geometry.titleSizes[0] * 0.9) }, 48, 4, 'gray')
+  const labelR = await run({ x: label.x, y: label.y, w: 220, h: 30 }, 22, 3, 'gray')
+  const frames = Math.min(barR.frames, titleR.frames, labelR.frames)
+  const amber = [0xf0, 0xb3, 0x4a]
+  let noBar = 0
+  let noTitle = 0
+  let noLabel = 0
+  let minTitleBright = Infinity
+  const perFrame = []
+  for (let f = 0; f < frames; f++) {
+    const r = barR.buf[f * 3]
+    const g = barR.buf[f * 3 + 1]
+    const b = barR.buf[f * 3 + 2]
+    const barOk = Math.abs(r - amber[0]) < 30 && Math.abs(g - amber[1]) < 30 && Math.abs(b - amber[2]) < 40
+    let tb = 0
+    for (let i = 0; i < titleR.per; i++) if (titleR.buf[f * titleR.per + i] > 170) tb++
+    let lb = 0
+    for (let i = 0; i < labelR.per; i++) if (labelR.buf[f * labelR.per + i] > 140) lb++
+    if (!barOk) noBar++
+    if (tb < 3) noTitle++
+    if (lb < 2) noLabel++
+    minTitleBright = Math.min(minTitleBright, tb)
+    perFrame.push({ bar: barOk, title: tb >= 3, label: lb >= 2 })
+  }
+  // 切り替え境界の前後（±3フレーム）
+  const boundaries = sections.slice(1).map((sct) => {
+    const f0 = Math.round((sct.startSec - startSecInClip) * fps)
+    const win = perFrame.slice(Math.max(0, f0 - 3), f0 + 4)
+    // タイトル帯の変化量（切り替えでタイトルが実際に入れ替わっていること）
+    const strip = (f) => titleR.buf.subarray(f * titleR.per, (f + 1) * titleR.per)
+    let diff = 0
+    const a = strip(Math.max(0, f0 - 2))
+    const c = strip(Math.min(frames - 1, f0 + 3))
+    for (let i = 0; i < a.length; i++) diff += Math.abs(a[i] - c[i])
+    return { atSec: Math.round(sct.startSec * 1000) / 1000, frameIndex: f0, framesChecked: win.length, allPresent: win.every((x) => x.bar && x.title && x.label), titleChangeScore: Math.round(diff / a.length) }
+  })
+  return {
+    fps: Math.round(fps * 1000) / 1000,
+    framesAnalyzed: frames,
+    framesExpected: Math.round(WINDOW_SEC * fps),
+    framesWithoutBar: noBar,
+    framesWithoutTitle: noTitle,
+    framesWithoutLabel: noLabel,
+    blankFrames: perFrame.filter((x) => !x.bar || !x.title || !x.label).length,
+    firstFramePresent: Boolean(perFrame[0]?.bar && perFrame[0]?.title && perFrame[0]?.label),
+    lastFramePresent: Boolean(perFrame[frames - 1]?.bar && perFrame[frames - 1]?.title && perFrame[frames - 1]?.label),
+    minTitleBrightPixels: minTitleBright,
+    boundaries,
+  }
+}
+
 async function stageRender(args) {
   const { file, bytes, job, canon } = loadJob(args.job)
   const canonBefore = canon(job)
@@ -496,7 +565,11 @@ async function stageRender(args) {
   const original = pages.captions
   const mat = materializeAnalysis(analysis, original)
   const captions = mat.captions
-  const topicSections = mat.topicSections
+  // 常時表示（--continuous-topics）: レンダー用に0〜300秒を隙間・重複なく被覆するよう正規化する。保存済みのAI候補・手動修正データは変更しない。
+  const continuous = Boolean(args.continuousTopics) && !checkOnly
+  const contNorm = continuous ? normalizeTopicSectionsContinuous(mat.topicSections, { startSec: 0, endSec: WINDOW_SEC }) : null
+  const topicSections = contNorm ? contNorm.sections : mat.topicSections
+  const topicOptions = contNorm ? { topicSections, topicAccentMode: 'label', topicContinuous: { startSec: 0, endSec: WINDOW_SEC } } : { topicSections, topicAccentMode: 'label' }
   const captionHashBefore = sha256(JSON.stringify(original.map((c) => [c.id, c.startSec, c.endSec, c.text, c.lines])))
 
   const problems = []
@@ -512,11 +585,13 @@ async function stageRender(args) {
   const limits = getCaptionFitLimits(W, H)
   if (fitPlan.some((f) => !f.fits)) problems.push('動的縮小(下限)でも使用可能幅に収まらない字幕があります')
   if (fitPlan.some((f) => f.size < limits.minSizePx)) problems.push('字幕サイズが下限を下回っています')
-  const topicFits = topicSections.map((t) => fitTopicTitle(t.title, W, H))
+  const topicFits = topicSections.map((t) => fitTopicTitle(t.title, W, H, { preferTwoLines: continuous }))
 
   const { sourceRealPath, outputRoot, srcBefore, existingOutputs } = safetyContext(job)
   const freeBefore = await getFreeBytes(outputRoot)
   const summary = {}
+  let assVerification = null
+  let frameVerification = null
   let outputs = {}
   const stillsWritten = []
   const t0 = Date.now()
@@ -555,7 +630,7 @@ async function stageRender(args) {
       // 動画は生成せず、実映像の1フレームへ字幕を焼き込んだ静止画だけを作る（位置・サイズ・顔との距離の確認用）
       mkdirSync(args.stillsDir, { recursive: true })
       const assPath = join(tmpDir, 'check.ass')
-      writeFileSync(assPath, buildAssContent({ width: W, height: H, captions }, { topicSections, topicAccentMode: 'label' }), 'utf-8')
+      writeFileSync(assPath, buildAssContent({ width: W, height: H, captions }, topicOptions), 'utf-8')
       const esc = assPath.replace(/\\/g, '\\\\\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")
       const picks = [...captions.filter((c) => c.lines.length === 2)].filter((_, i, a) => i % Math.max(1, Math.floor(a.length / 8)) === 0).slice(0, 8)
       for (const c of picks) {
@@ -573,8 +648,16 @@ async function stageRender(args) {
     }
     if (problems.length === 0 && !checkOnly) {
       const assPath = join(tmpDir, 'five_minute.ass')
-      writeFileSync(assPath, buildAssContent({ width: W, height: H, captions }, { topicSections, topicAccentMode: 'label' }), 'utf-8')
-      const finalPath = buildComparisonOutputPath('five_minute_topics', outputRoot, sourceRealPath)
+      const assText = buildAssContent({ width: W, height: H, captions }, topicOptions)
+      writeFileSync(assPath, assText, 'utf-8')
+      if (contNorm) {
+        // 生成したASSのDialogueイベントを読み、テーマ表示が0〜300秒を完全に被覆していることを確認する（JSONの時刻ではなくASS本文を検証）
+        assVerification = analyzeTopicAssEvents(assText, { startSec: 0, endSec: WINDOW_SEC })
+        const okAss = ['background', 'accentBar', 'label', 'title'].every((k) => assVerification[k].gapSec === 0 && assVerification[k].overlapSec === 0 && assVerification[k].firstStart === 0 && assVerification[k].lastEnd === WINDOW_SEC) && assVerification.title.coveredSec === WINDOW_SEC && assVerification.boundaries.every((b) => b.exact)
+        if (!okAss) problems.push('生成したASSでテーマ表示が0〜300秒を完全に被覆していません')
+        if (problems.length) throw new Error('ASSの検証に失敗したため動画を作りません')
+      }
+      const finalPath = buildComparisonOutputPath(contNorm ? 'five_minute_continuous_topics' : 'five_minute_topics', outputRoot, sourceRealPath)
       const partialPath = finalPath.replace(/\.mp4$/, '.partial.mp4')
       try {
         await renderPreviewClip({ sourceRealPath, assPath, outputPath: partialPath, startSec, clipDurationSec: WINDOW_SEC })
@@ -586,7 +669,13 @@ async function stageRender(args) {
         throw err
       }
       const probe = await runFfprobe(finalPath)
-      outputs = { five_minute_topics: { filename: finalPath.split('/').pop(), durationSec: round(probe.durationSec, 3), sizeBytes: statSync(finalPath).size } }
+      const fstat = statSync(finalPath)
+      outputs = { [contNorm ? 'five_minute_continuous_topics' : 'five_minute_topics']: { filename: finalPath.split('/').pop(), durationSec: round(probe.durationSec, 3), sizeBytes: fstat.size, createdAt: fstat.birthtime.toISOString() } }
+      if (contNorm) {
+        const g = buildContinuousTopicEvents(topicSections, { accent: '&H004AB3F0&', displayWidth: W, displayHeight: H, startSec: 0, endSec: WINDOW_SEC }).geometry
+        frameVerification = await verifyThemeFramesInVideo(finalPath, g, topicSections, 0)
+        if (frameVerification.blankFrames > 0 || !frameVerification.boundaries.every((b) => b.allPresent)) problems.push('完成動画にテーマ表示が欠けたフレームがあります')
+      }
 
       // 音声・デコードの機械検証
       const { stderr: volLog } = await execFileAsync(process.env.FFMPEG_BIN, ['-hide_banner', '-i', finalPath, '-vn', '-af', 'volumedetect', '-f', 'null', '-']).catch((e) => ({ stderr: e.stderr ?? '' }))
@@ -663,6 +752,7 @@ async function stageRender(args) {
       invariantProblems: problems,
     }
     summary.stillsWritten = stillsWritten
+    summary.continuousTopics = contNorm ? { normalization: contNorm.stats, assVerification, frameVerification } : null
   })
 
   const srcAfter = statSync(sourceRealPath)
