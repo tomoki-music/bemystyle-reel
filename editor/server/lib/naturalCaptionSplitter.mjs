@@ -51,6 +51,9 @@ export const NATURAL_DEFAULTS = {
   midWordSilenceSpanSec: null,
   consolidate: null, // 統合の条件の上書き（maxLen / maxSpeechSec / shortSpeechSec）
   targetPagesPerMinute: null, // 数値を指定すると、不自然にならない範囲でだけ統合して近づける（未達でも無理に統合しない）
+  // 分割位置を固定する（[[start, end], ...] で本文全体を隙間・重複なく覆う）。指定すると分割・修正・統合は行わず、時刻だけを
+  // 現在のアラインメントから再計算する（音声の時間軸を直したあと、本文・改行・件数を変えずに字幕時刻だけ更新する用途）。
+  fixedCuts: null,
 }
 
 const KIND_COST = { strong: 0, semantic: 4, comma: 6, conj: 8, phrase: 12, word: 60 }
@@ -325,6 +328,17 @@ export function splitTextIntoNaturalPages(text, timing0, bounds, overrides = {})
     cuts.reverse()
   }
 
+  const fixed = Array.isArray(opt.fixedCuts)
+  if (fixed) {
+    let at = 0
+    for (const c of opt.fixedCuts) {
+      if (!Array.isArray(c) || c[0] !== at || !(c[1] > c[0])) throw new Error('fixedCuts は本文全体を隙間・重複なく覆う必要があります')
+      at = c[1]
+    }
+    if (at !== n) throw new Error('fixedCuts は本文全体を隙間・重複なく覆う必要があります')
+    cuts = opt.fixedCuts.map((c) => [c[0], c[1]])
+  }
+
   let repairReport = null
   if (opt.repair) {
     const speechDur = (i, j) => {
@@ -390,10 +404,10 @@ export function splitTextIntoNaturalPages(text, timing0, bounds, overrides = {})
       },
     }
     const before = cuts.length
-    const rep = repairCuts(cuts, ctx)
+    const rep = fixed ? { cuts, actions: [], unresolved: [] } : repairCuts(cuts, ctx)
     cuts = rep.cuts
     let consolidated = 0
-    if (Number.isFinite(opt.targetPagesPerMinute)) {
+    if (Number.isFinite(opt.targetPagesPerMinute) && !fixed) {
       const target = Math.ceil((opt.targetPagesPerMinute * (bounds.endSec - bounds.startSec)) / 60)
       const c = consolidateCuts(cuts, { ...ctx, gapAt: (p) => gapAt[p] ?? 0, endsSentence, speechDur, len: (i, j) => j - i }, { targetCount: target, ...(opt.consolidate ?? {}) })
       cuts = c.cuts

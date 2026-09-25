@@ -7,8 +7,8 @@ import { fileURLToPath } from 'url'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 
-import { loadJob, safetyContext, FULL_DIR } from './localCaptionFull.mjs'
-import { buildPlan } from './localCaptionFullRender.mjs'
+import { loadJob, safetyContext } from './localCaptionFull.mjs'
+import { buildPlan, statePath } from './localCaptionFullRender.mjs'
 import { withTempDir } from '../server/lib/tempDir.mjs'
 import { resolveCompositionAssets } from '../server/lib/compositionRender.mjs'
 import { buildDigestStemArgs, planQrWindows } from '../server/lib/finalComposition.mjs'
@@ -16,7 +16,6 @@ import { buildDigestStemArgs, planQrWindows } from '../server/lib/finalCompositi
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const round = (v, d = 3) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : v)
-const STATE_PATH = resolve(FULL_DIR, 'full_v3.render-state.json')
 
 const norm = (s) => String(s).replace(/[\s、。！？!?,，「」『』（）()・…\n\\N]/g, '')
 /** 最長共通部分列 / 期待文字数（OCRの誤認識・欠落に強い一致率）。 */
@@ -32,7 +31,7 @@ const pct = (arr, q) => { const s = [...arr].sort((x, y) => x - y); return s.len
 
 export async function stageVerify(args, { composeFromSaved }) {
   const { job } = loadJob(args.job)
-  const state = JSON.parse(readFileSync(STATE_PATH, 'utf-8'))
+  const state = JSON.parse(readFileSync(statePath(), 'utf-8'))
   const { sourceRealPath, outputRoot, inputRoots } = safetyContext(job)
   const video = join(outputRoot, state.outputName)
   if (!existsSync(video)) throw new Error('完成動画が見つかりません')

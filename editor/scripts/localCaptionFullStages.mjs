@@ -9,7 +9,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { realpathSync } from 'fs'
 
-import { EDITOR_ROOT, FULL_DIR, loadJob, safetyContext, writeJsonAtomic } from './localCaptionFull.mjs'
+import { EDITOR_ROOT, FULL_DIR, loadJob, safetyContext, writeJsonAtomic, fullKey } from './localCaptionFull.mjs'
 import { getFreeBytes } from '../server/lib/diskSpace.mjs'
 import { withTempDir } from '../server/lib/tempDir.mjs'
 import { validateEmphasis } from '../server/lib/emphasisSelector.mjs'
@@ -22,8 +22,10 @@ import { measureCaptionTiming } from '../server/lib/comparisonMetrics.mjs'
 
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const KEY = 'full_v3'
-const p = (name) => resolve(FULL_DIR, `${KEY}.${name}.json`)
+// 保存データのバージョン（既定 full_v3。--key で同期修正版などの別バージョン）。実行時に決まるので都度参照する。
+const keyOf = () => fullKey()
+const pathFor = (key, name) => resolve(FULL_DIR, `${key}.${name}.json`)
+const p = (name) => pathFor(keyOf(), name)
 const sha256 = (b) => createHash('sha256').update(b).digest('hex')
 const round = (v, d = 3) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : v)
 const MIN_FREE_DURING_RENDER = 10 * 1024 ** 3
@@ -167,14 +169,19 @@ async function stagePrepare(args) {
   const canonBefore = canon(job)
   const pages = loadPages()
   const { caps, legacy, cum, canonicalText, types, emphasis } = composeCaptions(job, pages)
-  const { sections } = composeThemes(job, caps, cum)
+  // 同期修正版など: テーマ・ダイジェストは基準バージョンの保存値をそのまま使う（境界・区間は変更しない）。caption側の検証は新しいcaptionで行う。
+  const baseKey = args.reuseTopicsDigestFrom ? String(args.reuseTopicsDigestFrom).replace(/[^a-zA-Z0-9_-]/g, '') : null
+  const baseTopics = baseKey ? JSON.parse(readFileSync(pathFor(baseKey, 'topics'), 'utf-8')) : null
+  const baseDigest = baseKey ? JSON.parse(readFileSync(pathFor(baseKey, 'digest'), 'utf-8')) : null
+  if (baseKey && baseTopics.jobId !== job.id) throw new Error('基準バージョンのjobIdが一致しません')
+  const sections = baseTopics ? baseTopics.sections.map((s) => ({ ...s })) : composeThemes(job, caps, cum).sections
   const th = verifyThemes(sections, caps, job.durationSec)
 
   const cfg = resolveCompositionConfig(DIGEST_OVERRIDES)
   const v = validateCompositionConfig(cfg)
   const problems = []
   if (!v.ok) problems.push(...v.errors)
-  const sel = buildDigest(caps, th.normalized, cfg)
+  const sel = baseDigest ? { clips: baseDigest.clips.map((c) => ({ ...c })), reasons: [] } : buildDigest(caps, th.normalized, cfg)
   const digestThemes = digestThemeBlocks(th.normalized, sel.clips, caps)
   if (sel.reasons.length) problems.push(...sel.reasons)
   const digestTotal = sel.clips.reduce((a, c) => a + c.durationSec, 0)
@@ -196,9 +203,10 @@ async function stagePrepare(args) {
     canonicalSha256: sha256(canonicalText),
     captions: caps.map((c) => ({ id: c.id, startSec: c.startSec, endSec: c.endSec, text: c.text, lines: c.lines, startIndex: c.startIndex, captionType: c.captionType, emphasisText: c.emphasisText ?? null, lowConfidence: c.lowConfidence, displayOrder: c.displayOrder })),
   }
+  for (const n of ['captions', 'topics', 'digest']) if (existsSync(p(n))) throw new Error('同じバージョンの保存データが既にあります（上書きしません。別の --key を指定してください）')
   writeJsonAtomic(p('captions'), doc)
-  writeJsonAtomic(p('topics'), { createdAt: new Date().toISOString(), version: 3, jobId: job.id, source: 'manual', sections: sections.map((s) => ({ ...s })) })
-  writeJsonAtomic(p('digest'), { createdAt: new Date().toISOString(), version: 3, config: DIGEST_OVERRIDES.digest, clips: sel.clips, totalSec: round(digestTotal, 3), themeIds: themeOfClip })
+  writeJsonAtomic(p('topics'), { createdAt: new Date().toISOString(), version: 3, jobId: job.id, source: 'manual', ...(baseKey ? { reusedFrom: baseKey } : {}), sections: sections.map((s) => ({ ...s })) })
+  writeJsonAtomic(p('digest'), { createdAt: new Date().toISOString(), version: 3, config: DIGEST_OVERRIDES.digest, ...(baseKey ? { reusedFrom: baseKey } : {}), clips: sel.clips, totalSec: round(digestTotal, 3), themeIds: themeOfClip })
 
   const cntBy = (arr, f) => arr.reduce((h, x) => ({ ...h, [f(x)]: (h[f(x)] ?? 0) + 1 }), {})
   const legacyCounts = cntBy(legacy, (c) => c.captionType)
@@ -218,8 +226,8 @@ async function stagePrepare(args) {
 export async function stageRest(args) {
   if (args.stage === 'prepare') return stagePrepare(args)
   const { stageRender, stageCheck } = await import('./localCaptionFullRender.mjs')
-  if (args.stage === 'render') return stageRender(args, { KEY, p, composeFromSaved })
-  if (args.stage === 'check') return stageCheck(args, { KEY, p, composeFromSaved })
+  if (args.stage === 'render') return stageRender(args, { KEY: keyOf(), p, composeFromSaved })
+  if (args.stage === 'check') return stageCheck(args, { KEY: keyOf(), p, composeFromSaved })
   if (args.stage === 'verify') {
     const { stageVerify } = await import('./localCaptionFullVerify.mjs')
     return stageVerify(args, { composeFromSaved })

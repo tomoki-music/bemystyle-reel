@@ -8,7 +8,7 @@ import { createHash } from 'crypto'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 
-import { EDITOR_ROOT, FULL_DIR, loadJob, safetyContext, writeJsonAtomic } from './localCaptionFull.mjs'
+import { EDITOR_ROOT, FULL_DIR, loadJob, safetyContext, writeJsonAtomic, fullKey } from './localCaptionFull.mjs'
 import { getFreeBytes } from '../server/lib/diskSpace.mjs'
 import { withTempDir } from '../server/lib/tempDir.mjs'
 import { normalizeTopicSectionsContinuous } from '../server/lib/topicSections.mjs'
@@ -21,7 +21,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const MIN_FREE_DURING_RENDER = 10 * 1024 ** 3
 const round = (v, d = 3) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : v)
 const sha256 = (b) => createHash('sha256').update(b).digest('hex')
-const STATE_PATH = resolve(FULL_DIR, 'full_v3.render-state.json')
+export const statePath = () => resolve(FULL_DIR, `${fullKey()}.render-state.json`)
 
 const hashFile = (path) => new Promise((res, rej) => {
   const h = createHash('sha256')
@@ -31,13 +31,16 @@ const dirSnapshot = (dir) => Object.fromEntries(readdirSync(dir).map((n) => { co
 const dirHashes = (dir) => Object.fromEntries(readdirSync(dir).filter((n) => n.endsWith('.json')).map((n) => [n, sha256(readFileSync(join(dir, n)))]))
 
 /** 保存済みデータ（caption・テーマ・ダイジェスト）と設定から、最終動画の計画（タイムライン・ASS）を組み立てる。 */
-export function buildPlan(job, saved, paths) {
+export function buildPlan(job, saved, paths, opts = {}) {
   const caps = saved.capDoc.captions
-  const cfg = resolveCompositionConfig({ digest: { ...saved.digest.config, bgm: { path: paths.bgm } }, line: { qrPath: paths.qr } })
+  // opts.range: 短い試験用に本編の範囲を絞る（{ startSec, endSec }）。opts.overrides: 構成設定の上書き（試験でダイジェスト・LINE案内を外すなど）
+  const base = { digest: { ...saved.digest.config, bgm: { path: paths.bgm } }, line: { qrPath: paths.qr } }
+  for (const [k, v] of Object.entries(opts.overrides ?? {})) base[k] = v && typeof v === 'object' && !Array.isArray(v) && base[k] ? { ...base[k], ...v } : v
+  const cfg = resolveCompositionConfig(base)
   const norm = normalizeTopicSectionsContinuous(saved.topics.sections, { startSec: 0, endSec: job.durationSec })
   const clips = saved.digest.clips
-  const mainStartSec = 0
-  const mainEndSec = job.durationSec
+  const mainStartSec = opts.range?.startSec ?? 0
+  const mainEndSec = opts.range?.endSec ?? job.durationSec
   const timeline = planTimeline(cfg, { mainStartSec, mainEndSec, digestClips: clips })
   const digBlocks = digestThemeBlocks(norm.sections, clips, caps).blocks
   const mainBlock = mainThemeBlock(norm.sections, mainStartSec, mainEndSec, timeline.mainOffsetSec)
@@ -128,7 +131,8 @@ export async function stageRender(args, { composeFromSaved }) {
   const now = new Date()
   const p2 = (n) => String(n).padStart(2, '0')
   const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}_${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`
-  const outName = `video_captioned_complete_${stamp}.mp4`
+  const prefix = String(args.outPrefix || 'video_captioned_complete').replace(/[^a-zA-Z0-9_-]/g, '')
+  const outName = `${prefix}_${stamp}.mp4`
   const finalPath = join(outputRoot, outName)
   check('出力ファイルが未存在（上書きしない）', !existsSync(finalPath))
   check('出力名に元動画名・絶対パスを含まない', !outName.includes(job.sourceFilename.replace(/\.[^.]+$/, '')) && !outName.includes('/'))
@@ -163,7 +167,8 @@ export async function stageRender(args, { composeFromSaved }) {
   if (args.dryRun) return // 事前検証だけ
 
   // ── フルレンダー（1回だけ。自動再試行しない） ──
-  writeJsonAtomic(STATE_PATH, { createdAt: new Date().toISOString(), outputName: outName, originalQrSha256: originalSha, before })
+  if (existsSync(statePath())) throw new Error('同じバージョンのレンダー状態が既にあります（上書きしません。別の --key を指定してください）')
+  writeJsonAtomic(statePath(), { createdAt: new Date().toISOString(), outputName: outName, originalQrSha256: originalSha, before })
   let child = null
   let aborted = null
   const monitor = setInterval(async () => {
@@ -216,7 +221,7 @@ export async function stageRender(args, { composeFromSaved }) {
 // ────────────────────────────────────────────────────────────────
 export async function stageCheck(args, { composeFromSaved }) {
   const { job } = loadJob(args.job)
-  const state = JSON.parse(readFileSync(STATE_PATH, 'utf-8'))
+  const state = JSON.parse(readFileSync(statePath(), 'utf-8'))
   const { sourceRealPath, outputRoot, inputRoots } = safetyContext(job)
   const video = join(outputRoot, state.outputName)
   if (!existsSync(video)) throw new Error('完成動画が見つかりません')

@@ -2,6 +2,10 @@
 //
 // 使い方（editor/ で実行。.env の FFMPEG_BIN / FFPROBE_BIN / VIDEO_INPUT_ROOTS / VIDEO_OUTPUT_ROOT を使用）:
 //   node scripts/localCaptionFull.mjs align   --job <jobId>          # 全編を窓ごとにローカルwhisper.cpp(DTW)でアラインし、自然なページ分割（v3として保存）
+//        [--key <version>] [--base-key <version> --reuse-windows 1,2]   # 別バージョンへ保存 / 指定した窓は基準バージョンのwhisper結果を再利用（その窓だけ再アラインしない）
+//        [--shift-windows 0]   # 指定した窓は、基準バージョンのwhisper結果（トークン・無音）を「元動画の音声開始offset」だけ厳密にシフトして使う（whisperは再実行しない）
+//        [--pin-pages-from <version>]   # 再アラインする窓の分割位置（本文・改行・件数）を基準バージョンに固定し、時刻だけ再計算する
+//        既存のバージョンは上書きしない（同名のpagesがあれば中止）。
 //   node scripts/localCaptionFull.mjs prepare --job <jobId>          # 種別・強調の引き継ぎ、テーマ・ダイジェストの内部検証（保存済みデータのみ。動画は作らない）
 //   node scripts/localCaptionFull.mjs render  --job <jobId> --bgm <BGM> --qr <QR> [--dry-run]   # 事前検証→フルレンダー1回
 //   node scripts/localCaptionFull.mjs check   --job <jobId> --bgm <BGM> --qr <QR>   # レンダー後の基本検証（デコード・テーマ・不変性）
@@ -23,6 +27,7 @@ import dotenv from 'dotenv'
 
 import { validateSourcePath, validateOutputRoot } from '../server/lib/pathValidator.mjs'
 import { extractAudioSegmentWav } from '../server/lib/ffmpegRunner.mjs'
+import { execFileSync } from 'child_process'
 import { getFreeBytes } from '../server/lib/diskSpace.mjs'
 import { withTempDir } from '../server/lib/tempDir.mjs'
 import { buildWhisperArgs, runWhisperCli, parseWhisperJson, readWhisperJsonFile, PUNCTUATION_PROMPT } from '../server/lib/whisperLocal.mjs'
@@ -36,7 +41,9 @@ import { planFullWindows, clipLegacyCaptions, mergeWindowCaptions, validateFullC
 const __dirname = dirname(fileURLToPath(import.meta.url))
 export const EDITOR_ROOT = resolve(__dirname, '..')
 export const FULL_DIR = resolve(EDITOR_ROOT, 'data/local_caption_comparisons/full')
-const FULL_KEY = 'full_v3'
+const DEFAULT_FULL_KEY = 'full_v3'
+let FULL_KEY = DEFAULT_FULL_KEY
+const safeKey = (k) => String(k).replace(/[^a-zA-Z0-9_-]/g, '')
 const MIDWORD_SILENCE_SPAN_SEC = 0.9 // 承認済みの語中無音の例外（最大0.9秒）
 
 const sha256 = (b) => createHash('sha256').update(b).digest('hex')
@@ -44,6 +51,9 @@ const round = (v, d = 3) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 *
 const rounded = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'number' ? round(v) : v]))
 const snapshotDir = (dir) => new Map(readdirSync(dir).map((n) => [n, `${statSync(join(dir, n)).size}:${statSync(join(dir, n)).mtimeMs}`]))
 const pagesPath = () => resolve(FULL_DIR, `${FULL_KEY}.pages.json`)
+/** 保存データのバージョン（キー）。既定は full_v3。--key で別バージョン（同期修正版など）へ保存する。 */
+export const fullKey = () => FULL_KEY
+export const setFullKey = (k) => { FULL_KEY = safeKey(k || DEFAULT_FULL_KEY) || DEFAULT_FULL_KEY }
 
 function parseArgs(argv) {
   const o = { stage: argv[0] }
@@ -54,9 +64,25 @@ function parseArgs(argv) {
     else if (a === '--qr') o.qr = argv[++i]
     else if (a === '--frames-dir') o.framesDir = argv[++i]
     else if (a === '--from-cache') o.fromCache = true
+    else if (a === '--key') o.key = argv[++i]
+    else if (a === '--base-key') o.baseKey = argv[++i]
+    else if (a === '--reuse-windows') o.reuseWindows = String(argv[++i]).split(',').map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 0)
+    else if (a === '--shift-windows') o.shiftWindows = String(argv[++i]).split(',').map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 0)
+    else if (a === '--pin-pages-from') o.pinPagesFrom = argv[++i]
+    else if (a === '--out-prefix') o.outPrefix = argv[++i]
+    else if (a === '--reuse-topics-digest-from') o.reuseTopicsDigestFrom = argv[++i]
     else if (a === '--dry-run') o.dryRun = true
   }
   return o
+}
+
+/** 元動画の「音声の開始 − 映像の開始」（秒）。音声が映像より遅れて始まる場合は正。ffprobeの読み取りのみ。 */
+export function audioStartOffsetSec(sourceRealPath) {
+  const out = JSON.parse(execFileSync(process.env.FFPROBE_BIN, ['-v', 'error', '-print_format', 'json', '-show_entries', 'stream=codec_type,start_time', sourceRealPath], { encoding: 'utf-8' }))
+  const v = out.streams.find((s) => s.codec_type === 'video')
+  const a = out.streams.find((s) => s.codec_type === 'audio')
+  if (!v || !a) throw new Error('映像・音声ストリームを確認できません')
+  return Number(a.start_time) - Number(v.start_time)
 }
 
 export function loadJob(jobId) {
@@ -102,6 +128,18 @@ async function stageAlign(args) {
   const canonicalText = legacy.map((c) => c.text).join('')
   if (job.rawSegments.map((s) => s.text).join('') !== canonicalText) throw new Error('rawSegmentsの連結が正本と一致しません')
   const windows = planFullWindows(job.rawSegments, { windowCount: 3, durationSec: job.durationSec })
+  // 別バージョン保存と窓の再利用: 既存バージョンは上書きしない。再利用する窓は基準バージョンのwhisper結果（キャッシュ）から同じ手順で再計算する。
+  const reuse = new Set(args.reuseWindows ?? [])
+  const baseKey = safeKey(args.baseKey || FULL_KEY)
+  if (reuse.size && baseKey === FULL_KEY) throw new Error('窓を再利用するには、保存先と異なる --base-key が必要です')
+  const shiftWin = new Set(args.shiftWindows ?? [])
+  if (shiftWin.size && baseKey === FULL_KEY) throw new Error('シフトするには、保存先と異なる --base-key が必要です')
+  const audioOffsetSec = shiftWin.size ? audioStartOffsetSec(sourceRealPath) : 0
+  if (shiftWin.size && !(audioOffsetSec > 0 && audioOffsetSec < 0.5)) throw new Error('音声の開始offsetが想定範囲（0〜0.5秒）にありません')
+  for (const i of shiftWin) if (reuse.has(i)) throw new Error('同じ窓を再利用とシフトの両方に指定できません')
+  const pinDoc = args.pinPagesFrom ? JSON.parse(readFileSync(resolve(FULL_DIR, `${safeKey(args.pinPagesFrom)}.pages.json`), 'utf-8')) : null
+  if (pinDoc && pinDoc.jobId !== job.id) throw new Error('分割位置の基準バージョンのjobIdが一致しません')
+  if (!args.dryRun && existsSync(pagesPath())) throw new Error('同じバージョンのpagesが既にあります（上書きしません。別の --key を指定してください）')
 
   let peakNodeRss = process.memoryUsage().rss
   const sampler = setInterval(() => { peakNodeRss = Math.max(peakNodeRss, process.memoryUsage().rss) }, 500)
@@ -113,11 +151,24 @@ async function stageAlign(args) {
 
   const { removed: tempDirRemoved } = await withTempDir('lcv-full-', async (tmpDir) => {
     for (const w of windows) {
-      const cachePath = resolve(FULL_DIR, `${FULL_KEY}.window-${w.index}.align-cache.json`)
+      const reused = reuse.has(w.index)
+      const cachePath = resolve(FULL_DIR, `${reused ? baseKey : FULL_KEY}.window-${w.index}.align-cache.json`)
       const text = canonicalText.slice(w.startIndex, w.endIndex)
       let align, silences, thresholdDb, frameDb, frameSec, run
       let tw = Date.now()
-      if (args.fromCache) {
+      const shifted = shiftWin.has(w.index)
+      if (shifted) {
+        // 旧wav（音声の先頭から）は、新wav（映像の起点に合わせて先頭を無音で埋めたもの）から先頭のoffset分を除いたものと等価。
+        // 旧のwhisper結果（トークン・実測無音）を offset だけ後ろへずらすと、新しい時間軸の結果になる。
+        const base = JSON.parse(readFileSync(resolve(FULL_DIR, `${baseKey}.window-${w.index}.align-cache.json`), 'utf-8'))
+        if (base.canonicalSha256 !== sha256(text)) throw new Error('基準キャッシュが現在の正本と一致しません')
+        if (existsSync(cachePath)) throw new Error('同じバージョンのキャッシュが既にあります（上書きしません）')
+        const sh = (x) => round(x + audioOffsetSec, 4)
+        const cache = { ...base, tokens: base.tokens.map((t) => ({ ...t, startSec: sh(t.startSec), endSec: sh(t.endSec) })), silences: base.silences.map((x) => ({ ...x, startSec: sh(x.startSec), endSec: sh(x.endSec) })), shiftedFrom: baseKey, shiftSec: round(audioOffsetSec, 6) }
+        writeJsonAtomic(cachePath, cache)
+        ;({ silences, thresholdDb, frameDb, frameSec, run } = cache)
+        align = { tokens: cache.tokens }
+      } else if (args.fromCache || reused) {
         const cache = JSON.parse(readFileSync(cachePath, 'utf-8'))
         if (cache.canonicalSha256 !== sha256(text)) throw new Error('キャッシュが現在の正本と一致しません')
         ;({ silences, thresholdDb, frameDb, frameSec, run } = cache)
@@ -137,6 +188,7 @@ async function stageAlign(args) {
         const spawnFn = (bin, a, o) => spawn('/usr/bin/time', ['-l', bin, ...a], o)
         run = await runWhisperCli(wargs, { spawnFn, timeoutMs: 40 * 60 * 1000 })
         align = parseWhisperJson(readWhisperJsonFile(`${outBase}.json`))
+        if (existsSync(cachePath)) throw new Error('同じバージョンのキャッシュが既にあります（上書きしません）')
         writeJsonAtomic(cachePath, { canonicalSha256: sha256(text), tokens: align.tokens, silences, thresholdDb, frameDb: frameDb.map((v) => round(v, 2)), frameSec, run })
         rmSync(wavPath, { force: true })
       }
@@ -148,7 +200,12 @@ async function stageAlign(args) {
       const legacyWin = clipLegacyCaptions(legacy, w.startIndex, w.endIndex)
       const naturalArgs = { legacyCaptions: legacyWin, windowStartSec: w.startSec, windowDurationSec: w.durationSec, tokens: align.tokens, silences, timing }
       let repairReport = null
-      const natural = buildNaturalCaptions({ ...naturalArgs, splitOptions: { repair: true, targetPagesPerMinute: 30, midWordSilenceSpanSec: MIDWORD_SILENCE_SPAN_SEC, onRepairReport: (r) => { repairReport = r } } })
+      // 分割位置の固定（同期修正の再アラインメント）: 再アラインする窓だけ、基準バージョンのページ境界（正本上の位置）を使う。再利用する窓は従来どおり。
+      const fixedCuts = pinDoc && !reused
+        ? pinDoc.captions.filter((c) => c.windowIndex === w.index).map((c) => [c.startIndex - w.startIndex, c.startIndex - w.startIndex + c.text.length])
+        : null
+      if (pinDoc && !reused && !fixedCuts.length) throw new Error('基準バージョンにこの窓のcaptionがありません')
+      const natural = buildNaturalCaptions({ ...naturalArgs, splitOptions: { repair: true, targetPagesPerMinute: 30, midWordSilenceSpanSec: MIDWORD_SILENCE_SPAN_SEC, ...(fixedCuts ? { fixedCuts } : {}), onRepairReport: (r) => { repairReport = r } } })
       const caps = natural.captions
       const wp = []
       if (caps.map((c) => c.text).join('') !== text) wp.push('窓の本文が正本と一致しません')
@@ -218,6 +275,13 @@ async function stageAlign(args) {
   const doc = {
     createdAt: new Date().toISOString(),
     pagesVersion: 3,
+    key: FULL_KEY,
+    baseKey: reuse.size ? baseKey : null,
+    reusedWindows: [...reuse],
+    audioOriginFix: 'first_pts=0',
+    audioStartOffsetSec: shiftWin.size ? round(audioOffsetSec, 6) : null,
+    shiftedWindows: [...shiftWin],
+    pinnedPagesFrom: pinDoc ? safeKey(args.pinPagesFrom) : null,
     jobId: job.id,
     canonicalSha256: sha256(canonicalText),
     canonicalChars: canonicalText.length,
@@ -283,6 +347,7 @@ async function stageAlign(args) {
 async function main() {
   dotenv.config({ path: resolve(EDITOR_ROOT, '.env'), quiet: true })
   const args = parseArgs(process.argv.slice(2))
+  setFullKey(args.key)
   if (!args.job) throw new Error('--job <jobId> を指定してください')
   if (args.stage === 'align') return stageAlign(args)
   const { stageRest } = await import('./localCaptionFullStages.mjs')

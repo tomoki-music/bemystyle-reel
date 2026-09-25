@@ -201,3 +201,32 @@ describe('修正（repair）: 低信頼区間の推定時刻は、無音によ�
     expect(report.unresolved.some((u) => u.reasons.includes('compound'))).toBe(true)
   })
 })
+
+describe('fixedCuts: 分割位置を固定して時刻だけ再計算する（音声の時間軸を直したあとの再アラインメント用）', () => {
+  const T3 = '今日は皆さんにコミュニティの管理運営についてお話をします。とても大事な話です。'
+  const shifted = (tm, d) => ({ ...tm, charStart: tm.charStart.map((v) => v + d), charEnd: tm.charEnd.map((v) => v + d), total: tm.total + d })
+  it('本文・分割位置・件数は固定のまま、時刻だけが新しいアラインメントに従う', () => {
+    const tm = uniformTiming(T3)
+    const base = splitTextIntoNaturalPages(T3, tm, bounds(tm.total + 1), {})
+    const cuts = base.map((p) => [p.startIndex, p.endIndex])
+    const tm2 = shifted(tm, 0.067)
+    const re = splitTextIntoNaturalPages(T3, tm2, bounds(tm2.total + 1), { fixedCuts: cuts })
+    expect(re.map((p) => [p.startIndex, p.endIndex])).toEqual(cuts)
+    expect(re.map((p) => p.text).join('')).toBe(T3)
+    expect(re.map((p) => p.lines)).toEqual(base.map((p) => p.lines))
+    expect(re[1].startSec - base[1].startSec).toBeCloseTo(0.07, 1) // 発話時刻が0.067秒遅れた分だけ、字幕開始も遅れる（10ms単位）
+  })
+  it('repair指定でも分割・統合は行わない（固定のまま）', () => {
+    const tm = uniformTiming(T3)
+    const cuts = [[0, 10], [10, T3.length]]
+    let report = null
+    const re = splitTextIntoNaturalPages(T3, tm, bounds(tm.total + 1), { fixedCuts: cuts, repair: true, targetPagesPerMinute: 60, onRepairReport: (r) => { report = r } })
+    expect(re.map((p) => [p.startIndex, p.endIndex])).toEqual(cuts)
+    expect(report.unresolved).toEqual([])
+  })
+  it('本文全体を覆わない・隙間や重複がある固定位置は拒否する', () => {
+    const tm = uniformTiming(T3)
+    expect(() => splitTextIntoNaturalPages(T3, tm, bounds(tm.total), { fixedCuts: [[0, 10]] })).toThrow()
+    expect(() => splitTextIntoNaturalPages(T3, tm, bounds(tm.total), { fixedCuts: [[0, 10], [11, T3.length]] })).toThrow()
+  })
+})
