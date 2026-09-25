@@ -66,6 +66,16 @@ export const COMPOSITION_DEFAULTS = Object.freeze({
   sampleRate: 48000,
 })
 
+/**
+ * 正式採用した推奨プロファイル（約10秒のダイジェスト＋ダイジェスト→本編の暗転遷移）。COMPOSITION_DEFAULTS への上書きとして使う（素材・文言・時刻は含まない）。
+ * 本編BGM（音量0.05・ダッキング・フェード・ループ）・冒頭LINEオーバーレイ30秒・末尾LINE案内12秒・QR表示・ダイジェスト白黒は既定値がそのまま採用値。
+ * API/UI からは overrides.profile === 'recommended' で適用する（sanitizeCompositionOverrides）。
+ */
+export const RECOMMENDED_COMPOSITION_PROFILE = Object.freeze({
+  digest: Object.freeze({ durationSec: 10, minSec: 9, maxSec: 12, clipCount: Object.freeze({ min: 2, max: 3 }), clipSec: Object.freeze({ min: 2.5, max: 6.5 }) }),
+  transition: Object.freeze({ enabled: true }),
+})
+
 const clone = (o) => JSON.parse(JSON.stringify(o))
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v)
 function deepMerge(base, over) {

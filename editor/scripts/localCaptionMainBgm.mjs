@@ -23,7 +23,7 @@ import { EDITOR_ROOT, FULL_DIR, loadJob, safetyContext, writeJsonAtomic } from '
 import { pcm, measurePoint, ptsReport } from './localCaptionFullSync.mjs'
 import { analyzeTopicAssEvents } from '../server/lib/topicAss.mjs'
 import { planQrWindows } from '../server/lib/finalComposition.mjs'
-import { loadBase, SHORT_DIGEST_PICKS } from './localCaptionCuts.mjs'
+import { loadBase, getDigestPicks } from './localCaptionCuts.mjs'
 import { withTempDir } from '../server/lib/tempDir.mjs'
 import { readWavPcm16Mono, computeFrameDb, detectSilences } from '../server/lib/silenceDetector.mjs'
 import { findFirstSpeechOnset, planIntroCut, verifyIntroCutSilent, validateRecoveredCaptions, INTRO_CUT_DEFAULTS } from '../server/lib/introCut.mjs'
@@ -170,7 +170,7 @@ async function stageIntroAnalyze(args) {
     whisper = result
   }
 
-  const digest = buildShortDigest(base.captions, base.norm, SHORT_DIGEST_PICKS)
+  const digest = buildShortDigest(base.captions, base.norm, getDigestPicks())
   if (!digest.ok) throw new Error(`ダイジェストの検証に失敗: ${digest.problems.join(' / ')}`)
   const D = digest.totalSec
   const { items, trimmedTailSec } = introCutItems(job.durationSec, cut.plan.cutEndSec, FPS)
@@ -326,7 +326,7 @@ export async function measureDigestTail({ sourcePath, base, dig }) {
 export const PREVIEW_TRANSITION = Object.freeze({ enabled: true })
 
 export function buildMainBgmPreviewPlan(job, base, { paths, cutEndSec, mainBgm, mainSec = PREVIEW_MAIN_SEC, recovered = [], loopCheck = null, digestTail = null, transition = null, fullItems = null, strict = false }) {
-  const dig0 = buildShortDigest(base.captions, base.norm, SHORT_DIGEST_PICKS)
+  const dig0 = buildShortDigest(base.captions, base.norm, getDigestPicks())
   if (!dig0.ok) throw new Error(`ダイジェストの検証に失敗: ${dig0.problems.join(' / ')}`)
   if (digestTail && !digestTail.ok) throw new Error(`ダイジェスト末尾を確保できません: ${digestTail.reason}`)
   // 最後のクリップだけ、最後の発話＋余韻まで（開始・選択・順序・強調は変えない）
@@ -597,7 +597,7 @@ const mainBgmRequestFor = (job, cutDoc, inputRoots, seg1Sec) => { const full = f
 async function previewInputs(job, base, cutDoc, paths, mp3Real, volume, sourcePath) {
   const recovered = loadRecovered(job).captions.filter((c) => c.confirmed)
   const seg1Sec = PREVIEW_MAIN_SEC
-  const dig0 = buildShortDigest(base.captions, base.norm, SHORT_DIGEST_PICKS)
+  const dig0 = buildShortDigest(base.captions, base.norm, getDigestPicks())
   if (!dig0.ok) throw new Error(`ダイジェストの検証に失敗: ${dig0.problems.join(' / ')}`)
   const digestTail = await measureDigestTail({ sourcePath, base, dig: dig0 })
   const plan = buildMainBgmPreviewPlan(job, base, { paths, cutEndSec: cutDoc.cut.cutEndSec, mainBgm: { sourcePath: mp3Real, overrides: Number.isFinite(volume) ? { volume } : {} }, mainSec: seg1Sec, recovered, loopCheck: LOOP_CHECK, digestTail, transition: PREVIEW_TRANSITION })
@@ -726,7 +726,7 @@ async function stagePreviewVerify(args) {
   const cutEnd = cutDoc.cut.cutEndSec
   const out = { stage: 'preview-verify', outputName: state.outputName, sizeBytes: statSync(video).size }
   const gate = -45
-  const dig0 = buildShortDigest(base.captions, base.norm, SHORT_DIGEST_PICKS)
+  const dig0 = buildShortDigest(base.captions, base.norm, getDigestPicks())
 
   // 基本: 長さ・PTS・デコード・フレーム数
   out.pts = await ptsReport(video, T.totalSec)

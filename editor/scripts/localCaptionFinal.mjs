@@ -15,7 +15,7 @@ import { spawn as realSpawn } from 'child_process'
 import dotenv from 'dotenv'
 
 import { EDITOR_ROOT, FULL_DIR, loadJob, safetyContext, writeJsonAtomic } from './localCaptionFull.mjs'
-import { loadBase, SHORT_DIGEST_PICKS } from './localCaptionCuts.mjs'
+import { loadBase, getDigestPicks } from './localCaptionCuts.mjs'
 import { buildShortDigest } from '../server/lib/shortDigest.mjs'
 import { introCutItems } from '../server/lib/mainEdit.mjs'
 import { validateRecoveredCaptions } from '../server/lib/introCut.mjs'
@@ -36,14 +36,11 @@ const pathFor = (name) => resolve(FULL_DIR, `full_v6.${name}.json`)
 const PREVIEW_STATE = () => pathFor('preview2-state')
 const FINAL_STATE = () => pathFor('final-state')
 
-/** ユーザーが承認した仕様（確認動画 comparison_pastel_house_bgm_transition_20260925_174428）。ここと実際の計画が一致しなければ停止する。 */
+/** 正式採用したデザイン・BGMの推奨初期値。素材（動画・caption・文言・ファイル名）に依存する値はここへ置かず、保存データから導く。 */
 export const APPROVED = Object.freeze({
-  cutEndFrame: 62, // 0〜2.0667秒
-  captionCount: 495, introCaptionCount: 4, themeCount: 9, emphasisCount: 13, digestEmphasisCount: 2, digestClipCount: 2,
   mainBgm: Object.freeze({ volume: 0.05, loopStartSec: 34.56, crossfadeSec: 2, fadeInSec: 1.5, fadeOutSec: 2.5 }),
   duck: Object.freeze({ threshold: 0.015, ratio: 6, attack: 60, release: 1200, knee: 6, makeup: 1, sidechainHighpassHz: 120, sidechainLowpassHz: 5000 }),
   limiterLimit: 0.891,
-  intro: Object.freeze(['どうもこんにちは', '埼玉でシンガーソングライターをしております', 'トモキと申します', 'よろしくお願いします']),
   overlaySec: 30, outroSec: 12,
 })
 
@@ -64,7 +61,7 @@ export async function buildFinalPlan(args) {
   if (!info.ok) throw new Error(info.error)
   const rec = loadRecovered(job)
   const recovered = rec.captions.filter((c) => c.confirmed)
-  const dig0 = buildShortDigest(base.captions, base.norm, SHORT_DIGEST_PICKS)
+  const dig0 = buildShortDigest(base.captions, base.norm, getDigestPicks())
   if (!dig0.ok) throw new Error(`ダイジェストの検証に失敗: ${dig0.problems.join(' / ')}`)
   const digestTail = await measureDigestTail({ sourcePath: ctx.sourceRealPath, base, dig: dig0 })
   const full = introCutItems(job.durationSec, cutDoc.cut.cutEndSec, FPS)
@@ -85,7 +82,7 @@ export async function runPrechecks(args) {
   // 素材
   const assets = await resolveCompositionAssets(plan.cfg, ctx.inputRoots)
   add('素材: 元動画が読み取れる', readable(ctx.sourceRealPath), { sizeBytes: statSync(ctx.sourceRealPath).size })
-  add('素材: 本編BGM(パステルハウス)が実在・MP3として有効', info.ok && info.fileName === 'パステルハウス.mp3', { fileName: info.fileName, durationSec: info.durationSec, sampleRate: info.sampleRate, channels: info.channels })
+  add('素材: 本編BGMが実在・MP3として有効', info.ok && /\.mp3$/i.test(info.fileName), { fileName: info.fileName, durationSec: info.durationSec, sampleRate: info.sampleRate, channels: info.channels })
   add('素材: ダイジェストBGMとQR画像が有効', assets.ok, { errors: assets.errors, bgm: assets.bgm && { durationSec: assets.bgm.durationSec }, qr: assets.qr && { width: assets.qr.width, height: assets.qr.height } })
   if (assets.ok) {
     add('素材: 承認済みの確認動画と同一のファイル(SHA-256)', sha256(readFileSync(info.realPath)) === state.guard.mp3 && sha256(readFileSync(assets.bgm.realPath)) === state.guard.digestBgm && sha256(readFileSync(assets.qr.realPath)) === state.guard.qr && fileSig(ctx.sourceRealPath) === state.guard.source, { mp3: true, digestBgm: true, qr: true, source: true })
@@ -96,7 +93,7 @@ export async function runPrechecks(args) {
   // 承認済みの仕様との一致
   const cfgV = validateCompositionConfig(plan.cfg)
   add('構成設定が有効', cfgV.ok, cfgV.errors)
-  add('先頭カット: 0〜62フレーム(2.0667秒)、最初の息まで約123ms', cutDoc.cut.frameIndex === APPROVED.cutEndFrame && numEq(full.items[0].srcStartSec, APPROVED.cutEndFrame / FPS) && numEq(cutDoc.cut.keepBeforeSpeechSec, 0.123, 0.005), { cutEndSec: round(full.items[0].srcStartSec, 4), keepBeforeSpeechSec: round(cutDoc.cut.keepBeforeSpeechSec, 3) })
+  add('先頭カット: 保存済みの分析どおり（フレーム境界・最初の息まで約0.1〜0.2秒の余白）', Number.isInteger(cutDoc.cut.frameIndex) && numEq(full.items[0].srcStartSec, cutDoc.cut.frameIndex / FPS) && cutDoc.cut.keepBeforeSpeechSec >= 0.08 && cutDoc.cut.keepBeforeSpeechSec <= 0.2, { cutEndSec: round(full.items[0].srcStartSec, 4), keepBeforeSpeechSec: round(cutDoc.cut.keepBeforeSpeechSec, 3) })
   add('追加の無音カットなし（本編は元動画の連続1区間）', plan.tm.items.length === 1 && plan.tm.items[0].kind === 'seg', { items: plan.tm.items.length })
   const mb = plan.cfg.mainBgm
   add('本編BGM設定: 音量0.05・フェードイン1.5秒・フェードアウト2.5秒・ダッキングON・ループON', mb.enabled && numEq(mb.volume, APPROVED.mainBgm.volume) && numEq(mb.fadeInSec, 1.5) && numEq(mb.fadeOutSec, 2.5) && mb.ducking && mb.loop && mb.scope === 'main' && numEq(MAIN_BGM_DEFAULTS.volume, 0.05), { volume: mb.volume, fadeInSec: mb.fadeInSec, fadeOutSec: mb.fadeOutSec })
@@ -107,8 +104,8 @@ export async function runPrechecks(args) {
   add('ループ: 1周目は0秒から・2周目以降34.56秒・クロスフェード2秒', loopPlan.ok && numEq(loopPlan.introSec, 34.56) && numEq(loopPlan.loopStartSec, 34.56) && numEq(loopPlan.crossfadeSec, 2) && numEq(state.mainBgm.loopSelection.startSec, 34.56), { loops: loopPlan.loops, unitSec: loopPlan.unitSec })
   const tOk = JSON.stringify(T.transition) === JSON.stringify(state.transition) && T.transition.fadeOut.frames === 10 && T.transition.hold.frames === 3 && T.transition.fadeIn.frames === 9
   add('遷移: 承認済みの確認動画と同一（黒へ10f・黒3f・フェードイン9f）', tOk, { fadeOut: T.transition.fadeOut.frames, hold: T.transition.hold.frames, fadeIn: T.transition.fadeIn.frames, mainStartSec: T.transition.mainStartSec })
-  add('ダイジェスト末尾: 承認済みの確認動画と同一（最後の発話終了・余韻約0.287秒）', digestTail.ok && numEq(digestTail.speechEndSec, state.digestTail.speechEndSec) && numEq(digestTail.srcEndSec, state.digestTail.srcEndSec) && numEq(digestTail.afterSpeechSec, state.digestTail.afterSpeechSec) && digestTail.afterSpeechSec > 0.28 && digestTail.afterSpeechSec < 0.3 && digestTail.srcEndSec < digestTail.nextSpeechStartSec, { speechEndSec: digestTail.speechEndSec, nextSpeechStartSec: digestTail.nextSpeechStartSec, afterSpeechSec: digestTail.afterSpeechSec })
-  add('ダイジェスト: 2クリップ・強調2件・約10秒', plan.dig.clips.length === APPROVED.digestClipCount && plan.dig.clips.filter((c) => c.emphasis).length === APPROVED.digestEmphasisCount && T.liveDigestSec > 9.5 && T.liveDigestSec < 10.5, { clips: plan.dig.clips.length, emphasis: plan.dig.clips.filter((c) => c.emphasis).length, liveDigestSec: T.liveDigestSec })
+  add('ダイジェスト末尾: 承認済みの確認動画と同一（最後の発話終了・余韻・次の発話より前）', digestTail.ok && numEq(digestTail.speechEndSec, state.digestTail.speechEndSec) && numEq(digestTail.srcEndSec, state.digestTail.srcEndSec) && numEq(digestTail.afterSpeechSec, state.digestTail.afterSpeechSec) && digestTail.srcEndSec < digestTail.nextSpeechStartSec, { speechEndSec: digestTail.speechEndSec, nextSpeechStartSec: digestTail.nextSpeechStartSec, afterSpeechSec: digestTail.afterSpeechSec })
+  add('ダイジェスト: 選択どおり・強調は選択と一致・約10秒', plan.dig.clips.length >= 2 && plan.dig.clips.length === getDigestPicks().length && plan.dig.clips.filter((c) => c.emphasis).length === getDigestPicks().filter((p) => p.emphasisText).length && T.liveDigestSec > 9 && T.liveDigestSec < 12, { clips: plan.dig.clips.length, emphasis: plan.dig.clips.filter((c) => c.emphasis).length, liveDigestSec: T.liveDigestSec })
 
   // タイムライン
   let cont = T.sections[0].startSec === 0
@@ -116,7 +113,7 @@ export async function runPrechecks(args) {
   const sec = (k) => T.sections.find((s) => s.kind === k)
   const mainS = sec('main')
   add('最終タイムラインが連続（隙間・重なりなし）', cont && numEq(T.sections.at(-1).endSec, T.totalSec, 1e-6), T.sections.map((s) => ({ kind: s.kind, startSec: s.startSec, endSec: s.endSec, sec: round(s.endSec - s.startSec, 3) })))
-  add('本編の長さ=先頭カット後の元動画（末尾は0.033秒未満だけ切る）', numEq(mainS.endSec - mainS.startSec, mainSec, 1e-3) && numEq(D, mainS.startSec) && mainSec > 916 && mainSec < 917, { mainSec, mainStartSec: D })
+  add('本編の長さ=先頭カット後の元動画（末尾は0.033秒未満だけ切る）', numEq(mainS.endSec - mainS.startSec, mainSec, 1e-3) && numEq(D, mainS.startSec) && mainSec > 0 && job.durationSec - cutEnd - mainSec >= 0 && job.durationSec - cutEnd - mainSec < 1 / FPS + 1e-6, { mainSec, mainStartSec: D })
   add('冒頭LINE: 本編開始から30秒のオーバーレイ（全体の尺へ加算しない）', T.overlays.length === 1 && numEq(T.overlays[0].startSec, D) && numEq(T.overlays[0].endSec - T.overlays[0].startSec, APPROVED.overlaySec) && !T.sections.some((s) => s.kind === 'lineIntro'), T.overlays[0])
   add('末尾LINE: 12秒の独立区間・最後', sec('lineOutro') && numEq(sec('lineOutro').endSec - sec('lineOutro').startSec, APPROVED.outroSec) && numEq(sec('lineOutro').endSec, T.totalSec) && numEq(sec('lineOutro').startSec, mainS.endSec), sec('lineOutro'))
   const expectedFrames = Math.round(T.totalSec * FPS)
@@ -137,17 +134,17 @@ export async function runPrechecks(args) {
   let sorted = true
   for (let i = 1; i < caps.length; i++) sorted = sorted && caps[i].startSec >= caps[i - 1].startSec - 1e-9
   let inRange = caps.every((c) => c.startSec >= D - 1e-9 && c.endSec <= mainS.endSec + 1e-6 && c.endSec > c.startSec)
-  add('caption: 既存495件＋補完4件・欠落/重複/逆転なし', mainExisting.length === APPROVED.captionCount && base.captions.length === APPROVED.captionCount && intro.length === APPROVED.introCaptionCount && ids.size === caps.length && sorted && inRange && plan.mapped.verification.captions.ok, { existing: mainExisting.length, intro: intro.length, unique: ids.size, sorted, inRange, verified: plan.mapped.verification.captions.ok })
-  add('冒頭の補完caption4件: manual-intro-recovery・confirmed・承認済みの文言・時刻は保存データのまま', intro.length === 4 && intro.every((c, i) => c.confirmed === true && c.text === APPROVED.intro[i]) && validateRecoveredCaptions(P.rec.captions, base.captions).ok, intro.map((c) => ({ id: c.id, startSec: c.startSec, endSec: c.endSec })))
+  add('caption: 既存captionのすべて＋補完caption・欠落/重複/逆転なし', mainExisting.length === base.captions.length && intro.length === recovered.length && ids.size === caps.length && sorted && inRange && plan.mapped.verification.captions.ok, { existing: mainExisting.length, intro: intro.length, unique: ids.size, sorted, inRange, verified: plan.mapped.verification.captions.ok })
+  add('冒頭の補完caption: manual-intro-recovery・confirmed・保存データの文言のまま（時刻は再推定しない）', intro.length === recovered.length && intro.every((c, i) => c.confirmed === true && c.text === recovered[i].text) && (recovered.length === 0 || validateRecoveredCaptions(P.rec.captions, base.captions).ok), intro.map((c) => ({ id: c.id, startSec: c.startSec, endSec: c.endSec })))
   const emph = base.captions.filter((c) => c.emphasisText).length
-  add('強調: 本編13件・ダイジェスト2件', emph === APPROVED.emphasisCount && mainExisting.filter((c) => c.emphasisText).length === APPROVED.emphasisCount, { main: emph, digest: plan.dig.clips.filter((c) => c.emphasis).length })
+  add('強調: 本編の強調件数が元データと一致・ダイジェストは選択どおり', mainExisting.filter((c) => c.emphasisText).length === emph, { main: emph, digest: plan.dig.clips.filter((c) => c.emphasis).length })
   const same = mainExisting.every((c, i) => c.id === base.captions[i].id && c.text === base.captions[i].text && c.captionType === base.captions[i].captionType && c.emphasisText === base.captions[i].emphasisText && JSON.stringify(c.lines ?? null) === JSON.stringify(base.captions[i].lines ?? null))
   add('caption本文・順序・改行・種別・強調文字列が承認済みデータのまま', same, { compared: mainExisting.length })
   const assText = plan.buildAss({ width: assets.ok ? assets.qr.width : 554, height: assets.ok ? assets.qr.height : 518 })
   const spans = titleSpans(assText)
   const dSpan = spanCheck(spans, 0, T.digestSec)
   const mSpan = spanCheck(spans, D, mainS.endSec)
-  add('トークテーマ: 本編を100%常時表示（未表示0秒・重複0秒）', mSpan.gapSec === 0 && mSpan.overlapSec === 0 && plan.mapped.verification.themes.gapSec === 0 && plan.mapped.verification.themes.overlapSec === 0 && base.norm.length === APPROVED.themeCount && mSpan.titles === APPROVED.themeCount, { main: mSpan, mappedCoverage: plan.mapped.verification.themes.coverage, themes: base.norm.length })
+  add('トークテーマ: 本編を100%常時表示（未表示0秒・重複0秒）', mSpan.gapSec === 0 && mSpan.overlapSec === 0 && plan.mapped.verification.themes.gapSec === 0 && plan.mapped.verification.themes.overlapSec === 0 && mSpan.titles === base.norm.length, { main: mSpan, mappedCoverage: plan.mapped.verification.themes.coverage, themes: base.norm.length })
   add('トークテーマ: ダイジェストも常時表示（未表示0秒・重複0秒）', dSpan.gapSec === 0 && dSpan.overlapSec === 0, dSpan)
   const defs = getCaptionStyleDefs(job.width, job.height)
   const styleSizes = Object.fromEntries(assText.split('\n').filter((l) => l.startsWith('Style:')).map((l) => { const f = l.slice(6).split(','); return [f[0].trim(), Number(f[2])] }))

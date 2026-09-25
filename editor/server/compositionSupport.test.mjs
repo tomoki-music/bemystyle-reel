@@ -35,6 +35,13 @@ const job = {
 }
 
 describe('設定の受け渡し', () => {
+  it('遷移は enabled とフレーム数（範囲内の整数）だけ受け取り、profile: recommended で正式採用値（約10秒ダイジェスト＋暗転遷移）を土台にする', () => {
+    expect(sanitizeCompositionOverrides({ transition: { enabled: true, fadeOutFrames: 12, holdFrames: -1, fadeInFrames: 1.5, evil: 1 } }).transition).toEqual({ enabled: true, fadeOutFrames: 12 })
+    const r = sanitizeCompositionOverrides({ profile: 'recommended', digest: { durationSec: 11 } })
+    expect(r.transition).toEqual({ enabled: true })
+    expect(r.digest).toMatchObject({ durationSec: 11, minSec: 9, maxSec: 12, clipCount: { min: 2, max: 3 } })
+    expect(sanitizeCompositionOverrides({ profile: 'unknown' }).transition).toEqual({})
+  })
   it('UIからの上書きは許可した項目だけ。素材パス・未知のキーは無視する', () => {
     const o = sanitizeCompositionOverrides({ digest: { enabled: false, durationSec: 25, bgm: { path: '/etc/passwd', volume: 0.1 }, evil: 1 }, line: { qrPath: '/etc/passwd' }, lineOutro: { showQr: 'yes' }, __proto__: { x: 1 } })
     expect(o.digest).toEqual({ enabled: false, durationSec: 25, bgm: { volume: 0.1 } })

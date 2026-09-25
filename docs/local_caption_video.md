@@ -141,6 +141,11 @@ libass はデフォルトフォントへフォールバックするため、映�
 | `VIDEO_OUTPUT_ROOT` | ○ | レンダー結果MP4の書き出し先ディレクトリ（単一、絶対パス）。例: `/Users/you/Movies/captioned-output` |
 | `CAPTION_VIDEO_TMP_ROOT` | 任意 | 音声抽出やASSファイルの一時置き場。未設定時はOSの一時ディレクトリ配下 `bemystyle-caption-tmp` を使用。`VIDEO_INPUT_ROOTS` の中には絶対に置かないこと。 |
 | `CAPTION_VIDEO_FONT_FAMILY` | 任意 | ASS字幕のフォント名。デフォルト `Noto Sans CJK JP`。 |
+| `FFMPEG_BIN` / `FFPROBE_BIN` | ○ | libass 対応の ffmpeg / ffprobe（前述のセットアップ参照）。 |
+| `WHISPER_CLI_BIN` / `WHISPER_MODEL_PATH` | ローカル整列を使う場合 | whisper.cpp の実行ファイルとモデル（ローカルだけで完結）。 |
+| `COMPOSITION_BGM_PATH` | 任意 | ダイジェストBGM（許可ルート内のファイル）。UIから素材パスは受け付けないため、素材はここか runner の引数で指定する。 |
+| `COMPOSITION_QR_PATH` | 任意 | LINE QR画像（許可ルート内。PNG/JPG）。冒頭・末尾のLINE案内に表示。 |
+| `COMPOSITION_MAIN_BGM_PATH` | 任意 | 本編BGMの既定MP3（許可ルート内）。UIの「MP3ファイルを選択」でも選べる。 |
 
 **注意:** `editor/.env` には本番運用中のOpenAI APIキーが既に記載されています。このドキュメント作成
 にあたり、このファイルの中身を書き換えたり新しい行を追記したりはしていません（キー漏洩・事故を
@@ -299,12 +304,12 @@ mono/16kHz/64kbpsの音声はおおよそ十数MB程度になり、24MB上限に
 
 ### 本編BGM
 - 本編（冒頭LINEオーバーレイの間を含む）だけに小さく流す。ダイジェスト（既存BGM）・末尾LINE案内（無音）には使わない。別のフィルタチェーンなので同時に鳴らない。
-- 設定（`mainBgm`）: `enabled`（既定OFF）/ `sourcePath` / `volume`（標準0.03・上限0.06）/ `autoGain` / `ducking` / `loop` / `fadeInSec`（1.5）/ `fadeOutSec`（2.5）/ `scope: 'main'`。素材未指定・OFFなら従来どおり。ONで素材が無い・使えないときはレンダー開始前に停止する。
+- 設定（`mainBgm`）: `enabled`（既定OFF）/ `sourcePath` / `volume`（標準0.05・上限0.06）/ `autoGain` / `ducking` / `loop` / `fadeInSec`（1.5）/ `fadeOutSec`（2.5）/ `scope: 'main'`。素材未指定・OFFなら従来どおり。ONで素材が無い・使えないときはレンダー開始前に停止する。
 - MP3は許可ルート（`VIDEO_INPUT_ROOTS`）内を直接参照（アップロード・コピーしない）。UIは「MP3ファイルを選択」（候補はファイル名と不透明なIDだけ）。CLI/環境設定は `COMPOSITION_MAIN_BGM_PATH`。
 - 検証は ffprobe の実データ（音声ストリーム・コーデックmp3・duration）。拡張子・Content-Type は信用しない。
-- 音量: MP3と本編トークの発話中のRMSを測り、声−BGM（ダッキング前）が目標差（ダッキングON 20dB / OFF 26dB）になる初期ゲインを決める。ユーザー音量は標準に対する倍率で、差が12dB未満になる上げ方はできない。
-- ダッキング: 声をサイドチェインにした `sidechaincompress`（threshold 0.02・ratio 4・attack 60ms・release 900ms・knee 6）。サイドチェインは120〜5000Hzに絞り `acompressor` で検出レベルをそろえる。
-- ループ: 短いMP3は「末尾2秒→先頭2秒のクロスフェード」で継ぎ目のない単位WAV（一時ファイル）を作り `-stream_loop -1` で繰り返す。長いMP3は本編の長さで切る。本編終了でフェードアウトして無音。
+- 音量: MP3と本編トークの発話中のRMSを測り、声−BGM（ダッキング前）が目標差（ダッキングON 15.6dB / OFF 21.6dB）になる初期ゲインを決める。ユーザー音量は標準に対する倍率で、差が12dB未満になる上げ方はできない。
+- ダッキング: 声をサイドチェインにした `sidechaincompress`（threshold 0.015・ratio 6・attack 60ms・release 1200ms・knee 6・makeup 1）。サイドチェインは120〜5000Hzに絞り `acompressor` で検出レベルをそろえる。
+- ループ: 短いMP3は、1周目を曲の0秒から流し、2周目以降は自動選定したループ開始点（拍・音量・スペクトルの継ぎ目を実測して選ぶ。今回は34.56秒）から、末尾2秒→開始点直前2秒のクロスフェードで継ぎ目のない単位WAV（一時ファイル）を作り `-stream_loop -1` で繰り返す。長いMP3は本編の長さで切る。本編終了でフェードアウトして無音。
 - 最終ミックスに `alimiter`（-1dBFS・`level=0:latency=1`。自動レベル補正を切り、先読み遅延を補正）。
 
 ### 先頭無音カット
@@ -312,3 +317,71 @@ mono/16kHz/64kbpsの音声はおおよそ十数MB程度になり、24MB上限に
 - `server/lib/mainEdit.mjs`: 同じタイムマップで映像・音声・caption・手動補完caption・テーマ・LINEオーバーレイ・BGM終了・末尾案内を変換。
 - 冒頭の手動補完caption（`source: 'manual-intro-recovery'`、`full_v6.intro-recovery.json`）は確定済み（`confirmed: true`）のものだけ使う。既存captionは上書きしない。
 - ランナー: `node scripts/localCaptionMainBgm.mjs intro-analyze|machinery|preview|preview-verify --job <id>`（詳細はスクリプト冒頭）。`preview` は `--main-bgm` が無ければ「素材待ち」で停止する。
+
+---
+
+## 正式ワークフロー（新しい動画を作る手順）と推奨初期値
+
+「ダイジェスト → 本編（先頭無音カット・本編BGM・常時テーマ・冒頭/末尾LINE案内）」の正式版を、別の動画でも再現するための手順です。素材固有の値（パス・字幕本文・ID・秒数）はすべて Git 管理外のデータに置き、コード側にはありません。
+
+### 1. 環境設定（`editor/.env`・Git管理外）
+「環境変数」の表のとおり。最低限 `FFMPEG_BIN` / `FFPROBE_BIN` / `VIDEO_INPUT_ROOTS` / `VIDEO_OUTPUT_ROOT`。素材（元動画・MP3・QR）は **必ず `VIDEO_INPUT_ROOTS` の配下**に置く。出力先 `VIDEO_OUTPUT_ROOT` は実在するフォルダで、レンダー前に空き15GB以上が必要（実行中に10GB未満になったら安全に停止）。
+素材が無い・読めない・許可ルート外の場合は、**レンダー開始前にエラーで停止**する（黙って省略しない）。
+
+### 2. ジョブ作成 〜 文字起こし 〜 caption 編集（Web UI）
+`npm run editor` → `http://localhost:3001/?mode=local-caption`。元動画を選んでジョブ作成 → 文字起こし → caption の追加・編集・削除・並び替え。
+- captionType（normal / main / sub / emphasis）と部分強調（`emphasisText`。本文の完全な部分文字列・1captionにつき1か所）は UI で付ける。
+- **トークテーマ**は本編全体を切れ目なく覆う区間として作る（未表示・重複0秒であること）。テーマ変更時は同じ位置でタイトルだけが入れ替わる。
+
+### 3. 構成設定（ダイジェスト・遷移・LINE・BGM）
+API/UI の `composition` 上書き（`POST /:id/render` ほか）で指定する。`profile: 'recommended'` を付けると、正式採用した推奨値（下記）を土台にできる。個別指定はその上に重ねる。
+- ダイジェスト: `digest.enabled / durationSec / grayscale`（白黒）。
+- 遷移: `transition.enabled / fadeOutFrames / holdFrames / fadeInFrames`（既定OFF。推奨プロファイルでON）。
+- LINE: `lineIntro`（overlay・秒数・QR）/ `lineOutro`（秒数・QR）/ `qr.enabled`。
+- 本編BGM: `mainBgm.enabled / volume / autoGain / ducking / loop / fadeInSec / fadeOutSec` と MP3 の選択。
+
+### 4. 短時間プレビュー（動画は短く・本番の前に必ず）
+- 通常のプレビュー: `POST /:id/preview-render`。
+- 本編BGM付きの30〜60秒プレビュー: `POST /:id/main-bgm-preview`（BGMの音量・ダッキングを耳で確認。ダイジェスト・LINE案内は入らない）。
+
+### 5. フルレンダー（Web UI / API）
+`POST /:id/render`。一時ファイル（`.rendering-*`）へ書き、**成功したときだけ最終名へ rename**。失敗・中断時は一時ファイルを削除し、既存の動画は上書きしない。
+
+### 6. 「確認動画 → 承認 → 最終版」の runner（`editor/scripts/`、15分級・再現性重視）
+今回の正式版はこの流れで作った。各 runner は外部APIを呼ばず、保存データ（`editor/data/local_caption_comparisons/full/`、Git管理外）だけを使う。
+1. `localCaptionFull.mjs align` — 全編をローカル whisper.cpp（DTW）で窓ごとに整列（**Whisper APIは使わない**）。`prepare` で種別・強調・テーマ・ダイジェストを内部検証。
+2. `localCaptionMainBgm.mjs intro-analyze` — 先頭の無音を実測して、最初の息の直前100〜150msを残すカット点を決める。`intro-recovery` は冒頭の挨拶の補完caption（文言は人が確定し `confirmed: true`）。
+3. **ダイジェストの発言選択**: 既定は `SHORT_DIGEST_PICKS`（この動画用）。別動画では Git管理外の `full_v6.digest-picks.json`（`[{ "firstIndex": 数, "lastIndex": 数, "emphasisText": "強調語" }, …]`、結論→理由の順、2件以上）を置くと `getDigestPicks()` がそちらを使う。形式が不正なら停止する。
+4. `localCaptionMainBgm.mjs preview --job <id> --main-bgm <MP3> --bgm <ダイジェストBGM> --qr <QR>` — 確認動画（1本）。ダイジェスト末尾の余韻・暗転遷移・BGMループ境界の確認区間つき。試聴して承認する。
+5. `localCaptionFinal.mjs precheck …` — レンダー前の必須確認（素材・SHA-256・空き容量・タイムライン連続・caption/テーマ/強調・BGM範囲・first_pts=0・出力名の衝突・字幕サイズ）。**1つでも失敗すれば止まる**。動画は作らず何も書かない。
+6. `localCaptionFinal.mjs render …` — precheck通過後に **1回だけ**フルレンダー（空き容量を10秒ごとに監視し10GB未満で停止）。状態を `full_v6.final-state.json` に残し、存在すると再実行を拒否する。
+7. `localCaptionFinal.mjs verify … --frames-dir <dir>` — レンダー後の検証（読み取りのみ）。
+
+共通の引数: `--job <ジョブID> --main-bgm <MP3> --bgm <ダイジェストBGM> --qr <QR>`（素材は許可ルート内のパスをコマンドラインで渡す。ソースコードへ書かない）。
+
+### 7. レンダー後の確認項目
+duration（映像・音声・コンテナ）と総フレーム数 / 1920×1080・映像+音声ストリーム / 全編デコードエラー0 / 開始PTS / 冒頭・25%・50%・75%・終了付近のA/V同期と蓄積ドリフト（音声遅れ0msが基準。映像は元動画の29.9977fpsによる±1フレームのぶれが出る） / ダイジェスト末尾〜本編開始の遷移と最初の息 / ダイジェストBGM・本編BGMの範囲（末尾LINE案内は無音） / BGMループ境界すべてのクリック・音量差 / caption件数・テーマ常時表示・強調 / QR（冒頭・末尾の開始直後・中央・終了直前を 1920/430/390px で読み取り） / LINEパネルと字幕・テーマの重なり / 元素材・データ・既存動画の不変 / 一時ファイル残りなし / 空き容量。**代表フレームは必ず目視し、音声は人が聴いて確認する**（機械測定だけで「確認済み」としない）。
+
+### 8. 失敗時の再開方法
+- Web UI のレンダー: 失敗しても一時ファイルは残らない。ジョブは編集可能に戻るので、原因（素材・容量など）を直して再実行。
+- runner の `render` が失敗: 不完全な完成ファイルは残らない。`full_v6.final-state.json`（`status: failed` と理由）を確認して削除してから再実行する（自動では再実行しない）。空き容量が原因なら先に空ける。
+- 元動画・MP3・QR・ジョブJSONは読み取り専用で、失敗しても変更されない。
+
+### 9. 外部APIが呼ばれる操作 / ローカルだけで完結する操作
+| 操作 | 外部API |
+|---|---|
+| Web UI「文字起こしを開始」（`/start-processing`） | **OpenAI Whisper API（課金あり）** |
+| Web UI「AIで種別を分類」（`/classify-captions`） | **OpenAI API（課金あり）** |
+| `localCaptionFull.mjs align`（whisper.cpp）、`prepare`、`localCaptionCuts.mjs`、`localCaptionMainBgm.mjs`、`localCaptionFinal.mjs`（precheck / render / verify）、Web UIのcaption編集・プレビュー・フルレンダー | なし（ローカルの ffmpeg / whisper.cpp と保存データだけ） |
+
+### 10. Git管理対象外になるもの
+`editor/.env` / `editor/data/`（ジョブJSON・整列結果・比較データ・出力状態）/ 動画・音源・QR画像・生成物。素材や字幕本文・絶対パスはコミットしない（テストが追跡ファイルを検査する）。
+
+### 11. 推奨初期値（今回正式採用）
+- **ダイジェスト**: 約10秒（9〜12秒・2〜3クリップ・各2.5〜6.5秒）、結論→理由、白黒、専用BGM（音量0.05・フェードイン1.2/アウト2.0秒）、トークテーマ常時表示、字幕126px＋強調、最後の発話＋余韻0.25〜0.4秒（次の発話の語頭は混入させない）。
+- **遷移**: 最終発話の余韻→黒へ10フレーム→黒3フレーム→本編へフェードイン9フレーム。黒の間は無音。ダイジェストBGMは本編へ漏らさない。
+- **本編冒頭**: 先頭の無音のみカット（最初の息の直前100〜150msを残す）。それ以外の短い間・語中無音はカットしない。
+- **本編BGM**: 音量0.05 / ダッキング threshold 0.015・ratio 6・attack 60ms・release 1200ms・knee 6・makeup 1（声検出120〜5000Hz） / 1周目は0秒から・2周目以降は自動選定した開始点 / クロスフェード2秒 / フェードイン1.5秒・アウト2.5秒 / リミッター −1dBFS（`level=0:latency=1`）。適用範囲は本編だけ。**音量は聴いて決めた値なので、機械測定値を理由に下げない**。
+- **字幕**: normal 116px / main 122 / sub 109 / emphasis 116、トークテーマ84、`TALK THEME` 40。テーマ箱の幅は全テーマの最長タイトルに合わせて固定される（テーマが増えると確認動画より広くなり得る）。
+- **LINE案内**: 冒頭は本編開始から30秒のオーバーレイ（動画の長さに加算しない・QRと見出しは最初のフレームから・本編は止めない）/ 末尾は12秒の独立区間（無音）/ 冒頭・末尾ともQR表示。
+- **安全**: 出力は一時ファイル→成功時のみrename・既存動画は上書きしない・開始前15GB / 実行中10GB の空き容量・元素材は変更しない。

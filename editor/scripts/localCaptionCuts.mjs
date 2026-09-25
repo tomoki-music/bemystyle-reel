@@ -38,7 +38,7 @@ const pathFor = (key, name) => resolve(FULL_DIR, `${key}.${name}.json`)
 const readJson = (key, name) => JSON.parse(readFileSync(pathFor(key, name), 'utf-8'))
 
 /** 人が選んだダイジェストの発言（caption範囲。文頭〜文末）。結論 → その理由の順（続きが気になる順）。強調語は本文の完全な部分文字列。 */
-export const SHORT_DIGEST_PICKS = [
+export const SHORT_DIGEST_PICKS = [ // 既定（この動画の人手選択）。別動画では Git管理外の full_v6.digest-picks.json（同じ形式の配列）で上書きする（getDigestPicks）
   { firstIndex: 226, lastIndex: 227, emphasisText: '無理して一緒に' }, // 結論: 違うなら無理して一緒に続ける必要はない
   { firstIndex: 398, lastIndex: 400, emphasisText: '違います' }, // 原因: 同じ音楽好きでも目的・熱量は違う
 ]
@@ -50,6 +50,19 @@ export const COMPARISON_PIECES = [
   { title: '区間C', note: '語中無音0.67秒を残した区間', a: 563, b: 575 },
   { title: '区間D', note: '語中無音0.72秒を残した区間', a: 731, b: 743 },
 ]
+/**
+ * ダイジェストの発言選択。Git管理外の保存データ full_v6.digest-picks.json があればそれを使い（別の動画用）、無ければ既定の SHORT_DIGEST_PICKS。
+ * 形式: [{ firstIndex, lastIndex, emphasisText? }, ...]（結論 → 理由の順）。形式が不正ならエラー（黙って既定へ戻さない）。
+ */
+export function getDigestPicks() {
+  const file = resolve(FULL_DIR, 'full_v6.digest-picks.json')
+  if (!existsSync(file)) return SHORT_DIGEST_PICKS
+  const doc = JSON.parse(readFileSync(file, 'utf-8'))
+  const picks = Array.isArray(doc) ? doc : doc.picks
+  const ok = Array.isArray(picks) && picks.length >= 2 && picks.every((p) => Number.isInteger(p.firstIndex) && Number.isInteger(p.lastIndex) && p.lastIndex >= p.firstIndex && (p.emphasisText == null || typeof p.emphasisText === 'string'))
+  if (!ok) throw new Error('full_v6.digest-picks.json の形式が不正です（[{ firstIndex, lastIndex, emphasisText? }] を2件以上）')
+  return picks
+}
 const CARD_SEC = 1.5
 
 function parseArgs(argv) {
@@ -84,7 +97,7 @@ export function loadBase(job) {
 
 /** 確認動画の計画（タイムマップ・ダイジェスト・ASS・タイムライン）。compare と verify で同じものを使う。 */
 export function buildComparisonPlan(job, paths, base) {
-  const dig = buildShortDigest(base.captions, base.norm, SHORT_DIGEST_PICKS)
+  const dig = buildShortDigest(base.captions, base.norm, getDigestPicks())
   if (!dig.ok) throw new Error(`ダイジェストの検証に失敗: ${dig.problems.join(' / ')}`)
   const items = []
   COMPARISON_PIECES.forEach((p, k) => {
@@ -152,7 +165,7 @@ async function stageAnalyze(args) {
   for (const n of ['digest', 'silence-plan', 'timemap']) if (existsSync(pathFor(OUT_KEY, n))) throw new Error(`同じバージョンの保存データが既にあります（上書きしません）: ${OUT_KEY}.${n}`)
 
   // 1) 新ダイジェスト
-  const dig = buildShortDigest(base.captions, base.norm, SHORT_DIGEST_PICKS)
+  const dig = buildShortDigest(base.captions, base.norm, getDigestPicks())
   if (!dig.ok) throw new Error(`ダイジェストの検証に失敗: ${dig.problems.join(' / ')}`)
   const digCaps = shortDigestCaptions(base.captions, dig.clips)
   const sizes = planDigestCaptionSizes(job.width, job.height, digCaps)

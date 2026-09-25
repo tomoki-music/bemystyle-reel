@@ -7,7 +7,7 @@
 import express from 'express'
 import { createReadStream } from 'fs'
 import { extname } from 'path'
-import { resolveCompositionConfig, validateCompositionConfig, selectDigestClips, planTimeline, shiftMainCaptions, digestCaptions, mainThemeBlock, digestThemeBlocks, buildFinalAss } from './lib/finalComposition.mjs'
+import { RECOMMENDED_COMPOSITION_PROFILE, resolveCompositionConfig, validateCompositionConfig, selectDigestClips, planTimeline, shiftMainCaptions, digestCaptions, mainThemeBlock, digestThemeBlocks, buildFinalAss } from './lib/finalComposition.mjs'
 import { resolveCompositionAssets, inspectAsset } from './lib/compositionRender.mjs'
 import { sanitizeMainBgmOverrides } from './lib/mainBgm.mjs'
 import { inspectMainBgm, listMainBgmCandidates, resolveMainBgmId } from './lib/mainBgmAssets.mjs'
@@ -38,7 +38,8 @@ export function sanitizeCompositionOverrides(body) {
   const bool = (v) => (typeof v === 'boolean' ? v : undefined)
   const mode = (v) => (v === 'overlay' || v === 'standalone' ? v : undefined)
   const strip = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined))
-  return {
+  const int = (v, lo, hi) => (Number.isInteger(v) && v >= lo && v <= hi ? v : undefined)
+  const rest = {
     digest: strip({ enabled: bool(body.digest?.enabled), durationSec: num(body.digest?.durationSec), grayscale: bool(body.digest?.grayscale), bgm: strip({ volume: num(body.digest?.bgm?.volume), fadeInSec: num(body.digest?.bgm?.fadeInSec), fadeOutSec: num(body.digest?.bgm?.fadeOutSec) }) }),
     lineIntro: strip({ enabled: bool(body.lineIntro?.enabled), mode: mode(body.lineIntro?.mode), durationSec: num(body.lineIntro?.durationSec), showQr: bool(body.lineIntro?.showQr), startWithMain: bool(body.lineIntro?.startWithMain) }),
     lineOutro: strip({ enabled: bool(body.lineOutro?.enabled), mode: mode(body.lineOutro?.mode), durationSec: num(body.lineOutro?.durationSec), showQr: bool(body.lineOutro?.showQr) }),
@@ -46,7 +47,11 @@ export function sanitizeCompositionOverrides(body) {
     preview: strip({ digest: bool(body.preview?.digest), lineIntro: bool(body.preview?.lineIntro), lineOutro: bool(body.preview?.lineOutro) }),
     // 本編BGM: 素材は「選択ID」（許可ルート内のMP3の不透明なID）だけ受け付ける。絶対パスは受け付けない。
     mainBgm: strip({ ...sanitizeMainBgmOverrides(body.mainBgm), sourceId: typeof body.mainBgm?.sourceId === 'string' && /^([0-9a-f]{16})?$/.test(body.mainBgm.sourceId) ? body.mainBgm.sourceId : undefined }),
+    // ダイジェスト→本編の暗転遷移（フレーム数は30fpsのフレーム）
+    transition: strip({ enabled: bool(body.transition?.enabled), fadeOutFrames: int(body.transition?.fadeOutFrames, 1, 60), holdFrames: int(body.transition?.holdFrames, 0, 30), fadeInFrames: int(body.transition?.fadeInFrames, 1, 60) }),
   }
+  // profile: 'recommended' は正式採用した推奨値（約10秒ダイジェスト＋暗転遷移）を土台にし、個別の指定で上書きする
+  return body.profile === 'recommended' ? merge(JSON.parse(JSON.stringify(RECOMMENDED_COMPOSITION_PROFILE)), rest) : rest
 }
 
 /** 選択ID（sourceId）を許可ルート内のMP3の実パスへ解決する。見つからなければ sourcePath を null にする（ONのままなら素材エラーで止まる）。 */
