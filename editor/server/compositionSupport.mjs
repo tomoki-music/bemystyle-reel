@@ -9,6 +9,8 @@ import { createReadStream } from 'fs'
 import { extname } from 'path'
 import { resolveCompositionConfig, validateCompositionConfig, selectDigestClips, planTimeline, shiftMainCaptions, digestCaptions, mainThemeBlock, digestThemeBlocks, buildFinalAss } from './lib/finalComposition.mjs'
 import { resolveCompositionAssets, inspectAsset } from './lib/compositionRender.mjs'
+import { sanitizeMainBgmOverrides } from './lib/mainBgm.mjs'
+import { inspectMainBgm, listMainBgmCandidates, resolveMainBgmId } from './lib/mainBgmAssets.mjs'
 import { normalizeTopicSectionsContinuous } from './lib/topicSections.mjs'
 
 const isPlainObject = (v) => v && typeof v === 'object' && !Array.isArray(v)
@@ -17,7 +19,8 @@ const isPlainObject = (v) => v && typeof v === 'object' && !Array.isArray(v)
 export function getCompositionEnvOverrides(env = process.env) {
   const bgm = String(env.COMPOSITION_BGM_PATH || '').trim()
   const qr = String(env.COMPOSITION_QR_PATH || '').trim()
-  return { ...(bgm ? { digest: { bgm: { path: bgm } } } : {}), ...(qr ? { line: { qrPath: qr } } : {}) }
+  const mainBgm = String(env.COMPOSITION_MAIN_BGM_PATH || '').trim() // 本編BGMのMP3（許可ルート内。ONにするのは上書きの mainBgm.enabled）
+  return { ...(bgm ? { digest: { bgm: { path: bgm } } } : {}), ...(qr ? { line: { qrPath: qr } } : {}), ...(mainBgm ? { mainBgm: { sourcePath: mainBgm } } : {}) }
 }
 
 /**
@@ -41,7 +44,17 @@ export function sanitizeCompositionOverrides(body) {
     lineOutro: strip({ enabled: bool(body.lineOutro?.enabled), mode: mode(body.lineOutro?.mode), durationSec: num(body.lineOutro?.durationSec), showQr: bool(body.lineOutro?.showQr) }),
     qr: strip({ enabled: bool(body.qr?.enabled) }),
     preview: strip({ digest: bool(body.preview?.digest), lineIntro: bool(body.preview?.lineIntro), lineOutro: bool(body.preview?.lineOutro) }),
+    // 本編BGM: 素材は「選択ID」（許可ルート内のMP3の不透明なID）だけ受け付ける。絶対パスは受け付けない。
+    mainBgm: strip({ ...sanitizeMainBgmOverrides(body.mainBgm), sourceId: typeof body.mainBgm?.sourceId === 'string' && /^([0-9a-f]{16})?$/.test(body.mainBgm.sourceId) ? body.mainBgm.sourceId : undefined }),
   }
+}
+
+/** 選択ID（sourceId）を許可ルート内のMP3の実パスへ解決する。見つからなければ sourcePath を null にする（ONのままなら素材エラーで止まる）。 */
+export function resolveMainBgmSource(cfgOverrides, roots) {
+  const mb = cfgOverrides?.mainBgm
+  if (!mb || mb.sourceId === undefined) return cfgOverrides
+  const { sourceId, ...rest } = mb
+  return { ...cfgOverrides, mainBgm: { ...rest, sourcePath: sourceId === '' ? null : resolveMainBgmId(sourceId, roots) } } // ''=選択の解除
 }
 
 const merge = (a, b) => {
@@ -52,15 +65,18 @@ const merge = (a, b) => {
 
 /** 設定と素材の状態（UI表示用。絶対パスは含めない）。 */
 export async function describeCompositionStatus(overrides, roots, deps = {}) {
-  const cfg = resolveCompositionConfig(merge(getCompositionEnvOverrides(deps.env), sanitizeCompositionOverrides(overrides)))
+  const cfg = resolveCompositionConfig(merge(getCompositionEnvOverrides(deps.env), resolveMainBgmSource(sanitizeCompositionOverrides(overrides), roots)))
   const safeAsset = (a) => (a ? { ok: a.ok, error: a.error ?? null, sizeBytes: a.sizeBytes ?? null, durationSec: a.durationSec ?? null, width: a.width ?? null, height: a.height ?? null } : { ok: false, error: '未設定', sizeBytes: null, durationSec: null, width: null, height: null })
   const bgm = cfg.digest.bgm.path ? await inspectAsset(cfg.digest.bgm.path, 'bgm', roots, deps) : null
   const qr = cfg.line.qrPath ? await inspectAsset(cfg.line.qrPath, 'qr', roots, deps) : null
   const { path: _bgmPath, ...bgmPublic } = cfg.digest.bgm
   const { qrPath: _qrPath, ...linePublic } = cfg.line
+  const { sourcePath: _mainBgmPath, sourceId: _mainBgmId, ...mainBgmPublic } = cfg.mainBgm
+  const mainBgmInfo = cfg.mainBgm.sourcePath ? await inspectMainBgm(cfg.mainBgm.sourcePath, roots, deps) : null
+  const mainBgmAsset = mainBgmInfo ? { ok: mainBgmInfo.ok, error: mainBgmInfo.error ?? null, fileName: mainBgmInfo.fileName ?? null, sizeBytes: mainBgmInfo.sizeBytes ?? null, durationSec: mainBgmInfo.durationSec ?? null, sampleRate: mainBgmInfo.sampleRate ?? null, channels: mainBgmInfo.channels ?? null } : { ok: false, error: '未設定', fileName: null, sizeBytes: null, durationSec: null, sampleRate: null, channels: null }
   return {
-    config: { ...cfg, digest: { ...cfg.digest, bgm: bgmPublic }, line: linePublic },
-    assets: { bgm: safeAsset(bgm), qr: safeAsset(qr) },
+    config: { ...cfg, digest: { ...cfg.digest, bgm: bgmPublic }, line: linePublic, mainBgm: mainBgmPublic },
+    assets: { bgm: safeAsset(bgm), qr: safeAsset(qr), mainBgm: mainBgmAsset },
     validation: validateCompositionConfig(cfg),
     configuredByEnv: isCompositionConfiguredByEnv(deps.env),
     appliesToFullRender: isCompositionConfiguredByEnv(deps.env),
@@ -73,7 +89,7 @@ export async function describeCompositionStatus(overrides, roots, deps = {}) {
  * @returns {Promise<{ cfg: object, assets: object, timeline: object, assText: string, digest: object, mainStartSec: number, mainEndSec: number }>}
  */
 export async function prepareJobComposition(job, overrides, roots, deps = {}) {
-  const cfg = resolveCompositionConfig(merge(getCompositionEnvOverrides(deps.env), sanitizeCompositionOverrides(overrides)), { mode: 'full' })
+  const cfg = resolveCompositionConfig(merge(getCompositionEnvOverrides(deps.env), resolveMainBgmSource(sanitizeCompositionOverrides(overrides), roots)), { mode: 'full' })
   const v = validateCompositionConfig(cfg)
   if (!v.ok) throw Object.assign(new Error(`構成設定が不正です: ${v.errors.join(' / ')}`), { status: 400 })
   const assets = await resolveCompositionAssets(cfg, roots, deps)
@@ -103,6 +119,36 @@ export async function prepareJobComposition(job, overrides, roots, deps = {}) {
   return { cfg, assets, timeline, assText, digest: { clips }, mainStartSec, mainEndSec }
 }
 
+/** 本編BGMの短時間プレビュー（30〜60秒）の長さ。 */
+export const MAIN_BGM_PREVIEW_SEC = Object.freeze({ min: 30, max: 60, default: 45 })
+
+/**
+ * 本編BGM付きの短時間プレビューを準備する。ダイジェスト・LINE案内は入れず、本編の一部（caption・テーマ・本編BGM）だけを作る。
+ * 開始は最初のcaptionの少し前（トークとBGMが同時に聞ける位置）。本編BGMがOFF・素材不備なら400で止める。
+ */
+export async function prepareMainBgmPreview(job, overrides, roots, opts = {}, deps = {}) {
+  const cfg = resolveCompositionConfig(
+    merge(merge(getCompositionEnvOverrides(deps.env), resolveMainBgmSource(sanitizeCompositionOverrides(overrides), roots)), { digest: { enabled: false }, lineIntro: { enabled: false }, lineOutro: { enabled: false } }),
+    { mode: 'full' },
+  )
+  if (!cfg.mainBgm.enabled) throw Object.assign(new Error('本編BGMがOFFです。「本編BGMを使用する」をONにしてください'), { status: 400 })
+  const v = validateCompositionConfig(cfg)
+  if (!v.ok) throw Object.assign(new Error(`構成設定が不正です: ${v.errors.join(' / ')}`), { status: 400 })
+  const assets = await resolveCompositionAssets(cfg, roots, deps)
+  if (!assets.ok) throw Object.assign(new Error(`素材を確認できません: ${assets.errors.join(' / ')}`), { status: 400 })
+  const sorted = [...job.captions].sort((a, b) => a.displayOrder - b.displayOrder)
+  const lengthSec = Math.min(Math.max(opts.lengthSec ?? MAIN_BGM_PREVIEW_SEC.default, MAIN_BGM_PREVIEW_SEC.min), MAIN_BGM_PREVIEW_SEC.max, Number(job.durationSec))
+  const startSec = Math.max(0, Math.min(Math.floor(((sorted[0]?.startSec ?? 0) - 0.5) * 10) / 10, Number(job.durationSec) - lengthSec))
+  const endSec = Math.round((startSec + lengthSec) * 1000) / 1000
+  const themes = Array.isArray(job.topicSections) && job.topicSections.length > 0
+    ? normalizeTopicSectionsContinuous(job.topicSections, { startSec: 0, endSec: Number(job.durationSec) }).sections
+    : []
+  const timeline = planTimeline(cfg, { mainStartSec: startSec, mainEndSec: endSec, digestClips: [] })
+  const mainBlock = themes.length > 0 ? [mainThemeBlock(themes, startSec, endSec, timeline.mainOffsetSec)] : []
+  const assText = buildFinalAss({ width: job.width, height: job.height, cfg, timeline, mainCaptions: shiftMainCaptions(sorted, startSec, endSec, timeline.mainOffsetSec), digestCaps: [], themeBlocks: mainBlock })
+  return { cfg, assets, timeline, assText, mainStartSec: startSec, mainEndSec: endSec, mainItems: [{ kind: 'seg', srcStartSec: startSec, srcEndSec: endSec }] }
+}
+
 /** GET /composition/status（設定・素材の状態）と GET /composition/qr-image（QRプレビュー）。 */
 export function createCompositionRouter({ getRoots }) {
   const router = express.Router()
@@ -112,6 +158,14 @@ export function createCompositionRouter({ getRoots }) {
       res.json({ ok: true, ...(await describeCompositionStatus(req.body?.composition, getRoots())) })
     } catch {
       res.status(500).json({ ok: false, message: '設定状態を取得できませんでした' })
+    }
+  })
+  // 本編BGMのMP3候補（許可ルート内。ファイル名と不透明なIDだけ。絶対パスは返さない）
+  router.get('/main-bgm/candidates', (_req, res) => {
+    try {
+      res.json({ ok: true, files: listMainBgmCandidates(getRoots()) })
+    } catch {
+      res.status(500).json({ ok: false, message: 'MP3の一覧を取得できませんでした' })
     }
   })
   router.get('/qr-image', async (_req, res) => {

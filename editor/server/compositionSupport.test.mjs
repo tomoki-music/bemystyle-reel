@@ -140,3 +140,63 @@ describe('createCompositionRouter', () => {
     }
   })
 })
+
+describe('本編BGM（MP3）の受け渡し', () => {
+  const mp3Probe = () => (bin, args) => {
+    const child = new EventEmitter()
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    setImmediate(() => {
+      child.stdout.emit('data', JSON.stringify({ format: { format_name: 'mp3', duration: '63.9' }, streams: [{ codec_type: 'audio', codec_name: 'mp3', sample_rate: '44100', channels: 2 }] }))
+      child.emit('close', 0)
+    })
+    return child
+  }
+  it('UIからの上書き: 本編BGMの許可項目と選択ID（16桁の16進）だけ。絶対パス・不正なID・未知のキーは捨てる', () => {
+    const o = sanitizeCompositionOverrides({ mainBgm: { enabled: true, sourcePath: '/etc/passwd', sourceId: '0123456789abcdef', volume: 0.04, ducking: false, loop: true, fadeInSec: 2, fadeOutSec: 3, evil: 1 } })
+    expect(o.mainBgm).toEqual({ enabled: true, sourceId: '0123456789abcdef', volume: 0.04, ducking: false, loop: true, fadeInSec: 2, fadeOutSec: 3 })
+    expect(JSON.stringify(o)).not.toContain('/etc/passwd')
+    expect(sanitizeCompositionOverrides({ mainBgm: { sourceId: '../../etc/passwd' } }).mainBgm).toEqual({})
+    expect(sanitizeCompositionOverrides({ mainBgm: { sourceId: '' } }).mainBgm).toEqual({ sourceId: '' }) // 選択の解除
+  })
+  it('状態API: ファイル名・長さ・sample rate・channelsだけを返し、絶対パスは返さない。未選択は「未設定」', async () => {
+    writeFileSync(join(dir, 'main-bgm.mp3'), 'x')
+    const env = { COMPOSITION_MAIN_BGM_PATH: join(dir, 'main-bgm.mp3') }
+    const s = await describeCompositionStatus({ mainBgm: { enabled: true } }, [dir], { env, spawnFn: mp3Probe() })
+    expect(s.config.mainBgm).toMatchObject({ enabled: true, volume: 0.03, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5, scope: 'main' })
+    expect(s.config.mainBgm.sourcePath).toBeUndefined()
+    expect(s.assets.mainBgm).toMatchObject({ ok: true, fileName: 'main-bgm.mp3', durationSec: 63.9, sampleRate: 44100, channels: 2 })
+    expect(JSON.stringify(s)).not.toContain(dir)
+    const none = await describeCompositionStatus({}, [dir], { env: {}, spawnFn: mp3Probe() })
+    expect(none.config.mainBgm.enabled).toBe(false)
+    expect(none.assets.mainBgm).toMatchObject({ ok: false, error: '未設定', fileName: null })
+  })
+  it('選択の解除（sourceId: ""）は環境設定のパスよりも優先して素材を外す', async () => {
+    writeFileSync(join(dir, 'main-bgm.mp3'), 'x')
+    const env = { COMPOSITION_MAIN_BGM_PATH: join(dir, 'main-bgm.mp3') }
+    const s = await describeCompositionStatus({ mainBgm: { enabled: false, sourceId: '' } }, [dir], { env, spawnFn: mp3Probe() })
+    expect(s.assets.mainBgm.fileName).toBeNull()
+  })
+  it('本編BGMをONにして素材が無いなら、レンダーの準備で400（素材エラー）になり、絶対パスを含めない。OFF（既定）は影響なし', async () => {
+    const env = assets()
+    await expect(prepareJobComposition(job, { mainBgm: { enabled: true } }, [dir], { env, spawnFn: probe() })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('本編BGMのMP3が見つかりません') })
+    const ok = await prepareJobComposition(job, {}, [dir], { env, spawnFn: probe() })
+    expect(ok.cfg.mainBgm.enabled).toBe(false)
+    expect(ok.assets.mainBgm).toBeNull()
+  })
+  it('MP3候補の一覧API: ファイル名とIDだけ（絶対パスなし）', async () => {
+    writeFileSync(join(dir, 'song.MP3'), 'x')
+    writeFileSync(join(dir, 'note.txt'), 'x')
+    const app = express()
+    app.use('/composition', createCompositionRouter({ getRoots: () => [dir] }))
+    const server = await new Promise((res) => { const s = app.listen(0, () => res(s)) })
+    try {
+      const j = await (await fetch(`http://127.0.0.1:${server.address().port}/composition/main-bgm/candidates`)).json()
+      expect(j.ok).toBe(true)
+      expect(j.files.map((f) => f.fileName)).toEqual(['song.MP3'])
+      expect(JSON.stringify(j)).not.toContain(dir)
+    } finally {
+      server.close()
+    }
+  })
+})

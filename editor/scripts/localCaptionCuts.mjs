@@ -73,7 +73,7 @@ const build = async (tmp, name) => {
 // ────────────────────────────────────────────────────────────────
 // 共通: 新ダイジェスト・本編（編集項目）・確認動画の計画
 // ────────────────────────────────────────────────────────────────
-function loadBase(job) {
+export function loadBase(job) {
   const capDoc = readJson(BASE_KEY, 'captions')
   const topics = readJson(BASE_KEY, 'topics')
   const pages = readJson(BASE_KEY, 'pages')

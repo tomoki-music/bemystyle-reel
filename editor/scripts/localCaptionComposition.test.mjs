@@ -39,3 +39,26 @@ describe('localCaptionComposition: 安全性（静的確認）', () => {
     expect(/prepareJobComposition|renderCompositionToFile|resolveCompositionConfig/.test(preview)).toBe(false)
   })
 })
+
+describe('localCaptionComposition: 本編BGM・先頭無音カットの静的確認', () => {
+  const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf-8')
+  const routes = read('../server/localCaptionVideoRoutes.mjs')
+  const assets = read('../server/lib/mainBgmAssets.mjs')
+  const bgm = read('../server/lib/mainBgm.mjs')
+  it('本編BGMのMP3はアップロード・コピーせず、許可ルート内を直接参照する（multer・コピー・移動・削除を使わない）', () => {
+    for (const src of [assets, bgm]) expect(/multer|copyFile|renameSync|unlinkSync|writeFileSync\(\s*(?:bgmPath|inputPath|realPath)/.test(src)).toBe(false)
+    expect(assets).toContain('validateSourcePath')
+    expect(assets).toContain('isInsideAnyRoot')
+  })
+  it('ffmpegは argv配列で起動し、shellを使わない。外部AI APIを呼ばない', () => {
+    expect(assets).toContain('shell: false')
+    expect(/exec\(|execSync|shell:\s*true/.test(assets + bgm)).toBe(false)
+    expect(/openai|fetch\(|https?:\/\//i.test(assets + bgm + read('../server/lib/introCut.mjs') + read('../server/lib/mainEdit.mjs'))).toBe(false)
+  })
+  it('本編BGMプレビューのルートは、ダイジェスト・LINE案内を入れない構成で、絶対パスをログ・レスポンスに出さない', () => {
+    const r = routes.slice(routes.indexOf("router.post('/:id/main-bgm-preview'"), routes.indexOf("router.post('/:id/preview-render'"))
+    expect(r.length).toBeGreaterThan(200)
+    expect(r).toContain('prepareMainBgmPreview')
+    expect(/logSafe\([^)]*(sourcePath|outputPath|realPath)/.test(r)).toBe(false)
+  })
+})

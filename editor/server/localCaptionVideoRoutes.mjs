@@ -52,7 +52,8 @@ import { checkDiskSpace } from './lib/diskSpace.mjs'
 import { checkJapaneseFontAvailable } from './lib/fontCheck.mjs'
 import { buildUniqueOutputPath, buildPreviewOutputPath } from './lib/outputNaming.mjs'
 import { createFiveMinuteAnalysisRouter } from './fiveMinuteAnalysisRoutes.mjs'
-import { createCompositionRouter, prepareJobComposition, isCompositionConfiguredByEnv } from './compositionSupport.mjs'
+import { createCompositionRouter, prepareJobComposition, prepareMainBgmPreview, isCompositionConfiguredByEnv } from './compositionSupport.mjs'
+import { withTempDir } from './lib/tempDir.mjs'
 import { renderCompositionToFile, checkFreeSpace, FULL_RENDER_MIN_FREE_BYTES } from './lib/compositionRender.mjs'
 
 export const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v'])
@@ -773,6 +774,7 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
         qrSize: composed.assets.qr ? { width: composed.assets.qr.width, height: composed.assets.qr.height } : undefined,
         assText: composed.assText,
         tmpDir: tmpRoot,
+        mainBgmRequest: { roots: getAllowedInputRoots() }, // 本編BGM（ONのときだけ使われる。MP3は許可ルート内を直接参照）
         finalPath: finalOutputPath, // 一時ファイルへ書き、成功後にだけ最終名へrenameする（renderCompositionToFile内）
         spawnFn: (bin, argv, opts) => {
           const child = spawn(bin, argv, opts)
@@ -880,6 +882,66 @@ export function createLocalCaptionVideoRouter({ jobsDir }) {
   })
 
   // ── 短時間プレビュー（captionType別デザイン確認用、30〜60秒） ──────────────────────
+
+  // ── 本編BGM付きの短時間プレビュー（30〜60秒。本編の一部＋caption・テーマ・本編BGM。ダイジェスト・LINE案内は入れない） ──
+
+  router.post('/:id/main-bgm-preview', async (req, res) => {
+    const job = loadJobOr404(req, res)
+    if (!job) return
+    if (!Array.isArray(job.captions) || job.captions.length === 0) return res.status(400).json({ ok: false, message: '字幕が1件もありません' })
+    if (activeRenderJobId && activeRenderJobId !== job.id) return res.status(409).json({ ok: false, message: '他のジョブのレンダーが進行中です。完了までお待ちください。' })
+    if (!store.acquireLock(job.id)) return res.status(409).json({ ok: false, message: 'このジョブはすでに処理中です' })
+    let composed
+    let outputRootReal
+    let outputPath
+    try {
+      outputRootReal = validateOutputRoot(getOutputRoot())
+      const sourceRealPath = validateSourcePath(job.sourcePath, getAllowedInputRoots()).realPath
+      composed = await prepareMainBgmPreview(job, req.body?.composition, getAllowedInputRoots(), { lengthSec: Number(req.body?.lengthSec) || undefined })
+      const disk = await checkDiskSpace(outputRootReal, 300 * 1024 * 1024)
+      if (!disk.ok) throw Object.assign(new Error('出力先の空き容量が不足している可能性があります'), { status: 507 })
+      outputPath = buildPreviewOutputPath(job.id, outputRootReal, sourceRealPath)
+    } catch (err) {
+      store.releaseLock(job.id)
+      return res.status(err.status ?? (err instanceof PathValidationError ? 403 : 500)).json({ ok: false, message: err.message })
+    }
+    activeRenderJobId = job.id
+    logSafe('main bgm preview start', job.id)
+    try {
+      const tmpRoot = getTmpRoot()
+      mkdirSync(tmpRoot, { recursive: true })
+      const r = await withTempDir('lcv-main-bgm-preview-', (tmpDir) => renderCompositionToFile({
+        cfg: composed.cfg, timeline: composed.timeline, width: job.width, height: job.height, sourcePath: job.sourcePath,
+        mainStartSec: composed.mainStartSec, mainEndSec: composed.mainEndSec, digestClips: [], assText: composed.assText, tmpDir, finalPath: outputPath,
+        mainBgmRequest: { roots: getAllowedInputRoots(), mainItems: composed.mainItems },
+        spawnFn: (bin, argv, opts) => {
+          const child = spawn(bin, argv, opts)
+          activeRenderChildren.set(job.id, child)
+          return child
+        },
+      }), { baseDir: tmpRoot })
+      const latest = store.load(job.id)
+      const updated = latest ? store.save({ ...latest, previewOutputPath: outputPath, previewRenderedAt: new Date().toISOString(), previewWindow: { startSec: composed.mainStartSec, endSec: composed.mainEndSec, synthetic: false } }) : null
+      const m = r.result.mainBgm
+      res.json({
+        ok: true, job: updated,
+        previewWindow: { startSec: composed.mainStartSec, endSec: composed.mainEndSec, durationSec: composed.mainEndSec - composed.mainStartSec },
+        mainBgm: m ? { gainDb: m.gain.gainDb, preDuckGapDb: m.gain.preDuckGapDb, clamped: m.gain.clamped, loops: m.plan.loops, needsLoop: m.plan.needsLoop, fileName: m.info.fileName, durationSec: m.info.durationSec } : null,
+      })
+    } catch (err) {
+      try {
+        if (outputPath && existsSync(outputPath)) unlinkSync(outputPath)
+      } catch {
+        // best effort
+      }
+      logSafe('main bgm preview failed', job.id)
+      res.status(502).json({ ok: false, message: `本編BGMプレビューの生成に失敗しました: ${err.message}` })
+    } finally {
+      activeRenderChildren.delete(job.id)
+      if (activeRenderJobId === job.id) activeRenderJobId = null
+      store.releaseLock(job.id)
+    }
+  })
 
   router.post('/:id/preview-render', async (req, res) => {
     let job = loadJobOr404(req, res)

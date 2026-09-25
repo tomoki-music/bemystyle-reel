@@ -72,6 +72,8 @@ export function LocalCaptionVideoMode() {
     classifyCaptions,
     previewRendering,
     renderPreview,
+    mainBgmPreviewing,
+    renderMainBgmPreview,
   } = useLocalCaptionVideo()
 
   const [composition, setComposition] = useState<CompositionOverrides & { useComposition?: boolean }>({})
@@ -506,7 +508,13 @@ export function LocalCaptionVideoMode() {
                 )}
               </section>
 
-              <CompositionSettingsPanel value={composition} onChange={setComposition} disabled={currentJob.status === 'rendering'} />
+              <CompositionSettingsPanel
+                value={composition}
+                onChange={setComposition}
+                disabled={currentJob.status === 'rendering'}
+                previewBusy={mainBgmPreviewing}
+                onMainBgmPreview={() => { const { useComposition: _u, ...overrides } = composition; return renderMainBgmPreview(currentJob.id, overrides) }}
+              />
 
               <section className="lcv-panel">
                 <h2>動画を生成</h2>
@@ -515,7 +523,7 @@ export function LocalCaptionVideoMode() {
                     レンダーをキャンセル
                   </button>
                 ) : (
-                  <button type="button" disabled={Boolean(renderDisabled)} onClick={() => { const { useComposition, ...overrides } = composition; void startRender(currentJob.id, useComposition === undefined ? undefined : useComposition ? { composition: overrides } : { compositionDisabled: true }) }}>
+                  <button type="button" disabled={Boolean(renderDisabled)} onClick={() => { const { useComposition, ...overrides } = composition; void startRender(currentJob.id, useComposition === undefined ? (composition.mainBgm?.enabled ? { composition: overrides } : undefined) : useComposition ? { composition: overrides } : { compositionDisabled: true }) }}>
                     字幕を焼き込んで動画を生成
                   </button>
                 )}

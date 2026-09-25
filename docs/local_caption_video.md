@@ -294,3 +294,21 @@ mono/16kHz/64kbpsの音声はおおよそ十数MB程度になり、24MB上限に
 - `editor/server/lib/outputNaming.mjs` — 出力ファイル名のユニーク化
 - `editor/server/localCaptionVideoRoutes.mjs` — Expressルーター本体
 - `editor/src/components/localCaption/` — フロントエンド一式（`LocalCaptionVideoMode.tsx` ほか）
+
+## 本編BGM（ユーザー指定のMP3）と先頭無音カット
+
+### 本編BGM
+- 本編（冒頭LINEオーバーレイの間を含む）だけに小さく流す。ダイジェスト（既存BGM）・末尾LINE案内（無音）には使わない。別のフィルタチェーンなので同時に鳴らない。
+- 設定（`mainBgm`）: `enabled`（既定OFF）/ `sourcePath` / `volume`（標準0.03・上限0.06）/ `autoGain` / `ducking` / `loop` / `fadeInSec`（1.5）/ `fadeOutSec`（2.5）/ `scope: 'main'`。素材未指定・OFFなら従来どおり。ONで素材が無い・使えないときはレンダー開始前に停止する。
+- MP3は許可ルート（`VIDEO_INPUT_ROOTS`）内を直接参照（アップロード・コピーしない）。UIは「MP3ファイルを選択」（候補はファイル名と不透明なIDだけ）。CLI/環境設定は `COMPOSITION_MAIN_BGM_PATH`。
+- 検証は ffprobe の実データ（音声ストリーム・コーデックmp3・duration）。拡張子・Content-Type は信用しない。
+- 音量: MP3と本編トークの発話中のRMSを測り、声−BGM（ダッキング前）が目標差（ダッキングON 20dB / OFF 26dB）になる初期ゲインを決める。ユーザー音量は標準に対する倍率で、差が12dB未満になる上げ方はできない。
+- ダッキング: 声をサイドチェインにした `sidechaincompress`（threshold 0.02・ratio 4・attack 60ms・release 900ms・knee 6）。サイドチェインは120〜5000Hzに絞り `acompressor` で検出レベルをそろえる。
+- ループ: 短いMP3は「末尾2秒→先頭2秒のクロスフェード」で継ぎ目のない単位WAV（一時ファイル）を作り `-stream_loop -1` で繰り返す。長いMP3は本編の長さで切る。本編終了でフェードアウトして無音。
+- 最終ミックスに `alimiter`（-1dBFS・`level=0:latency=1`。自動レベル補正を切り、先読み遅延を補正）。
+
+### 先頭無音カット
+- `server/lib/introCut.mjs`: 実音声の音量から最初の発話（息・口の立ち上がりを含む）を測り、その直前100〜150msを残して、0秒〜そこまでを削除（30fpsフレーム境界＝48kHzで1600サンプルの倍数）。
+- `server/lib/mainEdit.mjs`: 同じタイムマップで映像・音声・caption・手動補完caption・テーマ・LINEオーバーレイ・BGM終了・末尾案内を変換。
+- 冒頭の手動補完caption（`source: 'manual-intro-recovery'`、`full_v6.intro-recovery.json`）は確定済み（`confirmed: true`）のものだけ使う。既存captionは上書きしない。
+- ランナー: `node scripts/localCaptionMainBgm.mjs intro-analyze|machinery|preview|preview-verify --job <id>`（詳細はスクリプト冒頭）。`preview` は `--main-bgm` が無ければ「素材待ち」で停止する。

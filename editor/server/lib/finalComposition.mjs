@@ -14,6 +14,7 @@ import { buildAssContent, getFontFamily, getCaptionStyleDefs, buildDialogueText 
 import { getCaptionFitLimits, fitCaptionFontSize } from './captionFit.mjs'
 import { escapePathForFfmpegFilter, escapeAssText } from './assText.mjs'
 import { estimateTextWidthPx } from './topicAss.mjs'
+import { MAIN_BGM_DEFAULTS, validateMainBgmConfig, buildMainBgmFilters, MAIN_BGM_MISSING_MESSAGE } from './mainBgm.mjs'
 
 export const BGM_CREDIT_DEFAULT = Object.freeze({ title: 'The maze of aqua', composer: '蒲鉾さちこ（Kamaboko Sachiko）' })
 export const LINE_TEXT_DEFAULT = Object.freeze({
@@ -52,6 +53,8 @@ export const COMPOSITION_DEFAULTS = Object.freeze({
   // 末尾のLINE案内は独立した全画面カード（本編終了後に追加）。
   lineOutro: Object.freeze({ enabled: true, mode: 'standalone', durationSec: 12, showQr: true }),
   line: Object.freeze({ qrPath: '', text: LINE_TEXT_DEFAULT, backgroundColor: '0x161c19' }),
+  // 本編BGM（ユーザー指定のMP3。本編の開始〜終了だけ。ダイジェスト・末尾LINE案内には使わない）。素材未指定なら従来どおり本編BGMなし。
+  mainBgm: MAIN_BGM_DEFAULTS,
   // プレビュー（短時間の確認動画）では、追加区間を既定で入れない。プレビューでも入れたい機能だけ true にする。
   preview: Object.freeze({ digest: false, lineIntro: false, lineOutro: false }),
   fps: 30,
@@ -102,6 +105,7 @@ export function validateCompositionConfig(cfg) {
   if (!['overlay', 'standalone'].includes(cfg.lineIntro.mode)) errors.push('冒頭LINE案内の表示方式は overlay か standalone を指定してください')
   if (cfg.lineOutro.mode !== 'standalone') errors.push('末尾LINE案内の表示方式は standalone のみ対応しています')
   if (cfg.lineIntro.mode === 'overlay' && cfg.lineIntro.startWithMain !== true) errors.push('冒頭LINE案内(overlay)は本編開始と同時に始めてください')
+  if (cfg.mainBgm?.enabled) errors.push(...validateMainBgmConfig(cfg.mainBgm).errors)
   return { ok: errors.length === 0, errors }
 }
 
@@ -546,6 +550,7 @@ export function planQrPlacement(win, width, height, qrSize, cfg) {
  *   cfg: ReturnType<typeof resolveCompositionConfig>, timeline: ReturnType<typeof planTimeline>, width: number, height: number,
  *   sourcePath: string, mainStartSec: number, mainEndSec: number, digestClips: Array<{ srcStartSec: number, durationSec: number }>,
  *   bgmPath?: string, qrPath?: string, qrSize?: { width: number, height: number }, assPath: string, outputPath: string,
+ *   mainBgm?: { inputPath: string, plan: object, gainDb: number },  // cfg.mainBgm.enabled のとき必須（inputPath は元MP3、ループ時はループ単位のWAV）
  * }} p
  * @returns {{ args: string[], filterComplex: string }}
  */
@@ -641,20 +646,21 @@ export function buildCompositionArgs(p) {
     concatIn.push('[dvid]', '[dA]')
   }
 
-  const panel = (label, sec) => {
+  const panel = (label, sec, into = concatIn) => {
     const d = round3(sec.endSec - sec.startSec)
     chain.push(`color=c=${cfg.line.backgroundColor}:s=${width}x${height}:r=${F}:d=${d},setsar=1,format=yuv420p[${label}v]`)
     chain.push(`anullsrc=r=${SR}:cl=stereo,atrim=0:${d},asetpts=PTS-STARTPTS[${label}a]`)
-    concatIn.push(`[${label}v]`, `[${label}a]`)
+    into.push(`[${label}v]`, `[${label}a]`)
   }
   if (intro) panel('li', intro)
 
+  const mainIn = []
   if (Array.isArray(p.mainItems) && p.mainItems.length > 0) {
     // 編集済みの本編: 残す区間（元動画の [start, end)）と区切りカードの並び。映像・音声へ同じ区間を同じ順で適用する。
     // 映像はフレーム単位で接続（長いクロスフェードなし）。音声は編集点の前後だけ短いフェード（重ねないので映像との長さは一致し続ける）。
     p.mainItems.forEach((it, k) => {
       if (it.kind === 'card') {
-        panel(`mc${k}`, { startSec: 0, endSec: it.durationSec })
+        panel(`mc${k}`, { startSec: 0, endSec: it.durationSec }, mainIn)
         return
       }
       const d = it.srcEndSec - it.srcStartSec
@@ -664,7 +670,7 @@ export function buildCompositionArgs(p) {
       const fades = `${k > 0 ? `,afade=t=in:st=0:d=${JOIN_FADE}` : ''}${k < p.mainItems.length - 1 ? `,afade=t=out:st=${round3(Math.max(0, d - JOIN_FADE))}:d=${JOIN_FADE}` : ''}`
       chain.push(`[${n}:v]${seg.v}[mv${k}]`)
       chain.push(`[${n}:a]${seg.a}${fades}[ma${k}]`)
-      concatIn.push(`[mv${k}]`, `[ma${k}]`)
+      mainIn.push(`[mv${k}]`, `[ma${k}]`)
     })
   } else {
     args.push('-ss', String(round3(p.mainStartSec)), '-t', String(round3(p.mainEndSec - p.mainStartSec)), '-i', p.sourcePath)
@@ -672,7 +678,23 @@ export function buildCompositionArgs(p) {
     const md = round3(p.mainEndSec - p.mainStartSec)
     chain.push(`[${mi}:v]trim=0:${md},setpts=PTS-STARTPTS,${fmtV}[mv]`)
     chain.push(`[${mi}:a]${fmtAV},atrim=0:${md},asetpts=PTS-STARTPTS[ma]`)
-    concatIn.push('[mv]', '[ma]')
+    mainIn.push('[mv]', '[ma]')
+  }
+  if (cfg.mainBgm?.enabled) {
+    // 本編BGM: 本編（トーク）だけを先に連結し、その音声へBGMを重ねてから全体の連結へ渡す。ダイジェスト・末尾LINE案内のチェーンには入らない。
+    const mb = p.mainBgm
+    if (!mb?.inputPath || !mb.plan?.ok || !Number.isFinite(mb.gainDb)) throw new Error(MAIN_BGM_MISSING_MESSAGE)
+    const mainSec = timeline.sections.find((x) => x.kind === 'main')
+    const mainLen = round3(mainSec.endSec - mainSec.startSec)
+    if (mb.plan.needsLoop) args.push('-stream_loop', '-1', '-i', mb.inputPath)
+    else args.push('-i', mb.inputPath)
+    const bi = idx++
+    const kMain = mainIn.length / 2
+    chain.push(`${mainIn.join('')}concat=n=${kMain}:v=1:a=1[mainvid][mainvoice]`)
+    chain.push(...buildMainBgmFilters({ bgmInputIndex: bi, mainSec: mainLen, gainDb: mb.gainDb, plan: mb.plan, cfg: cfg.mainBgm, sampleRate: SR, voiceLabel: '[mainvoice]', outLabel: '[mainaudio]' }))
+    concatIn.push('[mainvid]', '[mainaudio]')
+  } else {
+    concatIn.push(...mainIn)
   }
   if (outro) panel('lo', outro)
 

@@ -17,6 +17,13 @@ export interface RenderPreviewResult {
   sourceUnchanged?: boolean
 }
 
+export interface MainBgmPreviewResult {
+  ok: boolean
+  message?: string
+  previewWindow?: { startSec: number; endSec: number; durationSec: number }
+  mainBgm?: { gainDb: number; preDuckGapDb: number; clamped: boolean; loops: number; needsLoop: boolean; fileName: string; durationSec: number } | null
+}
+
 const API_BASE = '/api/local-caption-videos'
 const POLL_INTERVAL_MS = 1500
 const IN_PROGRESS_STATUSES = new Set(['probing', 'extracting_audio', 'transcribing', 'rendering'])
@@ -39,6 +46,7 @@ export function useLocalCaptionVideo() {
 
   const [classifying, setClassifying] = useState(false)
   const [previewRendering, setPreviewRendering] = useState(false)
+  const [mainBgmPreviewing, setMainBgmPreviewing] = useState(false)
 
   const [inputRoots, setInputRoots] = useState<RootInfo[]>([])
   const [outputRoot, setOutputRoot] = useState<RootInfo | null>(null)
@@ -309,6 +317,23 @@ export function useLocalCaptionVideo() {
     }
   }, [])
 
+  // 本編BGM付きの30〜60秒プレビュー（本編の一部＋caption・テーマ・本編BGM）。生成物は短時間プレビューと同じ枠（job.previewOutputPath）に入る。
+  const renderMainBgmPreview = useCallback(async (jobId: string, composition: unknown): Promise<MainBgmPreviewResult> => {
+    setError(null)
+    setMainBgmPreviewing(true)
+    try {
+      const data = await apiFetch<ApiResult<unknown>>(`/${jobId}/main-bgm-preview`, { method: 'POST', body: JSON.stringify({ composition }) })
+      if (!data.ok) {
+        setError(data.message ?? '本編BGMプレビューの生成に失敗しました')
+        return { ok: false, message: data.message as string | undefined }
+      }
+      if (data.job) setCurrentJob(data.job)
+      return { ok: true, previewWindow: data.previewWindow as MainBgmPreviewResult['previewWindow'], mainBgm: (data.mainBgm as MainBgmPreviewResult['mainBgm']) ?? null }
+    } finally {
+      setMainBgmPreviewing(false)
+    }
+  }, [])
+
   return {
     jobs,
     currentJob,
@@ -339,5 +364,7 @@ export function useLocalCaptionVideo() {
     classifyCaptions,
     previewRendering,
     renderPreview,
+    mainBgmPreviewing,
+    renderMainBgmPreview,
   }
 }
