@@ -146,7 +146,7 @@ export async function measureMainBgmLevels({ sourcePath, mainItems, bgmPath }, d
  * レンダー用に本編BGMを準備する: 音源の検証 → ラウドネス測定 → ゲイン・ループの計画 → （必要なら）ループ単位のWAVを tmpDir へ書く。
  * @returns {Promise<{ ok: boolean, error?: string, prep?: { inputPath: string, plan: object, gainDb: number, gain: object, levels: object, info: object, loopUnitPath: string | null } }>}
  */
-export async function prepareMainBgm({ cfg, roots, sourcePath, mainItems, mainSec, tmpDir }, deps = {}) {
+export async function prepareMainBgm({ cfg, roots, sourcePath, mainItems, mainSec, tmpDir, transform }, deps = {}) {
   const mb = cfg.mainBgm
   const info = await inspectMainBgm(mb.sourcePath, roots, deps)
   if (!info.ok) return { ok: false, error: info.error }
@@ -160,5 +160,9 @@ export async function prepareMainBgm({ cfg, roots, sourcePath, mainItems, mainSe
     await run(deps.ffmpegBin ?? ffmpegBin(), buildLoopUnitArgs({ bgmPath: info.realPath, outPath: loopUnitPath, bgmSec: info.durationSec, crossfadeSec: plan.crossfadeSec, sampleRate: 48000 }).args, { spawnFn: deps.spawnFn })
   }
   const { realPath, ...publicInfo } = info
-  return { ok: true, prep: { inputPath: plan.needsLoop ? loopUnitPath : realPath, plan, gainDb: gain.gainDb, gain, levels, info: publicInfo, loopUnitPath } }
+  let inputPath = plan.needsLoop ? loopUnitPath : realPath
+  let effectivePlan = plan
+  // 確認動画用: 入力のBGMを別の音声（例: ループ境界の区間を差し込んだトラック）へ差し替える。一時ファイルは tmpDir へ作る
+  if (transform) ({ inputPath, plan: effectivePlan } = await transform({ realPath, info, plan, tmpDir, unitPath: loopUnitPath, mainSec }))
+  return { ok: true, prep: { inputPath, plan: effectivePlan, sourcePlan: plan, gainDb: gain.gainDb, gain, levels, info: publicInfo, loopUnitPath } }
 }
