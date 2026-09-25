@@ -48,10 +48,10 @@ const SR = 48000
 const BASE_KEY = 'full_v4' // 同期修正版（caption・テーマ）
 const OUT_KEY = 'full_v6'
 const pathFor = (name) => resolve(FULL_DIR, `${OUT_KEY}.${name}.json`)
-const sha256 = (b) => createHash('sha256').update(b).digest('hex')
+export const sha256 = (b) => createHash('sha256').update(b).digest('hex')
 const ff = () => process.env.FFMPEG_BIN
-const dirSnapshot = (dir) => Object.fromEntries(readdirSync(dir).map((n) => { const s = statSync(join(dir, n)); return [n, `${s.size}:${s.mtimeMs}`] }))
-const fileSig = (p) => { const s = statSync(p); return `${s.size}:${s.mtimeMs}` }
+export const dirSnapshot = (dir) => Object.fromEntries(readdirSync(dir).map((n) => { const s = statSync(join(dir, n)); return [n, `${s.size}:${s.mtimeMs}`] }))
+export const fileSig = (p) => { const s = statSync(p); return `${s.size}:${s.mtimeMs}` }
 
 function parseArgs(argv) {
   const o = { stage: argv[0] }
@@ -325,7 +325,7 @@ export async function measureDigestTail({ sourcePath, base, dig }) {
 /** ダイジェスト→本編の画面遷移（ディップ・トゥ・ブラック）。フレーム数は既定（暗転10・黒3・フェードイン9）。 */
 export const PREVIEW_TRANSITION = Object.freeze({ enabled: true })
 
-export function buildMainBgmPreviewPlan(job, base, { paths, cutEndSec, mainBgm, mainSec = PREVIEW_MAIN_SEC, recovered = [], loopCheck = null, digestTail = null, transition = null }) {
+export function buildMainBgmPreviewPlan(job, base, { paths, cutEndSec, mainBgm, mainSec = PREVIEW_MAIN_SEC, recovered = [], loopCheck = null, digestTail = null, transition = null, fullItems = null, strict = false }) {
   const dig0 = buildShortDigest(base.captions, base.norm, SHORT_DIGEST_PICKS)
   if (!dig0.ok) throw new Error(`ダイジェストの検証に失敗: ${dig0.problems.join(' / ')}`)
   if (digestTail && !digestTail.ok) throw new Error(`ダイジェスト末尾を確保できません: ${digestTail.reason}`)
@@ -334,7 +334,8 @@ export function buildMainBgmPreviewPlan(job, base, { paths, cutEndSec, mainBgm, 
   const dig = { ...dig0, clips, totalSec: round(clips.reduce((a, c) => a + c.durationSec, 0), 3) }
   const frames = Math.round(mainSec * FPS)
   const startFrame = Math.round(cutEndSec * FPS)
-  const items = [{ kind: 'seg', srcStartSec: startFrame / FPS, srcEndSec: (startFrame + frames) / FPS }]
+  // fullItems: 15分全編（introCutItems の項目をそのまま使う。確認動画の45秒抜き出しとは別）
+  const items = fullItems ? fullItems.map((i) => ({ ...i })) : [{ kind: 'seg', srcStartSec: startFrame / FPS, srcEndSec: (startFrame + frames) / FPS }]
   if (loopCheck) items.push({ kind: 'card', durationSec: CARD_SEC, label: 'ループ境界の確認' }, { kind: 'seg', srcStartSec: loopCheck.srcStartSec, srcEndSec: loopCheck.srcStartSec + loopCheck.sec })
   const cfg = resolveCompositionConfig({
     digest: { durationSec: 10, minSec: SHORT_DIGEST_DEFAULTS.minSec, maxSec: SHORT_DIGEST_DEFAULTS.maxSec, clipCount: SHORT_DIGEST_DEFAULTS.clipCount, clipSec: SHORT_DIGEST_DEFAULTS.clipSec, bgm: { path: paths.bgm } },
@@ -344,7 +345,7 @@ export function buildMainBgmPreviewPlan(job, base, { paths, cutEndSec, mainBgm, 
   })
   // 本編のオフセット（ダイジェスト＋暗転＋黒の保持）を先に決め、その基準で本編のcaption・テーマ・BGM・LINEオーバーレイを配置する（すべて同じ timeline から）
   const D = planTimeline(cfg, { mainStartSec: 0, mainEndSec: 1, digestClips: dig.clips }).mainOffsetSec
-  const mapped = mapMainToFinal({ items, captions: base.captions, recovered, themes: base.norm, mainOffsetSec: D, strict: false })
+  const mapped = mapMainToFinal({ items, captions: base.captions, recovered, themes: base.norm, mainOffsetSec: D, strict })
   const timeline = planTimeline(cfg, { mainStartSec: 0, mainEndSec: mapped.tm.totalSec, digestClips: dig.clips })
   if (timeline.mainOffsetSec !== D) throw new Error('本編の開始時刻が一致しません')
   let digCaps = shortDigestCaptions(base.captions, dig.clips)
@@ -379,7 +380,7 @@ export function makeLoopCheckTransform({ seg1Sec }) {
   }
 }
 
-const loadCut = () => {
+export const loadCut = () => {
   if (!existsSync(pathFor('intro-cut'))) throw new Error('先に intro-analyze を実行してください')
   return JSON.parse(readFileSync(pathFor('intro-cut'), 'utf-8'))
 }
@@ -387,13 +388,13 @@ const loadCut = () => {
 // ────────────────────────────────────────────────────────────────
 // 音声の測定（最終動画から）
 // ────────────────────────────────────────────────────────────────
-const f32 = async (file, ss, dur, ar = SR) => {
+export const f32 = async (file, ss, dur, ar = SR) => {
   const r = await execFileAsync(ff(), ['-v', 'error', ...(ss !== null ? ['-ss', String(round(ss, 4)), '-t', String(round(dur, 4))] : []), '-i', file, '-vn', '-ac', '1', '-ar', String(ar), '-f', 'f32le', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1 << 29 })
   return new Float32Array(r.stdout.buffer, r.stdout.byteOffset, Math.floor(r.stdout.length / 4))
 }
-const peakOf = (x) => { let p = 0; for (const v of x) p = Math.max(p, Math.abs(v)); return p }
-const rmsDbOf = (x) => { let s = 0; for (const v of x) s += v * v; const r = Math.sqrt(s / Math.max(1, x.length)); return r > 0 ? 20 * Math.log10(r) : -120 }
-const toDb = (v) => (v > 0 ? 20 * Math.log10(v) : -120)
+export const peakOf = (x) => { let p = 0; for (const v of x) p = Math.max(p, Math.abs(v)); return p }
+export const rmsDbOf = (x) => { let s = 0; for (const v of x) s += v * v; const r = Math.sqrt(s / Math.max(1, x.length)); return r > 0 ? 20 * Math.log10(r) : -120 }
+export const toDb = (v) => (v > 0 ? 20 * Math.log10(v) : -120)
 
 /** 最終ミックスのピーク（サンプルピーク。AAC後）と、区間ごとのRMS。 */
 async function stereoPeak(video) {
@@ -587,7 +588,7 @@ async function stageMachinery(args) {
 // ────────────────────────────────────────────────────────────────
 const STATE = (args) => (args?.outDir ? join(args.outDir, 'full_v6.preview2-state.json') : pathFor('preview2-state')) // 前回の確認動画（BGM音量・ダイジェスト末尾・遷移の改善前）の preview-state は変更しない
 const UNCHANGED_FILES = () => readdirSync(FULL_DIR).filter((n) => /^full_v[345]\./.test(n)).map((n) => join(FULL_DIR, n))
-const hashAll = (files) => Object.fromEntries(files.map((f) => [basename(f), sha256(readFileSync(f))]))
+export const hashAll = (files) => Object.fromEntries(files.map((f) => [basename(f), sha256(readFileSync(f))]))
 
 /** 最終版（本編全体）の長さと声の測定区間。確認動画でも、BGMの開始点・ゲインは最終版の長さで決める。 */
 const fullMainOf = (job, cutDoc) => { const { items } = introCutItems(job.durationSec, cutDoc.cut.cutEndSec, FPS); return { items, sec: round(items[0].srcEndSec - items[0].srcStartSec, 3) } }
@@ -673,13 +674,13 @@ async function stagePreview(args) {
   }, null, 2))
 }
 
-const buildSwift = async (tmp, name) => {
+export const buildSwift = async (tmp, name) => {
   const bin = join(tmp, name)
   await execFileAsync('swiftc', ['-O', resolve(dirname(fileURLToPath(import.meta.url)), 'tools', `${name}.swift`), '-o', bin], { timeout: 300000 })
   return bin
 }
-const normText = (s) => String(s).replace(/[\s、。！？!?,，「」『』（）()・…\n\\N]/g, '')
-function lcsRatio(expected, got) {
+export const normText = (s) => String(s).replace(/[\s、。！？!?,，「」『』（）()・…\n\\N]/g, '')
+export function lcsRatio(expected, got) {
   const a = Array.from(normText(expected)); const b = Array.from(normText(got))
   if (a.length === 0) return 1
   const dp = Array.from({ length: a.length + 1 }, () => new Uint16Array(b.length + 1))
@@ -690,15 +691,15 @@ const p95 = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? s
 
 // ── 検証の道具（最終動画から機械測定する） ──
 /** フレーム列の輝度(YAVG)または彩度(SATAVG)。startSec は1/30秒の倍数、count フレーム分。 */
-async function frameSeries(video, key, startSec, count) {
+export async function frameSeries(video, key, startSec, count) {
   const r = await execFileAsync(ff(), ['-v', 'error', '-ss', String(round(startSec, 4)), '-i', video, '-frames:v', String(count), '-vf', `signalstats,metadata=print:key=lavfi.signalstats.${key}:file=-`, '-an', '-f', 'null', '-'], { maxBuffer: 1 << 26 })
   return r.stdout.split('\n').filter((l) => l.startsWith(`lavfi.signalstats.${key}=`)).map((l) => Number(l.split('=')[1]))
 }
 /** 最大サンプル間差（クリックの目安）。all は最終動画のモノラル48kHz。 */
-const maxStep = (all, a, b) => { let m = 0; for (let i = Math.max(1, Math.round(a * SR)); i < Math.min(all.length, Math.round(b * SR)); i++) m = Math.max(m, Math.abs(all[i] - all[i - 1])); return m }
-const maxDiff = (x, y, a, b) => { let m = 0; for (let i = Math.round(a * SR); i < Math.min(x.length, y.length, Math.round(b * SR)); i++) m = Math.max(m, Math.abs(x[i] - y[i])); return m }
-const winRms = (all, a, b) => rmsDbOf(all.subarray(Math.max(0, Math.round(a * SR)), Math.min(all.length, Math.round(b * SR))))
-async function truePeak(video) {
+export const maxStep = (all, a, b) => { let m = 0; for (let i = Math.max(1, Math.round(a * SR)); i < Math.min(all.length, Math.round(b * SR)); i++) m = Math.max(m, Math.abs(all[i] - all[i - 1])); return m }
+export const maxDiff = (x, y, a, b) => { let m = 0; for (let i = Math.round(a * SR); i < Math.min(x.length, y.length, Math.round(b * SR)); i++) m = Math.max(m, Math.abs(x[i] - y[i])); return m }
+export const winRms = (all, a, b) => rmsDbOf(all.subarray(Math.max(0, Math.round(a * SR)), Math.min(all.length, Math.round(b * SR))))
+export async function truePeak(video) {
   const r = await execFileAsync(ff(), ['-hide_banner', '-nostats', '-i', video, '-vn', '-af', 'ebur128=peak=true', '-f', 'null', '-'], { maxBuffer: 1 << 26 }).catch((e) => e)
   const txt = `${r.stderr ?? ''}`
   const m = /True peak:\s*\n\s*Peak:\s*(-?[\d.]+) dBFS/.exec(txt)
