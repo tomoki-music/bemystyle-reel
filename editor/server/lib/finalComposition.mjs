@@ -10,7 +10,8 @@
 // - 元動画・素材は変更しない。トークテーマ/字幕/強調の本文・改行は変更しない。外部AIは呼ばない。
 
 import { STRONG_PUNCT } from './japaneseText.mjs'
-import { buildAssContent, getFontFamily } from './captionStyles.mjs'
+import { buildAssContent, getFontFamily, getCaptionStyleDefs, buildDialogueText } from './captionStyles.mjs'
+import { getCaptionFitLimits, fitCaptionFontSize } from './captionFit.mjs'
 import { escapePathForFfmpegFilter, escapeAssText } from './assText.mjs'
 import { estimateTextWidthPx } from './topicAss.mjs'
 
@@ -483,10 +484,36 @@ export function buildLineEvents(width, height, text, section, withQr, stages) {
   })
 }
 
+/** ダイジェスト内の字幕は、本編の通常字幕より少し大きくする（約9%）。白文字・黒縁・下部中央の基本デザインは同じ。 */
+export const DIGEST_CAPTION_SIZE_RATIO = 1.09
+
+/**
+ * ダイジェスト用の字幕サイズ（px）。基本は本編の通常字幕の約1.09倍。長い行で幅に収まらない場合だけ段階的に下げるが、本編の通常字幕未満にはしない。
+ * @returns {Array<{ size: number, baseSize: number, mainSize: number, fits: boolean }>}
+ */
+export function planDigestCaptionSizes(width, height, caps) {
+  const normal = getCaptionStyleDefs(width, height).normal.fontsize
+  const limits = getCaptionFitLimits(width, height)
+  const base = Math.round(normal * DIGEST_CAPTION_SIZE_RATIO)
+  return caps.map((c) => {
+    const lines = Array.isArray(c.lines) && c.lines.length > 1 && c.lines.join('') === c.text ? c.lines : [c.text]
+    const fit = fitCaptionFontSize({ lines, baseSize: base, minSize: normal, maxWidthPx: limits.maxWidthPx, ladderPx: [Math.round(normal * 1.06), Math.round(normal * 1.03), normal] })
+    return { size: fit.size, baseSize: base, mainSize: normal, fits: fit.fits }
+  })
+}
+
+/** ダイジェスト字幕のDialogue（強調はcaptionのemphasisText＝1クリップ最大1か所を琥珀色で部分強調）。 */
+export function buildDigestCaptionEvents(width, height, caps) {
+  const defs = getCaptionStyleDefs(width, height).normal
+  const sizes = planDigestCaptionSizes(width, height, caps)
+  return caps.map((c, i) => `Dialogue: 0,${assTime(c.startSec)},${assTime(c.endSec)},${defs.name},,0,0,0,,${buildDialogueText(c, defs.highlightColour, sizes[i].size)}`)
+}
+
 /**
  * 最終動画全体のASS。字幕・テーマ・強調は最終動画の時刻へ配置済みのものを渡す。LINE案内区間にはテーマも本編字幕も重ねない。
+ * digestStyle: 'strong' のとき、ダイジェストの字幕は本編より少し大きく（部分強調つき）描画する。extraEvents: 区切りカードの文字など。
  */
-export function buildFinalAss({ width, height, cfg, timeline, mainCaptions, digestCaps, themeBlocks, qrSize }) {
+export function buildFinalAss({ width, height, cfg, timeline, mainCaptions, digestCaps, themeBlocks, qrSize, digestStyle, extraEvents: more }) {
   const line = buildLineStyleLines(width, height)
   const extraEvents = []
   for (const s of timeline.sections) {
@@ -496,7 +523,9 @@ export function buildFinalAss({ width, height, cfg, timeline, mainCaptions, dige
   for (const o of timeline.overlays ?? []) {
     if (o.kind === 'lineIntro') extraEvents.push(...buildLineOverlayEvents(width, height, cfg.line.text, o, sectionShowsQr(cfg, 'lineIntro'), qrSize?.width, qrSize?.height))
   }
-  return buildAssContent({ width, height, captions: [...digestCaps, ...mainCaptions] }, { topicBlocks: themeBlocks, topicAccentMode: 'label', extraStyleLines: line.lines, extraEvents })
+  if (digestStyle === 'strong') extraEvents.push(...buildDigestCaptionEvents(width, height, digestCaps))
+  if (Array.isArray(more)) extraEvents.push(...more)
+  return buildAssContent({ width, height, captions: digestStyle === 'strong' ? [...mainCaptions] : [...digestCaps, ...mainCaptions] }, { topicBlocks: themeBlocks, topicAccentMode: 'label', extraStyleLines: line.lines, extraEvents })
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -536,22 +565,57 @@ export function buildCompositionArgs(p) {
   // 元動画の音声トラックが映像より遅れて始まる場合（例: 音声の開始が映像より0.067秒後）、PTS-STARTPTS で先頭を詰めると音声だけが
   // 早く聞こえる。映像と同じ起点（0秒）に合わせるため、先頭を無音で埋める（first_pts=0）。ダイジェストのクリップ・本編の音声に使う。
   const fmtAV = `aresample=${SR}:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo`
+  // 区間の長さが 1/fps の倍数（フレーム境界）のときは、フレーム数・サンプル数で厳密に切る（ミリ秒への丸めで1フレーム増減しない）。
+  const frameExact = (d) => {
+    const n = Math.round(d * F)
+    return Math.abs(n / F - d) < 0.0015 ? n : null
+  }
+  const vTrim = (d) => (frameExact(d) !== null ? `trim=end_frame=${frameExact(d)}` : `trim=0:${round3(d)}`)
+  const aTrim = (d) => (frameExact(d) !== null ? `atrim=end_sample=${Math.round((frameExact(d) / F) * SR)}` : `atrim=0:${round3(d)}`)
+  const JOIN_FADE = 0.02 // 編集点（カット・区間のつなぎ）の音声の短いフェード（クリックノイズ防止。重ねないので長さは変わらない）
+  const HALF = round3(0.5 / F) // 半フレーム
+  /**
+   * 元動画の [a, a+d) を、映像・音声をそろえて取り出す入力引数とフィルタ（a・d はフレーム境界）。
+   * 元動画の映像フレームは 1/30 秒の格子に載っていない（約29.9977fps）ため、-ss a ちょうどだと「a 以降で最初のフレーム」から始まり、
+   * 最大1フレーム遅れたフレームが先頭になって、音声（サンプル精度で a から）より映像が早く見える。
+   * そこで半フレーム手前からシークし、映像は時刻で a に合わせ（最も近いフレームを選ぶ）、音声は半フレーム分をサンプル数で切り落とす。
+   * a=0 は従来どおり（音声起点の補正 first_pts=0 が先頭を無音で埋める）。
+   * @returns {{ input: string[], v: string, a: string }}
+   */
+  const alignedSegment = (a, d) => {
+    const n = frameExact(d)
+    if (n === null || !(a > HALF)) {
+      return { input: ['-ss', String(round3(a)), '-t', String(round3(d + 0.1))], v: `${vTrim(d)},setpts=PTS-STARTPTS,${fmtV}`, a: `${fmtAV},${aTrim(d)},asetpts=PTS-STARTPTS` }
+    }
+    const skip = Math.round(HALF * SR)
+    const total = Math.round((n / F) * SR)
+    return {
+      input: ['-ss', String(Math.round((a - HALF) * 1e5) / 1e5), '-t', String(round3(d + 0.1 + HALF))],
+      v: `trim=start=${HALF},setpts=PTS-${HALF}/TB,scale=${width}:${height}:flags=bicubic,setsar=1,fps=${F}:start_time=0,trim=end_frame=${n},setpts=PTS-STARTPTS,format=yuv420p`,
+      a: `${fmtAV},atrim=start_sample=${skip}:end_sample=${skip + total},asetpts=PTS-STARTPTS`,
+    }
+  }
 
   if (digestOn) {
     const D = timeline.digestSec
     const clipIdx = []
-    for (const c of p.digestClips) {
-      args.push('-ss', String(round3(c.srcStartSec)), '-t', String(round3(c.durationSec)), '-i', p.sourcePath)
+    const clipSeg = p.digestClips.map((c) => alignedSegment(c.srcStartSec, c.durationSec))
+    p.digestClips.forEach((c, k) => {
+      // 従来と同じ入力（-ss a -t d）。フレーム境界の区間だけ、半フレーム手前からシークして映像と音声をそろえる
+      const aligned = frameExact(c.durationSec) !== null && c.srcStartSec > HALF
+      args.push(...(aligned ? clipSeg[k].input : ['-ss', String(round3(c.srcStartSec)), '-t', String(round3(c.durationSec))]), '-i', p.sourcePath)
       clipIdx.push(idx++)
-    }
+    })
     const vs = []
     const as = []
     p.digestClips.forEach((c, k) => {
       const n = clipIdx[k]
       const d = round3(c.durationSec)
       const gray = cfg.digest.grayscale ? ',hue=s=0' : ''
-      chain.push(`[${n}:v]trim=0:${d},setpts=PTS-STARTPTS,${fmtV}${gray}[dv${k}]`)
-      chain.push(`[${n}:a]${fmtAV},atrim=0:${d},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.04,afade=t=out:st=${round3(Math.max(0, d - 0.04))}:d=0.04[da${k}]`)
+      const seg = clipSeg[k]
+      const aligned = frameExact(c.durationSec) !== null && c.srcStartSec > HALF
+      chain.push(`[${n}:v]${aligned ? seg.v : `${vTrim(c.durationSec)},setpts=PTS-STARTPTS,${fmtV}`}${gray}[dv${k}]`)
+      chain.push(`[${n}:a]${aligned ? seg.a : `${fmtAV},${aTrim(c.durationSec)},asetpts=PTS-STARTPTS`},afade=t=in:st=0:d=0.04,afade=t=out:st=${round3(Math.max(0, d - 0.04))}:d=0.04[da${k}]`)
       vs.push(`[dv${k}]`)
       as.push(`[da${k}]`)
     })
@@ -585,12 +649,31 @@ export function buildCompositionArgs(p) {
   }
   if (intro) panel('li', intro)
 
-  args.push('-ss', String(round3(p.mainStartSec)), '-t', String(round3(p.mainEndSec - p.mainStartSec)), '-i', p.sourcePath)
-  const mi = idx++
-  const md = round3(p.mainEndSec - p.mainStartSec)
-  chain.push(`[${mi}:v]trim=0:${md},setpts=PTS-STARTPTS,${fmtV}[mv]`)
-  chain.push(`[${mi}:a]${fmtAV},atrim=0:${md},asetpts=PTS-STARTPTS[ma]`)
-  concatIn.push('[mv]', '[ma]')
+  if (Array.isArray(p.mainItems) && p.mainItems.length > 0) {
+    // 編集済みの本編: 残す区間（元動画の [start, end)）と区切りカードの並び。映像・音声へ同じ区間を同じ順で適用する。
+    // 映像はフレーム単位で接続（長いクロスフェードなし）。音声は編集点の前後だけ短いフェード（重ねないので映像との長さは一致し続ける）。
+    p.mainItems.forEach((it, k) => {
+      if (it.kind === 'card') {
+        panel(`mc${k}`, { startSec: 0, endSec: it.durationSec })
+        return
+      }
+      const d = it.srcEndSec - it.srcStartSec
+      const seg = alignedSegment(it.srcStartSec, d)
+      args.push(...seg.input, '-i', p.sourcePath)
+      const n = idx++
+      const fades = `${k > 0 ? `,afade=t=in:st=0:d=${JOIN_FADE}` : ''}${k < p.mainItems.length - 1 ? `,afade=t=out:st=${round3(Math.max(0, d - JOIN_FADE))}:d=${JOIN_FADE}` : ''}`
+      chain.push(`[${n}:v]${seg.v}[mv${k}]`)
+      chain.push(`[${n}:a]${seg.a}${fades}[ma${k}]`)
+      concatIn.push(`[mv${k}]`, `[ma${k}]`)
+    })
+  } else {
+    args.push('-ss', String(round3(p.mainStartSec)), '-t', String(round3(p.mainEndSec - p.mainStartSec)), '-i', p.sourcePath)
+    const mi = idx++
+    const md = round3(p.mainEndSec - p.mainStartSec)
+    chain.push(`[${mi}:v]trim=0:${md},setpts=PTS-STARTPTS,${fmtV}[mv]`)
+    chain.push(`[${mi}:a]${fmtAV},atrim=0:${md},asetpts=PTS-STARTPTS[ma]`)
+    concatIn.push('[mv]', '[ma]')
+  }
   if (outro) panel('lo', outro)
 
   const n = concatIn.length / 2

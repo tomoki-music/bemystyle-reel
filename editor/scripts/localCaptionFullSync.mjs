@@ -52,7 +52,7 @@ const ffmpeg = () => process.env.FFMPEG_BIN
 const ffprobe = () => process.env.FFPROBE_BIN
 
 /** 音声をモノラル16kHzのFloat64配列で読む（[ss, ss+dur)）。 */
-async function pcm(file, ss, dur) {
+export async function pcm(file, ss, dur) {
   const b = (await execFileAsync(ffmpeg(), ['-v', 'error', '-ss', String(Math.max(0, ss)), '-t', String(dur), '-i', file, '-vn', '-ac', '1', '-ar', String(SR), '-f', 's16le', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1 << 28 })).stdout
   const n = Math.floor(b.length / 2)
   const a = new Float64Array(n)
@@ -95,37 +95,55 @@ export function audioDelay(out, src, maxLag = 3200) {
 
 const RUN = 24 // 照合するフレーム数（約0.8秒。動きがあるほど判別できる）
 
+const FR_W = 64
+const FR_H = 40
+const outFrameCache = new Map()
+/** 出力動画の全フレーム（顔の周辺・グレー・64x40）を1回だけ順次デコードして持つ。出力は30fps一定なので、フレーム番号 n の時刻は n/30。 */
+async function outputFrames(video) {
+  if (!outFrameCache.has(video)) {
+    const r = await execFileAsync(ffmpeg(), ['-v', 'error', '-i', video, '-an', '-vf', `${FRAME_REGION},fps=${FPS}`, '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1 << 30 })
+    outFrameCache.set(video, r.stdout)
+  }
+  return outFrameCache.get(video)
+}
+
 /**
- * 元動画の時刻 s（フレーム時刻）から RUN フレームと最もよく一致する、出力側の位置を探し、その先頭フレームの実PTS（秒）を返す（±4フレーム）。
- * ratio: 次点のコスト / 最良のコスト。1に近いと（静止に近い画面など）1フレームを判別できない。
+ * 元動画の時刻 s（フレーム時刻）から RUN フレームと最もよく一致する出力フレームを探し、その先頭フレームのPTS（秒）を返す（±4フレーム）。
+ * 元動画は「フレームの半分手前」からシークして、目的のフレームから確実に始める（PTSちょうどを指定すると丸めで1フレーム取りこぼすことがある）。
+ * 出力はフレーム番号で扱う（-ss の丸めに依存しない）。ratio: 次点のコスト / 最良のコスト。1に近いと（静止に近い画面など）1フレームを判別できない。
  */
-async function videoMatchPts(video, source, s, expectedOut) {
-  const raw = (file, ss, frames, extra = []) => execFileAsync(ffmpeg(), ['-hide_banner', '-ss', String(ss), '-i', file, '-frames:v', String(frames), '-an', '-vf', `${FRAME_REGION}${extra.length ? ',' + extra.join(',') : ''}`, '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1 << 27 })
-  const src = (await raw(source, round(s, 5), RUN)).stdout
-  const t0 = Math.max(0, round(expectedOut - 4 / FPS, 5))
-  const r = await raw(video, t0, RUN + 8, ['showinfo'])
-  const times = [...r.stderr.toString().matchAll(/pts_time:([0-9.]+)/g)].map((m) => Number(m[1]) + t0) // -ss の後の時刻は先頭を0とした相対値なので、シーク位置を足す
-  const size = 64 * 40
+export async function videoMatchPts(video, source, s, expectedOut) {
+  const kS = Math.round(s * FPS)
+  // 元動画の映像フレームは 1/30 秒の格子に載っていない（約29.9977fps）ため、実際のPTSを取り、期待する出力時刻をそのぶん補正する。
+  const sr = await execFileAsync(ffmpeg(), ['-hide_banner', '-copyts', '-ss', String(round(Math.max(0, (kS - 0.5) / FPS), 5)), '-i', source, '-frames:v', String(RUN), '-an', '-vf', `${FRAME_REGION},showinfo`, '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1 << 27 })
+  const src = sr.stdout
+  const srcPts0 = Number([...sr.stderr.toString().matchAll(/pts_time:([0-9.]+)/g)][0]?.[1])
+  const drift = Number.isFinite(srcPts0) ? srcPts0 - s : 0
+  const out = await outputFrames(video)
+  const size = FR_W * FR_H
+  const nOut = Math.floor(out.length / size)
   const nSrc = Math.floor(src.length / size)
-  const nOut = Math.floor(r.stdout.length / size)
+  const e = Math.round(expectedOut * FPS)
   const costs = []
-  for (let j = 0; j + nSrc <= nOut && j <= 8; j++) {
+  for (let j = -4; j <= 4; j++) {
+    const start = e + j
+    if (start < 0 || start + nSrc > nOut) { costs.push(Infinity); continue }
     let c = 0
     for (let i = 0; i < nSrc; i++) {
       let d = 0
-      for (let k = 0; k < size; k++) d += Math.abs(r.stdout[(i + j) * size + k] - src[i * size + k])
+      for (let k = 0; k < size; k++) d += Math.abs(out[(start + i) * size + k] - src[i * size + k])
       c += d / size
     }
     costs.push(c / nSrc)
   }
-  if (!costs.length) return { pts: null, diff: null, ratio: null }
-  const order = costs.map((c, j) => [c, j]).sort((x, y) => x[0] - y[0])
+  const order = costs.map((c, j) => [c, j - 4]).filter((x) => Number.isFinite(x[0])).sort((x, y) => x[0] - y[0])
+  if (!order.length) return { pts: null, diff: null, ratio: null }
   const [bestC, bestJ] = order[0]
-  return { pts: times[bestJ] ?? null, diff: bestC, ratio: order.length > 1 ? order[1][0] / bestC : null }
+  return { pts: (e + bestJ) / FPS - drift, diff: bestC, ratio: order.length > 1 ? order[1][0] / bestC : null, srcDriftMs: round(drift * 1000, 1) }
 }
 
 /** 音声の発話開始（無音→発話）の時刻（出力の時刻）。 */
-function speechOnsets(samples01, frameSec = 0.01) {
+export function speechOnsets(samples01, frameSec = 0.01) {
   const samples = samples01.map((v) => v * 32768) // silenceDetector は int16 スケールを前提にする
   const { thresholdDb } = detectSilences(samples, SR, { minSilenceSec: 0.3 })
   const { db } = computeFrameDb(samples, SR, frameSec)
@@ -180,7 +198,7 @@ function captionLeadMs(events, samples01, t0Out, minGapSec = 0.15) {
 }
 
 /** 1点の測定: 音声の遅れ・映像の遅れ・音声と映像のずれ。srcSec は元動画の時刻、outSec は出力での期待時刻。 */
-async function measurePoint({ video, source, srcSec, outSec }) {
+export async function measurePoint({ video, source, srcSec, outSec }) {
   let used = srcSec
   let a = { ok: false }
   for (let k = 0; k < 4 && !(a.ok && a.corr >= 0.6); k++) {
@@ -212,7 +230,7 @@ async function measurePoint({ video, source, srcSec, outSec }) {
   }
 }
 
-async function ptsReport(video, expectedTotalSec) {
+export async function ptsReport(video, expectedTotalSec) {
   const probe = JSON.parse((await execFileAsync(ffprobe(), ['-v', 'error', '-print_format', 'json', '-show_entries', 'stream=index,codec_type,start_time,start_pts,duration,time_base,nb_frames:format=start_time,duration', video])).stdout)
   const vs = probe.streams.find((s) => s.codec_type === 'video')
   const as = probe.streams.find((s) => s.codec_type === 'audio')
@@ -240,7 +258,7 @@ async function ptsReport(video, expectedTotalSec) {
 }
 
 /** 元動画の音声先頭 offset 分の「無音」が、出力の本編先頭にあるか（padded silence）。 */
-async function paddedSilenceReport(video, source, mainOutSec, offsetSec) {
+export async function paddedSilenceReport(video, source, mainOutSec, offsetSec) {
   const at = async (f, ss, dur) => {
     const b = (await execFileAsync(ffmpeg(), ['-v', 'error', '-ss', String(Math.max(0, ss)), '-t', String(dur), '-i', f, '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1 << 26 })).stdout
     return new Float32Array(b.buffer, b.byteOffset, Math.floor(b.length / 4))
