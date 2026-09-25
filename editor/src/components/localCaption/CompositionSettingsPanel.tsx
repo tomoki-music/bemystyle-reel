@@ -11,7 +11,7 @@ export interface MainBgmOverrides { enabled?: boolean; sourceId?: string; volume
 export interface MainBgmCandidate { id: string; fileName: string; sizeBytes: number }
 export interface MainBgmPreviewOutcome { ok: boolean; message?: string; previewWindow?: { durationSec: number }; mainBgm?: { gainDb: number; preDuckGapDb: number; loops: number; needsLoop: boolean } | null }
 
-export const MAIN_BGM_VOLUME_MAX = 0.06 // サーバー側の上限（mainBgm.mjs の MAIN_BGM_LIMITS.volumeMax）と同じ（標準の2倍）
+export const MAIN_BGM_VOLUME_MAX = 0.06 // サーバー側の上限（mainBgm.mjs の MAIN_BGM_LIMITS.volumeMax）と同じ（標準の1.2倍）
 
 export interface CompositionOverrides {
   mainBgm?: MainBgmOverrides
@@ -24,7 +24,7 @@ export interface CompositionOverrides {
 interface AssetState { ok: boolean; error: string | null; sizeBytes: number | null; durationSec: number | null; width: number | null; height: number | null }
 interface MainBgmAssetState { ok: boolean; error: string | null; fileName: string | null; sizeBytes: number | null; durationSec: number | null; sampleRate: number | null; channels: number | null }
 interface MainBgmConfig { enabled: boolean; volume: number; autoGain: boolean; ducking: boolean; loop: boolean; fadeInSec: number; fadeOutSec: number }
-const MAIN_BGM_FALLBACK: MainBgmConfig = { enabled: false, volume: 0.03, autoGain: true, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5 }
+const MAIN_BGM_FALLBACK: MainBgmConfig = { enabled: false, volume: 0.05, autoGain: true, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5 }
 interface Status {
   config: { digest: { enabled: boolean; durationSec: number; grayscale: boolean; bgm: { volume: number; fadeInSec: number; fadeOutSec: number; credit: { title: string; composer: string } } }; lineIntro: { enabled: boolean; durationSec: number; showQr: boolean }; lineOutro: { enabled: boolean; durationSec: number; showQr: boolean }; preview: { digest: boolean; lineIntro: boolean; lineOutro: boolean }; mainBgm?: MainBgmConfig }
   assets: { bgm: AssetState; qr: AssetState; mainBgm?: MainBgmAssetState }
@@ -156,7 +156,7 @@ export function CompositionSettingsPanel({ value, onChange, disabled, onMainBgmP
       <p data-testid="main-bgm-file">選択中: {describeMainBgmAsset(mbAsset)}</p>
       <div>
         <label>音量{' '}<input type="range" aria-label="本編BGM音量" min={0} max={MAIN_BGM_VOLUME_MAX} step={0.005} value={mb.volume} disabled={mbLocked} onChange={(e) => set({ mainBgm: { volume: Number(e.target.value) } })} /></label>{' '}
-        <span>{mb.volume.toFixed(3)}（標準 0.030・上限 {MAIN_BGM_VOLUME_MAX.toFixed(2)}。声との差が12dB未満にならないよう自動で制限）</span>
+        <span>{mb.volume.toFixed(3)}（標準 0.050・上限 {MAIN_BGM_VOLUME_MAX.toFixed(2)}。声との差が12dB未満にならないよう自動で制限）</span>
       </div>
       <div>
         <label><input type="checkbox" aria-label="自動ダッキング" checked={mb.ducking} disabled={mbLocked} onChange={(e) => set({ mainBgm: { ducking: e.target.checked } })} /> 自動ダッキング（発話中にBGMを下げる）</label>{' '}

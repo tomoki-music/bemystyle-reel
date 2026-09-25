@@ -8,8 +8,8 @@ import { resolveCompositionConfig, validateCompositionConfig, planTimeline, buil
 const probe = (over = {}) => ({ streams: [{ codec_type: 'audio', codec_name: 'mp3', sample_rate: '44100', channels: 2, duration: '63.9' }], format: { format_name: 'mp3', duration: '63.9', bit_rate: '192000' }, ...over })
 
 describe('本編BGMの設定', () => {
-  it('既定: 素材未指定・OFF（従来どおり本編BGMなし）。ダッキングON・ループON・フェード 1.5/2.5秒・低め音量・適用範囲は本編のみ', () => {
-    expect(MAIN_BGM_DEFAULTS).toMatchObject({ enabled: false, sourcePath: null, volume: 0.03, autoGain: true, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5, scope: 'main' })
+  it('既定: 素材未指定・OFF（従来どおり本編BGMなし）。ダッキングON・ループON・フェード 1.5/2.5秒・音量0.05（確認動画でBGMが小さすぎたため 0.03 から上げた。許可範囲 0.035〜0.05・UI上限 0.06）・適用範囲は本編のみ', () => {
+    expect(MAIN_BGM_DEFAULTS).toMatchObject({ enabled: false, sourcePath: null, volume: 0.05, autoGain: true, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5, scope: 'main' })
     expect(COMPOSITION_DEFAULTS.mainBgm.enabled).toBe(false)
     expect(resolveCompositionConfig({}).mainBgm.enabled).toBe(false)
   })
@@ -17,7 +17,7 @@ describe('本編BGMの設定', () => {
     const o = sanitizeMainBgmOverrides({ enabled: true, sourcePath: '/etc/passwd', volume: 0.05, ducking: false, loop: 'yes', fadeInSec: 2, scope: 'all', extra: 1 })
     expect(o).toEqual({ enabled: true, volume: 0.05, ducking: false, fadeInSec: 2 })
   })
-  it('音量・フェードの範囲を検証する（音量の上限 0.06 = 標準の2倍）', () => {
+  it('音量・フェードの範囲を検証する（音量の上限 0.06 = 標準の1.2倍）', () => {
     expect(validateMainBgmConfig(resolveMainBgmConfig({ volume: MAIN_BGM_LIMITS.volumeMax })).ok).toBe(true)
     expect(validateMainBgmConfig(resolveMainBgmConfig({ volume: 0.1 })).ok).toBe(false)
     expect(validateMainBgmConfig(resolveMainBgmConfig({ volume: -1 })).ok).toBe(false)
@@ -48,23 +48,23 @@ describe('MP3の実データ検証（ffprobeの結果）', () => {
 
 describe('自動ゲイン（声とBGMの音量差）', () => {
   const base = { voiceSpeechDb: -32, bgmDb: -50, autoGain: true, ducking: true } // 音源が声より小さいときも、大きいときも同じ相対レベルになる（下のテスト）
-  it('標準音量では、声とBGM（ダッキング前）の差が目標（ダッキングON 20dB / OFF 26dB）になるゲインを返す', () => {
-    const on = planBgmGain({ ...base, volume: 0.03 })
+  it('標準音量では、声とBGM（ダッキング前）の差が目標（ダッキングON 15.6dB / OFF 21.6dB）になるゲインを返す', () => {
+    const on = planBgmGain({ ...base, volume: MAIN_BGM_LIMITS.presetVolume })
     expect(-50 + on.gainDb).toBeCloseTo(-32 - MAIN_BGM_GAP_TARGET.ducking, 2) // BGM = 声 − 目標差
     expect(on.preDuckGapDb).toBeCloseTo(MAIN_BGM_GAP_TARGET.ducking, 3)
-    const off = planBgmGain({ ...base, ducking: false, volume: 0.03 })
+    const off = planBgmGain({ ...base, ducking: false, volume: MAIN_BGM_LIMITS.presetVolume })
     expect(off.preDuckGapDb).toBeCloseTo(MAIN_BGM_GAP_TARGET.noDucking, 3)
   })
   it('音源の音量が違っても、BGMは同じ相対レベルになる（入力音源のラウドネスを測って決める）', () => {
     for (const bgmDb of [-6, -14, -24, -35]) {
-      const p = planBgmGain({ ...base, bgmDb, volume: 0.03 })
+      const p = planBgmGain({ ...base, bgmDb, volume: MAIN_BGM_LIMITS.presetVolume })
       expect(bgmDb + p.gainDb).toBeCloseTo(base.voiceSpeechDb - MAIN_BGM_GAP_TARGET.ducking, 2)
     }
   })
-  it('ユーザー音量は標準(0.03)に対する倍率。上げると大きく、下げると小さくなる', () => {
-    const a = planBgmGain({ ...base, volume: 0.03 }).gainDb
-    expect(planBgmGain({ ...base, bgmDb: -60, volume: 0.06 }).gainDb - planBgmGain({ ...base, bgmDb: -60, volume: 0.03 }).gainDb).toBeCloseTo(linearToDb(2), 1)
-    expect(planBgmGain({ ...base, volume: 0.015 }).gainDb - a).toBeCloseTo(linearToDb(0.5), 2)
+  it('ユーザー音量は標準(0.05)に対する倍率。上げると大きく、下げると小さくなる', () => {
+    const a = planBgmGain({ ...base, volume: MAIN_BGM_LIMITS.presetVolume }).gainDb
+    expect(planBgmGain({ ...base, bgmDb: -60, volume: 0.06 }).gainDb - planBgmGain({ ...base, bgmDb: -60, volume: 0.05 }).gainDb).toBeCloseTo(linearToDb(1.2), 1)
+    expect(planBgmGain({ ...base, volume: 0.025 }).gainDb - a).toBeCloseTo(linearToDb(0.5), 2)
     expect(planBgmGain({ ...base, volume: 0 })).toMatchObject({ muted: true, gainDb: -120 })
   })
   it('安全な上限: 音量を最大にしても、声とBGM（ダッキング前）の差は12dBを下回らない。上限を超える指定は上限へ丸める', () => {
@@ -135,13 +135,13 @@ describe('本編のミックス（フィルタ）', () => {
     expect(g).toContain('afade=t=out:st=297.5:d=2.5')
     expect(g.endsWith('[mainaudio]')).toBe(true)
   })
-  it('ダッキング: 声をサイドチェインにして（声の帯域＋強い圧縮）、ゆっくり動かす（attack 60ms・release 900ms）', () => {
+  it('ダッキング: 声をサイドチェインにして（声の帯域＋強い圧縮）、ゆっくり動かす（attack 60ms・release 1200ms）', () => {
     const g = chain()
     expect(g).toContain('sidechaincompress')
     expect(g).toContain(`threshold=${MAIN_BGM_DUCK.threshold}`)
     expect(g).toContain(`ratio=${MAIN_BGM_DUCK.ratio}`)
     expect(g).toContain('attack=60')
-    expect(g).toContain('release=900')
+    expect(g).toContain('release=1200')
     expect(g).toContain('highpass=f=120')
     expect(g).toContain('acompressor')
     expect(MAIN_BGM_DUCK.attack).toBeGreaterThanOrEqual(30) // 速すぎない
@@ -228,5 +228,75 @@ describe('レンダーのffmpeg引数への組み込み（後方互換・範囲�
     expect(on.args.every((a) => typeof a === 'string')).toBe(true)
     expect(on.args).toContain('/tmp/a b;$(rm -rf x).mp3')
     expect(on.filterComplex).not.toContain('rm -rf')
+  })
+})
+
+describe('本編BGM: 音量・ダッキングの採用値（確認動画でBGMが小さすぎたため調整）', () => {
+  it('音量は 0.035〜0.05（目安）の範囲。UI上限 0.06 は維持。標準音量でも声との差の下限（12dB）を割らない', () => {
+    expect(MAIN_BGM_DEFAULTS.volume).toBeGreaterThanOrEqual(0.035)
+    expect(MAIN_BGM_DEFAULTS.volume).toBeLessThanOrEqual(0.05)
+    expect(MAIN_BGM_DEFAULTS.volume).toBeGreaterThan(0.028) // 前回（0.028）より大きい
+    expect(MAIN_BGM_LIMITS.volumeMax).toBe(0.06)
+    const g = planBgmGain({ voiceSpeechDb: -31.7, bgmDb: -10.3, volume: MAIN_BGM_DEFAULTS.volume, autoGain: true, ducking: true })
+    expect(g.preDuckGapDb).toBeGreaterThanOrEqual(MAIN_BGM_LIMITS.minGapDb)
+    // 前回設定（volume 0.028・ゲイン -41.088dB）に対して、同じ声・同じ曲でBGMは約4dB大きい
+    expect(g.gainDb - -41.088).toBeGreaterThan(3.5)
+  })
+  it('ダッキングの各値は許可範囲内（threshold 0.015〜0.02 / ratio 4〜6 / attack 40〜80ms / release 700〜1200ms）。knee 6・makeup 1・声の帯域 120〜5000Hz', () => {
+    expect(MAIN_BGM_DUCK.threshold).toBeGreaterThanOrEqual(0.015)
+    expect(MAIN_BGM_DUCK.threshold).toBeLessThanOrEqual(0.02)
+    expect(MAIN_BGM_DUCK.ratio).toBeGreaterThanOrEqual(4)
+    expect(MAIN_BGM_DUCK.ratio).toBeLessThanOrEqual(6)
+    expect(MAIN_BGM_DUCK.attack).toBeGreaterThanOrEqual(40)
+    expect(MAIN_BGM_DUCK.attack).toBeLessThanOrEqual(80)
+    expect(MAIN_BGM_DUCK.release).toBeGreaterThanOrEqual(700)
+    expect(MAIN_BGM_DUCK.release).toBeLessThanOrEqual(1200)
+    expect(MAIN_BGM_DUCK).toMatchObject({ knee: 6, makeup: 1, sidechainHighpassHz: 120, sidechainLowpassHz: 5000 })
+  })
+  it('ダッキング: 発話開始でBGMがすぐ下がる（attackは短い）が、語尾では戻らない（releaseは長い）。BGMは主役にならない（声との差の下限を維持）', () => {
+    expect(MAIN_BGM_DUCK.attack).toBeLessThanOrEqual(80)
+    expect(MAIN_BGM_DUCK.release).toBeGreaterThan(MAIN_BGM_DUCK.attack * 10)
+    expect(MAIN_BGM_GAP_TARGET.ducking).toBeGreaterThanOrEqual(MAIN_BGM_LIMITS.minGapDb)
+  })
+})
+
+describe('本編BGM: ループ開始点（1周目は曲の0秒から・2周目以降は開始点から）', () => {
+  it('計画: 1周目 = 0〜開始点（introSec）、その後は 開始点〜曲末 の単位を繰り返す。単位の長さ = 曲長 − 開始点', () => {
+    const p = planBgmLoop({ bgmSec: 160.056, mainSec: 916.6, loop: true, loopStartSec: 35.41 })
+    expect(p).toMatchObject({ ok: true, needsLoop: true, loopStartSec: 35.41, introSec: 35.41, crossfadeSec: 2, unitSec: 124.646, playSec: 916.6 })
+    expect(p.loops).toBe(1 + Math.ceil((916.6 - 35.41) / 124.646))
+  })
+  it('開始点なしは従来どおり（曲頭へ戻る単位。introSec 0）', () => {
+    expect(planBgmLoop({ bgmSec: 60, mainSec: 300, loop: true })).toMatchObject({ loopStartSec: 0, introSec: 0, unitSec: 58, crossfadeSec: 2 })
+  })
+  it('曲が本編より長い・ループOFFなら開始点は使わない。開始点が範囲外なら計画不可', () => {
+    expect(planBgmLoop({ bgmSec: 200, mainSec: 120, loop: true, loopStartSec: 35 })).toMatchObject({ needsLoop: false, loopStartSec: 0, introSec: 0 })
+    expect(planBgmLoop({ bgmSec: 60, mainSec: 300, loop: true, loopStartSec: 1 }).ok).toBe(false) // 直前にクロスフェード分（2秒）が無い
+    expect(planBgmLoop({ bgmSec: 60, mainSec: 300, loop: true, loopStartSec: 58 }).ok).toBe(false) // 単位が短すぎる
+  })
+  it('ループ単位の書き出し: 単位 = [開始点, 曲末−2秒] + crossfade(曲末2秒 → 開始点直前2秒)。長さは 曲長 − 開始点（サンプル数で厳密）', () => {
+    const { args } = buildLoopUnitArgs({ bgmPath: '/in.mp3', outPath: '/out.wav', bgmSec: 160.056, crossfadeSec: 2, sampleRate: 48000, loopStartSec: 35.41 })
+    const g = args[args.indexOf('-filter_complex') + 1]
+    expect(g).toContain('[h0]atrim=33.41:35.41') // 開始点の直前（クロスフェードの相手）
+    expect(g).toContain('[m0]atrim=35.41:158.056')
+    expect(g).toContain('[t0]atrim=158.056:160.056')
+    expect(g).toContain('acrossfade=d=2:c1=qsin:c2=qsin')
+    expect(g).toContain(`atrim=end_sample=${Math.round((160.056 - 35.41) * 48000)}`)
+  })
+  it('フィルタ: 1周目（曲の0〜開始点）→ ループ単位 を連結し、本編の長さで切り、本編終了でフェードアウト（2.5秒）。2つのBGM入力を使う', () => {
+    const plan = planBgmLoop({ bgmSec: 160.056, mainSec: 916.6, loop: true, loopStartSec: 35.41 })
+    const cfg = resolveMainBgmConfig({ enabled: true })
+    const g = buildMainBgmFilters({ bgmInputIndex: 4, bgmIntroInputIndex: 3, mainSec: 916.6, gainDb: -37, plan, cfg, sampleRate: 48000, voiceLabel: '[mainvoice]', outLabel: '[mainaudio]' }).join(';')
+    expect(g).toContain(`[3:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end_sample=${Math.round(35.41 * 48000)}`)
+    expect(g).toContain('[4:a]aresample=48000')
+    expect(g).toContain('[mbi][mbu]concat=n=2:v=0:a=1,atrim=0:916.6')
+    expect(g).toContain('afade=t=out:st=914.1:d=2.5') // 本編終了で無音
+    expect(g.endsWith('[mainaudio]')).toBe(true)
+  })
+  it('開始点なし（従来）のフィルタは1入力のまま', () => {
+    const plan = planBgmLoop({ bgmSec: 60, mainSec: 300, loop: true })
+    const g = buildMainBgmFilters({ bgmInputIndex: 3, mainSec: 300, gainDb: -22, plan, cfg: resolveMainBgmConfig({ enabled: true }), sampleRate: 48000, voiceLabel: '[mainvoice]', outLabel: '[mainaudio]' }).join(';')
+    expect(g).not.toContain('[mbi]')
+    expect(g).toContain('[3:a]aresample=48000')
   })
 })

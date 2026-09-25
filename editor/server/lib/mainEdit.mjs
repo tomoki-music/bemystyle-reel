@@ -75,5 +75,7 @@ export function mainAnchors(timeline) {
     outroStartSec: outro?.startSec ?? null,
     bgmStartSec: main.startSec, // 本編BGMは本編の開始から本編の終了まで
     bgmEndSec: main.endSec,
+    digestEndSec: timeline.digestSec ?? null, // ダイジェスト（暗転の止め画を含む）の終了
+    transition: timeline.transition ?? null, // 画面遷移（暗転→黒→フェードイン）。無いときは null
   }
 }

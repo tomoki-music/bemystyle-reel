@@ -11,7 +11,7 @@ const status = (over: Partial<{ bgmOk: boolean; qrOk: boolean; env: boolean; mai
     lineIntro: { enabled: true, durationSec: 30, showQr: false },
     lineOutro: { enabled: true, durationSec: 12, showQr: true },
     preview: { digest: false, lineIntro: false, lineOutro: false },
-    mainBgm: { enabled: over.mainBgm ?? false, volume: 0.03, autoGain: true, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5 },
+    mainBgm: { enabled: over.mainBgm ?? false, volume: 0.05, autoGain: true, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5 },
   },
   assets: {
     mainBgm: over.mainBgmFile ? mainBgmAsset : { ok: false, error: '未設定', fileName: null, sizeBytes: null, durationSec: null, sampleRate: null, channels: null },
@@ -114,8 +114,8 @@ describe('CompositionSettingsPanel', () => {
       expect(last(changes)?.mainBgm?.ducking).toBe(false)
       fireEvent.click(screen.getByLabelText('BGMをループ'))
       expect(last(changes)?.mainBgm?.loop).toBe(false)
-      fireEvent.change(screen.getByLabelText('本編BGM音量'), { target: { value: '0.05' } })
-      expect(last(changes)?.mainBgm?.volume).toBe(0.05)
+      fireEvent.change(screen.getByLabelText('本編BGM音量'), { target: { value: '0.04' } })
+      expect(last(changes)?.mainBgm?.volume).toBe(0.04)
       fireEvent.change(screen.getByLabelText('本編BGMフェードイン秒'), { target: { value: '2' } })
       expect(last(changes)?.mainBgm?.fadeInSec).toBe(2)
       fireEvent.change(screen.getByLabelText('本編BGMフェードアウト秒'), { target: { value: '3' } })

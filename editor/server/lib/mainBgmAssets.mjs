@@ -13,7 +13,8 @@ import { basename, join, extname } from 'path'
 import { createHash } from 'crypto'
 import { validateSourcePath, PathValidationError, resolveAllowedRoots, isInsideAnyRoot } from './pathValidator.mjs'
 import { readWavPcm16Mono, computeFrameDb, detectSilences } from './silenceDetector.mjs'
-import { parseMp3Probe, MAIN_BGM_MISSING_MESSAGE, planBgmLoop, planBgmGain, buildLoopUnitArgs, meanEnergyDb } from './mainBgm.mjs'
+import { parseMp3Probe, MAIN_BGM_MISSING_MESSAGE, MAIN_BGM_LOOP, planBgmLoop, planBgmGain, buildLoopUnitArgs, meanEnergyDb } from './mainBgm.mjs'
+import { analyzeBgm, scoreLoopStarts, topDistinct, measureLoopBoundary } from './bgmLoopSelect.mjs'
 
 const ffmpegBin = () => (process.env.FFMPEG_BIN && process.env.FFMPEG_BIN.trim()) || 'ffmpeg'
 const ffprobeBin = () => (process.env.FFPROBE_BIN && process.env.FFPROBE_BIN.trim()) || 'ffprobe'
@@ -122,9 +123,10 @@ const decodeMono16k = async (ffmpeg, args, { spawnFn } = {}) => {
  * 声は編集後の本編に使う区間（items の seg）だけを、発話とみなせるフレーム（無音しきい値より大きい）のエネルギー平均で測る。
  * @returns {Promise<{ voiceSpeechDb: number, voiceOverallDb: number, bgmDb: number, speechFrames: number }>}
  */
-export async function measureMainBgmLevels({ sourcePath, mainItems, bgmPath }, deps = {}) {
+export async function measureMainBgmLevels({ sourcePath, mainItems, bgmPath, bgmFromSec = 0 }, deps = {}) {
   const ff = deps.ffmpegBin ?? ffmpegBin()
-  const bgm = await decodeMono16k(ff, ['-i', bgmPath], deps)
+  // bgmFromSec: ループするとき、本編の大半で鳴るのは開始点以降（曲頭の静かな部分は最初の1回だけ）なので、その範囲のラウドネスで測る
+  const bgm = await decodeMono16k(ff, [...(bgmFromSec > 0 ? ['-ss', String(bgmFromSec)] : []), '-i', bgmPath], deps)
   const bgmDb = meanEnergyDb(computeFrameDb(bgm.samples, bgm.sampleRate, 0.02).db, -80)
   const speechDbs = []
   const allDbs = []
@@ -142,27 +144,73 @@ export async function measureMainBgmLevels({ sourcePath, mainItems, bgmPath }, d
   return { voiceSpeechDb: meanEnergyDb(speechDbs), voiceOverallDb: meanEnergyDb(allDbs, -80), bgmDb, speechFrames: speechDbs.length }
 }
 
+const decodeF32 = async (ffmpeg, args, { sampleRate, channels = 1, spawnFn } = {}) => {
+  const buf = await run(ffmpeg, ['-v', 'error', ...args, '-vn', '-ac', String(channels), '-ar', String(sampleRate), '-f', 'f32le', 'pipe:1'], { spawnFn, encoding: 'buffer' })
+  return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength - (buf.byteLength % 4)))
+}
+
+/** ループ境界が自然と言える基準（機械測定）。 */
+export const LOOP_BOUNDARY_LIMITS = Object.freeze({ levelDiffDb: 1.5, dipDb: 1.5, xfadeLevelDb: 1.5, maxStepRatio: 1.5 })
+
 /**
- * レンダー用に本編BGMを準備する: 音源の検証 → ラウドネス測定 → ゲイン・ループの計画 → （必要なら）ループ単位のWAVを tmpDir へ書く。
- * @returns {Promise<{ ok: boolean, error?: string, prep?: { inputPath: string, plan: object, gainDb: number, gain: object, levels: object, info: object, loopUnitPath: string | null } }>}
+ * ループ開始点を選ぶ: 曲の4秒以降の候補を、拍・音量・音色の一致で並べ（bgmLoopSelect）、上位の候補は実際にループ単位WAVを作って境界を測る
+ * （境界前後の音量差・クロスフェードの落ち込み・クリック）。基準を満たすもののうち、もっとも自然な（スコアが高い）ものを採用する。
+ * 聴感の確認はできない（機械測定のみ）。ループ単位は tmpDir へ書く（呼び出し側の一時フォルダごと削除される）。
+ * @returns {Promise<{ startSec: number, unitPath: string, crossfadeSec: number, candidates: object[], allMeetCriteria: boolean, searched: number } | null>} 候補が取れない（短い曲）ときは null
  */
-export async function prepareMainBgm({ cfg, roots, sourcePath, mainItems, mainSec, tmpDir, transform }, deps = {}) {
+export async function selectLoopStart({ bgmPath, durationSec, tmpDir, crossfadeSec, topN = 8, fromSec = MAIN_BGM_LOOP.minStartSec, toSec = 40 }, deps = {}) {
+  const ff = deps.ffmpegBin ?? ffmpegBin()
+  const SR = 48000
+  const mono = await decodeF32(ff, ['-i', bgmPath], { sampleRate: 24000, spawnFn: deps.spawnFn }) // 24000Hz: 10msが240サンプルで割り切れる（解析の時刻が実時間と一致する）
+  const scored = scoreLoopStarts(analyzeBgm(mono, 24000), { lengthSec: durationSec, crossfadeSec, fromSec, toSec })
+  const top = topDistinct(scored, topN)
+  if (top.length === 0) return null // 曲が短くて4秒以降の候補が取れない → 従来のループ（曲頭へ戻る）
+  const measured = []
+  for (const [i, c] of top.entries()) {
+    const unitPath = join(tmpDir, `loop-cand-${i}.wav`)
+    await run(ff, buildLoopUnitArgs({ bgmPath, outPath: unitPath, bgmSec: durationSec, crossfadeSec, sampleRate: SR, loopStartSec: c.startSec }).args, { spawnFn: deps.spawnFn })
+    const u = await decodeF32(ff, ['-i', unitPath], { sampleRate: SR, spawnFn: deps.spawnFn })
+    const m = measureLoopBoundary(u, SR, crossfadeSec)
+    const meets = m.levelDiffDb <= LOOP_BOUNDARY_LIMITS.levelDiffDb && m.level500msDiffDb <= LOOP_BOUNDARY_LIMITS.levelDiffDb && m.dipDb >= -LOOP_BOUNDARY_LIMITS.dipDb && Math.abs(m.xfadeLevelDb) <= LOOP_BOUNDARY_LIMITS.xfadeLevelDb && m.maxStepRatio <= LOOP_BOUNDARY_LIMITS.maxStepRatio
+    measured.push({ ...c, ...m, meets, unitPath })
+  }
+  const pool = measured.some((m) => m.meets) ? measured.filter((m) => m.meets) : [...measured].sort((a, b) => a.levelDiffDb - b.levelDiffDb)
+  const best = measured.some((m) => m.meets) ? [...pool].sort((a, b) => b.score - a.score)[0] : pool[0]
+  return { startSec: best.startSec, unitPath: best.unitPath, crossfadeSec, candidates: measured.map(({ unitPath, ...rest }) => rest), allMeetCriteria: best.meets, searched: scored.length }
+}
+
+/**
+ * レンダー用に本編BGMを準備する: 音源の検証 → ループ開始点の選定 → ラウドネス測定 → ゲイン・ループの計画 → （必要なら）ループ単位のWAVを tmpDir へ書く。
+ * planMainSec / levelItems: ゲイン・ループの計画に使う本編の長さと、声のラウドネスを測る区間（確認動画では、実際に流す長さ・区間ではなく最終版のもので計画する）。省略時は mainSec / mainItems。
+ * @returns {Promise<{ ok: boolean, error?: string, prep?: { inputPath: string, introPath: string | null, plan: object, gainDb: number, gain: object, levels: object, info: object, loopUnitPath: string | null, loopSelection: object | null } }>}
+ */
+export async function prepareMainBgm({ cfg, roots, sourcePath, mainItems, levelItems, mainSec, planMainSec, tmpDir, transform }, deps = {}) {
   const mb = cfg.mainBgm
   const info = await inspectMainBgm(mb.sourcePath, roots, deps)
   if (!info.ok) return { ok: false, error: info.error }
-  const plan = planBgmLoop({ bgmSec: info.durationSec, mainSec, loop: mb.loop })
+  let plan = planBgmLoop({ bgmSec: info.durationSec, mainSec: planMainSec ?? mainSec, loop: mb.loop })
   if (!plan.ok) return { ok: false, error: plan.error }
-  const levels = await measureMainBgmLevels({ sourcePath, mainItems, bgmPath: info.realPath }, deps)
-  const gain = planBgmGain({ voiceSpeechDb: levels.voiceSpeechDb, bgmDb: levels.bgmDb, volume: mb.volume, autoGain: mb.autoGain, ducking: mb.ducking })
   let loopUnitPath = null
+  let loopSelection = null
   if (plan.needsLoop) {
-    loopUnitPath = join(tmpDir, `main-bgm-loop-${process.pid}-${Date.now()}.wav`)
-    await run(deps.ffmpegBin ?? ffmpegBin(), buildLoopUnitArgs({ bgmPath: info.realPath, outPath: loopUnitPath, bgmSec: info.durationSec, crossfadeSec: plan.crossfadeSec, sampleRate: 48000 }).args, { spawnFn: deps.spawnFn })
+    loopSelection = await selectLoopStart({ bgmPath: info.realPath, durationSec: info.durationSec, tmpDir, crossfadeSec: plan.crossfadeSec }, deps)
+    if (loopSelection) {
+      loopUnitPath = loopSelection.unitPath
+      plan = planBgmLoop({ bgmSec: info.durationSec, mainSec: planMainSec ?? mainSec, loop: mb.loop, loopStartSec: loopSelection.startSec })
+      if (!plan.ok) return { ok: false, error: plan.error }
+    } else {
+      // 短い曲: 従来のループ単位（末尾と先頭のクロスフェード）
+      loopUnitPath = join(tmpDir, `main-bgm-loop-${process.pid}-${Date.now()}.wav`)
+      await run(deps.ffmpegBin ?? ffmpegBin(), buildLoopUnitArgs({ bgmPath: info.realPath, outPath: loopUnitPath, bgmSec: info.durationSec, crossfadeSec: plan.crossfadeSec, sampleRate: 48000 }).args, { spawnFn: deps.spawnFn })
+    }
   }
+  const levels = await measureMainBgmLevels({ sourcePath, mainItems: levelItems ?? mainItems, bgmPath: info.realPath, bgmFromSec: plan.needsLoop ? plan.loopStartSec : 0 }, deps)
+  const gain = planBgmGain({ voiceSpeechDb: levels.voiceSpeechDb, bgmDb: levels.bgmDb, volume: mb.volume, autoGain: mb.autoGain, ducking: mb.ducking })
   const { realPath, ...publicInfo } = info
   let inputPath = plan.needsLoop ? loopUnitPath : realPath
   let effectivePlan = plan
+  if (planMainSec && planMainSec !== mainSec) effectivePlan = planBgmLoop({ bgmSec: info.durationSec, mainSec, loop: mb.loop }) // 実際に流す長さ（確認動画。トラックは transform が作る）
   // 確認動画用: 入力のBGMを別の音声（例: ループ境界の区間を差し込んだトラック）へ差し替える。一時ファイルは tmpDir へ作る
-  if (transform) ({ inputPath, plan: effectivePlan } = await transform({ realPath, info, plan, tmpDir, unitPath: loopUnitPath, mainSec }))
-  return { ok: true, prep: { inputPath, plan: effectivePlan, sourcePlan: plan, gainDb: gain.gainDb, gain, levels, info: publicInfo, loopUnitPath } }
+  if (transform) ({ inputPath, plan: effectivePlan } = await transform({ realPath, info, plan, tmpDir, unitPath: loopUnitPath, mainSec, loopSelection }))
+  return { ok: true, prep: { inputPath, introPath: effectivePlan.needsLoop && effectivePlan.introSec > 0 ? realPath : null, plan: effectivePlan, sourcePlan: plan, gainDb: gain.gainDb, gain, levels, info: publicInfo, loopUnitPath, loopSelection: loopSelection && { startSec: loopSelection.startSec, crossfadeSec: loopSelection.crossfadeSec, candidates: loopSelection.candidates, allMeetCriteria: loopSelection.allMeetCriteria, searched: loopSelection.searched } } }
 }

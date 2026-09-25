@@ -163,7 +163,7 @@ describe('本編BGM（MP3）の受け渡し', () => {
     writeFileSync(join(dir, 'main-bgm.mp3'), 'x')
     const env = { COMPOSITION_MAIN_BGM_PATH: join(dir, 'main-bgm.mp3') }
     const s = await describeCompositionStatus({ mainBgm: { enabled: true } }, [dir], { env, spawnFn: mp3Probe() })
-    expect(s.config.mainBgm).toMatchObject({ enabled: true, volume: 0.03, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5, scope: 'main' })
+    expect(s.config.mainBgm).toMatchObject({ enabled: true, volume: 0.05, ducking: true, loop: true, fadeInSec: 1.5, fadeOutSec: 2.5, scope: 'main' })
     expect(s.config.mainBgm.sourcePath).toBeUndefined()
     expect(s.assets.mainBgm).toMatchObject({ ok: true, fileName: 'main-bgm.mp3', durationSec: 63.9, sampleRate: 44100, channels: 2 })
     expect(JSON.stringify(s)).not.toContain(dir)

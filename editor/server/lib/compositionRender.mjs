@@ -119,10 +119,10 @@ export async function renderCompositionToFile(p) {
       if (!p.mainBgmRequest) throw new Error(MAIN_BGM_MISSING_MESSAGE)
       const mainSec = p.timeline.sections.find((s) => s.kind === 'main')
       bgmTmp = mkdtempSync(join(p.tmpDir, 'main-bgm-'))
-      const r = await prepareMainBgm({ cfg: p.cfg, roots: p.mainBgmRequest.roots, sourcePath: p.sourcePath, mainItems: p.mainItems ?? p.mainBgmRequest.mainItems, mainSec: mainSec.endSec - mainSec.startSec, tmpDir: bgmTmp, transform: p.mainBgmRequest.transform }, { spawnFn: p.spawnFn })
+      const r = await prepareMainBgm({ cfg: p.cfg, roots: p.mainBgmRequest.roots, sourcePath: p.sourcePath, mainItems: p.mainItems ?? p.mainBgmRequest.mainItems, mainSec: mainSec.endSec - mainSec.startSec, planMainSec: p.mainBgmRequest.planMainSec, levelItems: p.mainBgmRequest.levelItems, tmpDir: bgmTmp, transform: p.mainBgmRequest.transform }, { spawnFn: p.spawnFn })
       if (!r.ok) throw new Error(r.error)
-      mainBgm = { inputPath: r.prep.inputPath, plan: r.prep.plan, gainDb: r.prep.gainDb }
-      mainBgmReport = { gain: r.prep.gain, levels: r.prep.levels, info: r.prep.info, plan: r.prep.plan, sourcePlan: r.prep.sourcePlan }
+      mainBgm = { inputPath: r.prep.inputPath, introPath: r.prep.introPath, plan: r.prep.plan, gainDb: r.prep.gainDb }
+      mainBgmReport = { gain: r.prep.gain, levels: r.prep.levels, info: r.prep.info, plan: r.prep.plan, sourcePlan: r.prep.sourcePlan, loopSelection: r.prep.loopSelection }
     }
     const { args } = buildCompositionArgs({ ...p, mainBgm, assPath, outputPath: tempOut })
     await run(ffmpegBin(), args, p.spawnFn)

@@ -55,6 +55,11 @@ export const COMPOSITION_DEFAULTS = Object.freeze({
   line: Object.freeze({ qrPath: '', text: LINE_TEXT_DEFAULT, backgroundColor: '0x161c19' }),
   // 本編BGM（ユーザー指定のMP3。本編の開始〜終了だけ。ダイジェスト・末尾LINE案内には使わない）。素材未指定なら従来どおり本編BGMなし。
   mainBgm: MAIN_BGM_DEFAULTS,
+  // ダイジェスト→本編の画面遷移（ディップ・トゥ・ブラック）。既定はOFF（従来どおり直接つなぐ）。
+  // ON: ダイジェストの最後のフレームを fadeOutFrames 分止めて（映像だけ。音声は無音・BGMはフェードアウト）黒へフェードアウト → holdFrames 黒を保持 →
+  // 本編の先頭から fadeInFrames かけてフェードイン。本編の映像・音声・字幕は遅らせない（黒の保持区間の後ろに、そのまま始まる）。字幕・テーマ・QRも映像と一緒に暗くなる。
+  // 30fps: 10フレーム=0.333秒 / 3フレーム=0.1秒 / 9フレーム=0.3秒（全体 約0.73秒）。
+  transition: Object.freeze({ enabled: false, fadeOutFrames: 10, holdFrames: 3, fadeInFrames: 9 }),
   // プレビュー（短時間の確認動画）では、追加区間を既定で入れない。プレビューでも入れたい機能だけ true にする。
   preview: Object.freeze({ digest: false, lineIntro: false, lineOutro: false }),
   fps: 30,
@@ -105,6 +110,13 @@ export function validateCompositionConfig(cfg) {
   if (!['overlay', 'standalone'].includes(cfg.lineIntro.mode)) errors.push('冒頭LINE案内の表示方式は overlay か standalone を指定してください')
   if (cfg.lineOutro.mode !== 'standalone') errors.push('末尾LINE案内の表示方式は standalone のみ対応しています')
   if (cfg.lineIntro.mode === 'overlay' && cfg.lineIntro.startWithMain !== true) errors.push('冒頭LINE案内(overlay)は本編開始と同時に始めてください')
+  if (cfg.transition?.enabled) {
+    const fr = (v, lo, hi, name) => { if (!Number.isInteger(v) || v < lo || v > hi) errors.push(`${name}は${lo}〜${hi}フレームの整数で指定してください`) }
+    fr(cfg.transition.fadeOutFrames, 3, 30, '暗転（フェードアウト）')
+    fr(cfg.transition.holdFrames, 0, 12, '黒の保持')
+    fr(cfg.transition.fadeInFrames, 3, 30, 'フェードイン')
+    if (!cfg.digest.enabled) errors.push('画面遷移はダイジェストを有効にしたときだけ使えます')
+  }
   if (cfg.mainBgm?.enabled) errors.push(...validateMainBgmConfig(cfg.mainBgm).errors)
   return { ok: errors.length === 0, errors }
 }
@@ -220,18 +232,26 @@ export function selectDigestClips(p) {
  * 本編のオフセット = ダイジェスト長（standaloneのときだけ、さらに冒頭案内の長さ）。全体の長さに overlay の秒数は加算しない。
  * @param {ReturnType<typeof resolveCompositionConfig>} cfg
  * @param {{ mainStartSec: number, mainEndSec: number, digestClips?: Array<{ durationSec: number }> }} p
- * @returns {{ sections: Array<{ kind: 'digest' | 'lineIntro' | 'main' | 'lineOutro', startSec: number, endSec: number }>, overlays: Array<{ kind: 'lineIntro', startSec: number, endSec: number }>, mainOffsetSec: number, totalSec: number, digestSec: number }}
+ * 画面遷移（cfg.transition.enabled）: digest（末尾に止め画の暗転区間を含む）→ transitionHold（黒）→ main。digestSec は暗転を含む長さ、liveDigestSec は実映像だけの長さ。
+ * @returns {{ sections: Array<{ kind: 'digest' | 'transitionHold' | 'lineIntro' | 'main' | 'lineOutro', startSec: number, endSec: number }>, overlays: Array<{ kind: 'lineIntro', startSec: number, endSec: number }>, mainOffsetSec: number, totalSec: number, digestSec: number, liveDigestSec: number, transition: object | null }}
  */
 export function planTimeline(cfg, p) {
   const sections = []
   const overlays = []
   let t = 0
-  const digestSec = cfg.digest.enabled ? (p.digestClips ?? []).reduce((a, c) => a + c.durationSec, 0) : 0
+  const F = cfg.fps
+  const tr = cfg.transition?.enabled && cfg.digest.enabled && (p.digestClips ?? []).length > 0 ? cfg.transition : null
+  const liveDigestSec = cfg.digest.enabled ? (p.digestClips ?? []).reduce((a, c) => a + c.durationSec, 0) : 0
+  // 画面遷移が有効なとき、ダイジェストの末尾に「最後のフレームを止めた」暗転区間（fadeOutFrames）を含める
+  const fadeOutSec = tr ? round3(tr.fadeOutFrames / F) : 0
+  const digestSec = liveDigestSec + fadeOutSec
   const push = (kind, len) => {
     sections.push({ kind, startSec: round3(t), endSec: round3(t + len) })
     t += len
   }
   if (cfg.digest.enabled && digestSec > 0) push('digest', digestSec)
+  const holdSec = tr ? round3(tr.holdFrames / F) : 0
+  if (tr && holdSec > 0) push('transitionHold', holdSec) // 黒（映像・音声とも無音）
   if (cfg.lineIntro.enabled && cfg.lineIntro.mode === 'standalone') push('lineIntro', cfg.lineIntro.durationSec)
   const mainOffsetSec = t
   const mainSec = p.mainEndSec - p.mainStartSec
@@ -240,7 +260,24 @@ export function planTimeline(cfg, p) {
     overlays.push({ kind: 'lineIntro', startSec: round3(mainOffsetSec), endSec: round3(mainOffsetSec + Math.min(cfg.lineIntro.durationSec, mainSec)) })
   }
   if (cfg.lineOutro.enabled) push('lineOutro', cfg.lineOutro.durationSec)
-  return { sections, overlays, mainOffsetSec: round3(mainOffsetSec), totalSec: round3(t), digestSec: round3(digestSec) }
+  // 遷移区間（明示的なタイムライン上の区間）: フェードアウト（ダイジェスト末尾）→ 黒の保持 → フェードイン（本編先頭）。本編は mainStartSec ちょうどから始まる
+  let transition = null
+  if (tr) {
+    const fadeInSec = round3(tr.fadeInFrames / F)
+    const dEnd = round3(digestSec)
+    transition = {
+      startSec: round3(dEnd - fadeOutSec),
+      endSec: round3(mainOffsetSec + fadeInSec),
+      totalSec: round3(fadeOutSec + holdSec + fadeInSec),
+      liveEndSec: round3(dEnd - fadeOutSec), // ダイジェストの実映像の最後（ここから最後のフレームを止める）
+      fadeOut: { startSec: round3(dEnd - fadeOutSec), endSec: dEnd, frames: tr.fadeOutFrames, startFrame: Math.round(dEnd * F) - tr.fadeOutFrames },
+      hold: { startSec: dEnd, endSec: round3(mainOffsetSec), frames: tr.holdFrames },
+      fadeIn: { startSec: round3(mainOffsetSec), endSec: round3(mainOffsetSec + fadeInSec), frames: tr.fadeInFrames, startFrame: Math.round(mainOffsetSec * F) },
+      mainStartSec: round3(mainOffsetSec),
+      freezeSec: fadeOutSec,
+    }
+  }
+  return { sections, overlays, mainOffsetSec: round3(mainOffsetSec), totalSec: round3(t), digestSec: round3(digestSec), liveDigestSec: round3(liveDigestSec), transition }
 }
 const round3 = (v) => Math.round(v * 1000) / 1000
 
@@ -313,6 +350,16 @@ export function digestThemeBlocks(themes, clips, captions) {
     offset += clip.durationSec
   }
   return { blocks, clipsWithoutTheme: missing }
+}
+
+/** ダイジェストのテーマブロックの最後を endSec まで延ばす（暗転の間もテーマ表示を残し、発話の途中で消さない）。 */
+export function extendDigestBlocksTo(blocks, endSec) {
+  return blocks.map((b, i) => (i < blocks.length - 1 ? b : { ...b, endSec: round3(endSec), sections: b.sections.map((x, k) => (k < b.sections.length - 1 ? x : { ...x, endSec: round3(endSec) })) }))
+}
+
+/** ダイジェストの最後のcaptionを、ダイジェスト（暗転を含む）の終わりまで表示する（余韻・暗転の間もcaptionを残し、途中で消さない）。ほかのcaptionは変えない。 */
+export function extendLastDigestCaptionTo(caps, endSec) {
+  return caps.map((c, i) => (i === caps.length - 1 ? { ...c, endSec: round3(endSec) } : c))
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -624,8 +671,10 @@ export function buildCompositionArgs(p) {
       vs.push(`[dv${k}]`)
       as.push(`[da${k}]`)
     })
-    chain.push(`${vs.join('')}concat=n=${vs.length}:v=1:a=0[dvid]`)
-    chain.push(`${as.join('')}concat=n=${as.length}:v=0:a=1[dvoice]`)
+    // 画面遷移: 最後のフレームを暗転の長さだけ止める（次の発話の口の動きを見せない）。音声は無音で延ばす（apad）。フェードは最後にまとめてかける。
+    const freezeFrames = timeline.transition ? timeline.transition.fadeOut.frames : 0
+    chain.push(`${vs.join('')}concat=n=${vs.length}:v=1:a=0${freezeFrames > 0 ? `[dvid0];[dvid0]tpad=stop_mode=clone:stop=${freezeFrames}` : ''}[dvid]`)
+    chain.push(`${as.join('')}concat=n=${as.length}:v=0:a=1${freezeFrames > 0 ? `[dvoice0];[dvoice0]apad=whole_dur=${round3(D)}` : ''}[dvoice]`)
     const b = cfg.digest.bgm
     if (p.bgmPath) {
       args.push('-i', p.bgmPath)
@@ -644,6 +693,14 @@ export function buildCompositionArgs(p) {
       chain.push(`[dvoice]atrim=0:${round3(D)},asetpts=PTS-STARTPTS[dA]`)
     }
     concatIn.push('[dvid]', '[dA]')
+  }
+  // 黒の保持（映像は黒・音声は無音。文字・タイトルは出さない）
+  const holdSec = timeline.sections.find((x) => x.kind === 'transitionHold')
+  if (holdSec) {
+    const d = round3(holdSec.endSec - holdSec.startSec)
+    chain.push(`color=c=black:s=${width}x${height}:r=${F}:d=${d},setsar=1,format=yuv420p[thv]`)
+    chain.push(`anullsrc=r=${SR}:cl=stereo,atrim=end_sample=${Math.round(d * SR)},asetpts=PTS-STARTPTS[tha]`)
+    concatIn.push('[thv]', '[tha]')
   }
 
   const panel = (label, sec, into = concatIn) => {
@@ -686,12 +743,18 @@ export function buildCompositionArgs(p) {
     if (!mb?.inputPath || !mb.plan?.ok || !Number.isFinite(mb.gainDb)) throw new Error(MAIN_BGM_MISSING_MESSAGE)
     const mainSec = timeline.sections.find((x) => x.kind === 'main')
     const mainLen = round3(mainSec.endSec - mainSec.startSec)
+    const bgmIntro = mb.plan.needsLoop && mb.plan.introSec > 0
+    let bgmIntroIdx = null
+    if (bgmIntro) {
+      args.push('-i', mb.introPath) // 1周目（曲の0秒から）。2周目以降はループ単位（開始点から）
+      bgmIntroIdx = idx++
+    }
     if (mb.plan.needsLoop) args.push('-stream_loop', '-1', '-i', mb.inputPath)
     else args.push('-i', mb.inputPath)
     const bi = idx++
     const kMain = mainIn.length / 2
     chain.push(`${mainIn.join('')}concat=n=${kMain}:v=1:a=1[mainvid][mainvoice]`)
-    chain.push(...buildMainBgmFilters({ bgmInputIndex: bi, mainSec: mainLen, gainDb: mb.gainDb, plan: mb.plan, cfg: cfg.mainBgm, sampleRate: SR, voiceLabel: '[mainvoice]', outLabel: '[mainaudio]' }))
+    chain.push(...buildMainBgmFilters({ bgmInputIndex: bi, bgmIntroInputIndex: bgmIntroIdx, mainSec: mainLen, gainDb: mb.gainDb, plan: mb.plan, cfg: cfg.mainBgm, sampleRate: SR, voiceLabel: '[mainvoice]', outLabel: '[mainaudio]' }))
     concatIn.push('[mainvid]', '[mainaudio]')
   } else {
     concatIn.push(...mainIn)
@@ -719,6 +782,20 @@ export function buildCompositionArgs(p) {
       chain.push(`${vout}[qr${i}]overlay=${q.x}:${q.y}:enable='between(t,${w.startSec},${w.endSec})':eof_action=repeat[ov${i}]`)
       vout = `[ov${i}]`
     })
+  }
+  if (timeline.transition) {
+    // ダイジェスト末尾で黒へ → 黒の保持 → 本編の先頭から黒からフェードイン。字幕・テーマ・QRを焼き込んだ後の映像全体にかける（一緒に暗くなる）。
+    // fade=out は終了後のフレームがすべて黒のままになるため、映像を3つに分ける: [先頭〜黒の保持の終わり]にフェードアウト、[フェードインの区間]にフェードイン、[残り]はそのまま。
+    // 3つは連続したフレーム範囲で、つなぎ直してもフレームの重複・欠落はない。
+    const t = timeline.transition
+    const holdEndFrame = t.fadeIn.startFrame
+    const inEndFrame = holdEndFrame + t.fadeIn.frames
+    chain.push(`${vout}split=3[fa][fb][fc]`)
+    chain.push(`[fa]trim=end_frame=${holdEndFrame},setpts=PTS-STARTPTS,fade=t=out:s=${t.fadeOut.startFrame}:n=${t.fadeOut.frames}:color=black[fa2]`)
+    chain.push(`[fb]trim=start_frame=${holdEndFrame}:end_frame=${inEndFrame},setpts=PTS-STARTPTS,fade=t=in:s=0:n=${t.fadeIn.frames}:color=black[fb2]`)
+    chain.push(`[fc]trim=start_frame=${inEndFrame},setpts=PTS-STARTPTS[fc2]`)
+    chain.push('[fa2][fb2][fc2]concat=n=3:v=1:a=0[vfade]')
+    vout = '[vfade]'
   }
   args.push('-filter_complex', chain.join(';'))
   args.push('-map', vout, '-map', '[ca]')

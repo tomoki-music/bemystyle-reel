@@ -12,7 +12,7 @@ import { extname } from 'path'
 export const MAIN_BGM_DEFAULTS = Object.freeze({
   enabled: false,
   sourcePath: null,
-  volume: 0.03, // 標準。autoGain のとき、声より（ダッキング前で）約20dB（ダッキングOFFは約26dB）小さいゲインに相当（MAIN_BGM_GAP_TARGET）。
+  volume: 0.05, // 標準。autoGain のとき、声より（ダッキング前で）約15.6dB（ダッキングOFFは約21.6dB）小さいゲインに相当（MAIN_BGM_GAP_TARGET）。0.03→0.05: 確認動画でBGMが小さすぎたため（実測 平均差 23.8dB → 21.5dB、発話がない間は約5dB大きい）
   autoGain: true,
   ducking: true,
   loop: true,
@@ -22,31 +22,34 @@ export const MAIN_BGM_DEFAULTS = Object.freeze({
 })
 
 export const MAIN_BGM_LIMITS = Object.freeze({
-  volumeMax: 0.06, // 標準の2倍（+6dB）まで。声との差の下限（12dB）に対して余裕を残すため、これ以上は指定できない（ダッキングON・目標差20dBのとき最大 +8dB まで上げられる）
+  volumeMax: 0.06, // 標準の1.2倍（+1.6dB）まで。声との差の下限（12dB）に対して余裕を残すため、これ以上は指定できない（ダッキングON・標準の目標差15.6dBのとき最大 +3.6dB まで上げられる）
   fadeMaxSec: 10,
   minGapDb: 12, // 発話中の声−BGM(ダッキング前)の最小差。ユーザー音量を上げてもこれを割らない
-  presetVolume: 0.03,
+  presetVolume: 0.05, // ユーザー音量の基準（この音量のとき、声−BGMが MAIN_BGM_GAP_TARGET になる）
 })
 
 /**
- * 声−BGM（発話中）の、ダッキング前の目標差（dB）。「発話中の平均RMSどうし」で決める。400msウィンドウで測った実際の差は、これより平均で約4〜5dB小さく出る
- * （弱い語尾・発話の立ち上がりのウィンドウを含むため）。ダッキングは発話中に平均約7dB下げる。
- * 本編の声（発話中の平均 約-32dBFS）＋合成BGMの実測で、ダッキングON: 20dB → 400msウィンドウの平均差 約22dB・最小 約13dB。ダッキングOFF: 26dB → 平均 約21dB・最小 約13dB。
- * 平均18〜24dB・最小12dB以上の目標の中に収まる。
+ * 声−BGM（発話中）の、ダッキング前の目標差（dB）。「発話中の平均RMSどうし」で決める（標準音量 presetVolume のとき）。
+ * 実測（パステルハウス.mp3・本編全編の声 916秒・400msウィンドウ・発話とみなす窓の下限 -45dBFS）:
+ *   旧設定（音量0.028・ratio4・thr0.02・release900）: 平均差 23.2dB・最小 11.8dB・下位5%点 16.3dB → BGMが小さすぎた。
+ *   採用設定（音量0.05・ratio6・thr0.015・attack60・release1200）: 平均差 21.5dB・最小 10.8dB・下位5%点 14.7dB（窓の下限 -42dBFS で数えると 平均22.0・最小12.7）。
+ * 最小差は「声が最も小さい語尾の窓」で決まる（BGMは発話中ほぼ一定にダッキングされ、声の窓ごとの音量差がそのまま差に出る）ため、平均差と最小差の開きは約11dBで変えられない。
+ * 最小差12dB以上と平均差18〜20dBは同時に満たせず（最小12dB以上にすると平均は約23.5dB）、BGMの聞こえやすさを優先して平均約21.5dBを採用した。
  */
-export const MAIN_BGM_GAP_TARGET = Object.freeze({ ducking: 20, noDucking: 26 })
+export const MAIN_BGM_GAP_TARGET = Object.freeze({ ducking: 15.6, noDucking: 21.6 })
 
 /**
  * ダッキング（sidechaincompress）の設定。声をサイドチェインに、発話中だけBGMを下げる。
  * サイドチェインは声の帯域(120〜5000Hz)に絞り、acompressor(thr -48dBFS・ratio 20・makeup 18倍)で強く圧縮して、
  * 強い語頭でも弱い語尾・子音でも検出レベルをそろえる（弱い部分でダッキングが浅くなり、声がBGMへ埋もれるのを防ぐ）。
- * その上で sidechaincompress（threshold 0.02≒-34dBFS・ratio 4）が発話中のBGMを約7〜9dB下げる。
+ * その上で sidechaincompress（threshold 0.015・ratio 6）が発話中のBGMを約6dB下げる（音量0.05の実測）。
+ * attack 60ms: 発話開始ですぐ下がるが、語頭の子音を待たずに沈むほど速くない。release 1200ms: 語尾・0.4〜0.6秒の短い間では大きく戻らず（戻りは約2dB）、1.5秒以上の間で十分戻る。
  */
 export const MAIN_BGM_DUCK = Object.freeze({
-  threshold: 0.02,
-  ratio: 4,
-  attack: 60, // ms。速すぎない（発話の立ち上がり直後は声が先に立つ。BGMは元々12dB以上小さい）
-  release: 900, // ms。短い間（呼吸・0.5秒前後の間）ではBGMがわずかにしか戻らず、ポンピングしない。1.5秒以上の間では十分戻る
+  threshold: 0.015,
+  ratio: 6,
+  attack: 60, // ms
+  release: 1200, // ms
   knee: 6,
   makeup: 1,
   link: 'average',
@@ -56,7 +59,7 @@ export const MAIN_BGM_DUCK = Object.freeze({
   sidechainNormalize: Object.freeze({ threshold: 0.004, ratio: 20, attack: 5, release: 250, makeup: 18, knee: 2 }),
 })
 
-export const MAIN_BGM_LOOP = Object.freeze({ crossfadeSec: 2, minCrossfadeSec: 0.25 })
+export const MAIN_BGM_LOOP = Object.freeze({ crossfadeSec: 2, minCrossfadeSec: 0.25, minStartSec: 4 }) // minStartSec: 2周目以降の開始点の候補下限（曲頭の静かな部分を避ける）
 export const MAIN_BGM_LIMITER = Object.freeze({ limit: 0.891, attack: 5, release: 60 }) // 0.891 = -1dBFS。true peakに約1dBの余裕
 
 const clone = (o) => JSON.parse(JSON.stringify(o))
@@ -162,37 +165,49 @@ export function meanEnergyDb(db, minDb = -Infinity) {
 
 /**
  * ループの計画。音源が本編以上ならループしない（本編長で切る）。短いときはクロスフェード付きの単位を繰り返す。
- * ループ単位の長さ = 音源長 − クロスフェード秒。クロスフェードは音源の短さに応じて縮める（最小 0.25秒。音源がそれ以下なら計画不可）。
- * @returns {{ needsLoop: boolean, loopEnabled: boolean, unitSec: number, crossfadeSec: number, loops: number, playSec: number, ok: boolean, error?: string }}
+ * loopStartSec（2周目以降の開始点。1周目は必ず曲の0秒から）が無いとき: 単位 = 曲の先頭x秒〜曲末（長さ 音源長−x）。従来どおり。
+ * loopStartSec があるとき: 1周目 = 曲の 0〜開始点（introSec）、その後は単位 [開始点, 曲末) を繰り返す（単位の長さ = 音源長−開始点。曲末x秒は開始点直前のx秒へクロスフェード）。
+ * クロスフェードは音源の短さに応じて縮める（最小 0.25秒。音源がそれ以下なら計画不可）。
+ * @returns {{ needsLoop: boolean, loopEnabled: boolean, unitSec: number, crossfadeSec: number, loops: number, playSec: number, ok: boolean, loopStartSec: number, introSec: number, error?: string }}
  */
-export function planBgmLoop({ bgmSec, mainSec, loop }) {
-  if (!(bgmSec > 0) || !(mainSec > 0)) return { needsLoop: false, loopEnabled: false, unitSec: 0, crossfadeSec: 0, loops: 0, playSec: 0, ok: false, error: '音源または本編の長さが不正です' }
-  if (bgmSec >= mainSec - 1e-6) return { needsLoop: false, loopEnabled: false, unitSec: bgmSec, crossfadeSec: 0, loops: 1, playSec: r3(mainSec), ok: true }
-  if (!loop) return { needsLoop: false, loopEnabled: false, unitSec: bgmSec, crossfadeSec: 0, loops: 1, playSec: r3(bgmSec), ok: true }
+export function planBgmLoop({ bgmSec, mainSec, loop, loopStartSec = 0 }) {
+  if (!(bgmSec > 0) || !(mainSec > 0)) return { needsLoop: false, loopEnabled: false, unitSec: 0, crossfadeSec: 0, loops: 0, playSec: 0, ok: false, loopStartSec: 0, introSec: 0, error: '音源または本編の長さが不正です' }
+  if (bgmSec >= mainSec - 1e-6) return { needsLoop: false, loopEnabled: false, unitSec: bgmSec, crossfadeSec: 0, loops: 1, playSec: r3(mainSec), ok: true, loopStartSec: 0, introSec: 0 }
+  if (!loop) return { needsLoop: false, loopEnabled: false, unitSec: bgmSec, crossfadeSec: 0, loops: 1, playSec: r3(bgmSec), ok: true, loopStartSec: 0, introSec: 0 }
   const xf = Math.min(MAIN_BGM_LOOP.crossfadeSec, r3(bgmSec / 4))
-  if (xf < MAIN_BGM_LOOP.minCrossfadeSec) return { needsLoop: true, loopEnabled: true, unitSec: 0, crossfadeSec: 0, loops: 0, playSec: 0, ok: false, error: '音源が短すぎてループできません' }
+  if (xf < MAIN_BGM_LOOP.minCrossfadeSec) return { needsLoop: true, loopEnabled: true, unitSec: 0, crossfadeSec: 0, loops: 0, playSec: 0, ok: false, loopStartSec: 0, introSec: 0, error: '音源が短すぎてループできません' }
+  const a = Number(loopStartSec) || 0
+  if (a > 0) {
+    // 開始点は、直前にクロスフェード分の音があり、単位が短くなりすぎない範囲
+    if (a < xf || bgmSec - a < xf * 2 + 1) return { needsLoop: true, loopEnabled: true, unitSec: 0, crossfadeSec: 0, loops: 0, playSec: 0, ok: false, loopStartSec: a, introSec: a, error: 'ループ開始点が音源の範囲に合いません' }
+    const unitSec = r3(bgmSec - a)
+    return { needsLoop: true, loopEnabled: true, unitSec, crossfadeSec: xf, loops: 1 + Math.ceil(Math.max(0, mainSec - a) / unitSec), playSec: r3(mainSec), ok: true, loopStartSec: a, introSec: a }
+  }
   const unitSec = r3(bgmSec - xf)
-  return { needsLoop: true, loopEnabled: true, unitSec, crossfadeSec: xf, loops: Math.ceil(mainSec / unitSec), playSec: r3(mainSec), ok: true }
+  return { needsLoop: true, loopEnabled: true, unitSec, crossfadeSec: xf, loops: Math.ceil(mainSec / unitSec), playSec: r3(mainSec), ok: true, loopStartSec: 0, introSec: 0 }
 }
 
 /**
- * ループ単位（継ぎ目のないWAV）を書き出すffmpeg引数。単位 = [x, L−x] + crossfade(末尾x秒 → 先頭x秒)。
- * 単位の終端は元の音源の先頭x秒の終わり（=単位の先頭の直前）と連続するので、繰り返しても継ぎ目でクリックせず、音量も変わらない。
+ * ループ単位（継ぎ目のないWAV）を書き出すffmpeg引数。
+ * loopStartSec なし: 単位 = [x, L−x] + crossfade(末尾x秒 → 先頭x秒)。
+ * loopStartSec=a あり: 単位 = [a, L−x] + crossfade(末尾x秒 → [a−x, a])。どちらも単位の終端は元の音源の「単位の先頭の直前」と連続するので、
+ * 繰り返しても継ぎ目でクリックせず、音量も変わらない（loopStartSec なしは a = x の特別な場合）。
  * サンプル数は atrim=end_sample で厳密に決める（MP3のデコード長のずれに依存しない）。
- * @param {{ bgmPath: string, outPath: string, bgmSec: number, crossfadeSec: number, sampleRate: number }} p
+ * @param {{ bgmPath: string, outPath: string, bgmSec: number, crossfadeSec: number, sampleRate: number, loopStartSec?: number }} p
  */
 export function buildLoopUnitArgs(p) {
   const SR = p.sampleRate
   const x = p.crossfadeSec
   const L = p.bgmSec
+  const a = p.loopStartSec > 0 ? p.loopStartSec : x
   const f = `aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:${r3(L)},asetpts=PTS-STARTPTS`
   const chain = [
     `[0:a]${f},asplit=3[h0][m0][t0]`,
-    `[h0]atrim=0:${x},asetpts=PTS-STARTPTS[h]`,
-    `[m0]atrim=${x}:${r3(L - x)},asetpts=PTS-STARTPTS[m]`,
+    `[h0]atrim=${r3(a - x)}:${r3(a)},asetpts=PTS-STARTPTS[h]`,
+    `[m0]atrim=${r3(a)}:${r3(L - x)},asetpts=PTS-STARTPTS[m]`,
     `[t0]atrim=${r3(L - x)}:${r3(L)},asetpts=PTS-STARTPTS[t]`,
     `[t][h]acrossfade=d=${x}:c1=qsin:c2=qsin[xf]`,
-    `[m][xf]concat=n=2:v=0:a=1,atrim=end_sample=${Math.round((L - x) * SR)},asetpts=PTS-STARTPTS[u]`,
+    `[m][xf]concat=n=2:v=0:a=1,atrim=end_sample=${Math.round((L - a) * SR)},asetpts=PTS-STARTPTS[u]`,
   ]
   return { args: ['-y', '-hide_banner', '-nostats', '-i', p.bgmPath, '-filter_complex', chain.join(';'), '-map', '[u]', '-c:a', 'pcm_f32le', '-ar', String(SR), '-ac', '2', p.outPath] }
 }
@@ -216,7 +231,16 @@ export function buildMainBgmFilters(p) {
   const fo = Math.min(cfg.fadeOutSec, play)
   const d = p.duck ?? MAIN_BGM_DUCK
   const chain = []
-  const src = `[${p.bgmInputIndex}:a]aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:${r3(play)},asetpts=PTS-STARTPTS`
+  const fmt = `aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo`
+  let src
+  if (plan.needsLoop && plan.introSec > 0) {
+    // 1周目は曲の0秒から（introSec まで）→ 2周目以降はループ単位（開始点から）。つなぎ目は元の音源上で連続している
+    chain.push(`[${p.bgmIntroInputIndex}:a]${fmt},atrim=end_sample=${Math.round(plan.introSec * SR)},asetpts=PTS-STARTPTS[mbi]`)
+    chain.push(`[${p.bgmInputIndex}:a]${fmt},asetpts=PTS-STARTPTS[mbu]`)
+    src = `[mbi][mbu]concat=n=2:v=0:a=1,atrim=0:${r3(play)},asetpts=PTS-STARTPTS`
+  } else {
+    src = `[${p.bgmInputIndex}:a]${fmt},atrim=0:${r3(play)},asetpts=PTS-STARTPTS`
+  }
   const gain = `volume=${p.gainDb}dB:precision=float`
   const fades = `${fi > 0 ? `afade=t=in:st=0:d=${r3(fi)}` : 'anull'},${fo > 0 ? `afade=t=out:st=${r3(Math.max(0, play - fo))}:d=${r3(fo)}` : 'anull'}`
   chain.push(`${src},${gain},${fades}[mbgm]`)
@@ -246,10 +270,12 @@ export function buildMainBgmFilters(p) {
 export function buildMainBgmStemArgs(p) {
   const SR = p.sampleRate
   const args = ['-y', '-hide_banner', '-nostats', '-i', p.voicePath]
+  const intro = p.plan.needsLoop && p.plan.introSec > 0
+  if (intro) args.push('-i', p.bgmPath) // 1周目（曲の0秒から）
   if (p.plan.needsLoop) args.push('-stream_loop', '-1', '-i', p.loopUnitPath)
   else args.push('-i', p.bgmPath)
   const chain = [`[0:a]aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:${r3(p.mainSec)},asetpts=PTS-STARTPTS,asplit=2[vin][vstem]`]
-  chain.push(...buildMainBgmFilters({ bgmInputIndex: 1, mainSec: p.mainSec, gainDb: p.gainDb, plan: p.plan, cfg: p.cfg, sampleRate: SR, voiceLabel: '[vin]', outLabel: '[mix]', tapBgmLabel: '[bstem]', duck: p.duck }))
+  chain.push(...buildMainBgmFilters({ bgmInputIndex: intro ? 2 : 1, bgmIntroInputIndex: 1, mainSec: p.mainSec, gainDb: p.gainDb, plan: p.plan, cfg: p.cfg, sampleRate: SR, voiceLabel: '[vin]', outLabel: '[mix]', tapBgmLabel: '[bstem]', duck: p.duck }))
   args.push('-filter_complex', chain.join(';'), '-map', '[vstem]', '-ac', '1', '-ar', '16000', p.outVoice, '-map', '[bstem]', '-ac', '1', '-ar', '16000', p.outBgm, '-map', '[mix]', '-ac', '1', '-ar', '16000', p.outMix)
   return { args }
 }
