@@ -54,6 +54,7 @@ import { EventPostManagementPanel } from './components/posting/EventPostManageme
 import { useEventPosting } from './components/factory/useEventPosting'
 import { PostEditPanel } from './components/editor/PostEditPanel'
 import { LocalCaptionVideoMode } from './components/localCaption/LocalCaptionVideoMode'
+import { ScriptMode } from './components/script/ScriptMode'
 
 type AIPreset = {
   key: AIPresetKey
@@ -72,6 +73,12 @@ const LOCAL_CAPTION_VIDEO_MODE_PARAM = 'local-caption'
 function isLocalCaptionVideoModeRequested(): boolean {
   if (typeof window === 'undefined') return false
   return new URLSearchParams(window.location.search).get('mode') === LOCAL_CAPTION_VIDEO_MODE_PARAM
+}
+
+// 台本作成モード: ?mode=script で表示する（local-caption と同じ独立画面。既存のwizard/factoryには触れない）。
+function isScriptModeRequested(): boolean {
+  if (typeof window === 'undefined') return false
+  return new URLSearchParams(window.location.search).get('mode') === 'script'
 }
 
 
@@ -1384,6 +1391,10 @@ export default function App() {
   // ローカルAIテロップ動画モード（追加機能）。既存の読み込み状態より優先して表示する。
   if (isLocalCaptionVideoModeRequested()) {
     return <LocalCaptionVideoMode />
+  }
+
+  if (isScriptModeRequested()) {
+    return <ScriptMode onClose={() => { window.location.assign(window.location.pathname) }} />
   }
 
   if (loading) {
