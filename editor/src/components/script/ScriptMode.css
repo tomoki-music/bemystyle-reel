@@ -1,0 +1,32 @@
+/* 台本作成モード。既存のwz-変数があれば使い、なければ既定色にフォールバックする（単独で表示できる）。 */
+.sm-page { min-height: 100vh; background: var(--wz-bg, #f6f6fb); color: var(--wz-text, #1d1d2b); font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.sm-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 24px; background: var(--wz-card, #fff); border-bottom: 1px solid var(--wz-border, #e3e3ee); }
+.sm-header h1 { margin: 0; font-size: 18px; }
+.sm-main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; display: flex; flex-direction: column; gap: 16px; }
+.sm-card { background: var(--wz-card, #fff); border: 1px solid var(--wz-border, #e3e3ee); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.sm-label { margin: 0; font-size: 14px; font-weight: 700; }
+.sm-textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--wz-border, #d5d5e3); border-radius: 8px; font: inherit; line-height: 1.7; resize: vertical; background: #fff; color: inherit; }
+.sm-textarea:focus-visible { outline: 2px solid var(--wz-accent, #6c4bff); outline-offset: 1px; }
+.sm-textarea:disabled { opacity: 0.7; }
+.sm-textarea--script { min-height: 220px; }
+.sm-meta { display: flex; justify-content: flex-end; font-size: 12px; color: #6b6b80; }
+.sm-over { color: #c0392b; font-weight: 700; }
+.sm-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.sm-chip { padding: 4px 10px; border: 1px solid var(--wz-border, #d5d5e3); border-radius: 999px; background: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+.sm-chip:disabled { cursor: not-allowed; opacity: 0.6; }
+.sm-btn { padding: 9px 16px; border: 1px solid var(--wz-border, #d5d5e3); border-radius: 8px; background: #fff; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+.sm-btn--primary { background: var(--wz-accent, #6c4bff); border-color: var(--wz-accent, #6c4bff); color: #fff; }
+.sm-btn--ghost { background: transparent; }
+.sm-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+.sm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sm-patterns { display: grid; gap: 10px; }
+.sm-pattern { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 12px; border: 2px solid var(--wz-border, #e3e3ee); border-radius: 10px; background: #fff; color: inherit; font: inherit; cursor: pointer; }
+.sm-pattern--selected { border-color: var(--wz-accent, #6c4bff); background: #f3f0ff; }
+.sm-pattern:disabled { cursor: not-allowed; opacity: 0.7; }
+.sm-pattern-title { font-weight: 700; }
+.sm-pattern-body { font-size: 13px; line-height: 1.7; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+.sm-error { padding: 10px 12px; border-radius: 8px; background: #fdecea; color: #a12a1f; font-size: 14px; }
+.sm-note { padding: 8px 12px; border-radius: 8px; background: #fff6e0; color: #7a5b00; font-size: 13px; }
+.sm-slides { margin: 0; padding-left: 24px; display: flex; flex-direction: column; gap: 6px; }
+.sm-slide { line-height: 1.6; }
+@media (max-width: 600px) { .sm-header { padding: 10px 16px; } .sm-main { padding: 16px 12px 48px; } }

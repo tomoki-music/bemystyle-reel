@@ -145,3 +145,13 @@ export type ReelBackupData = {
   mmmEventPresets: MmmEventPreset[];
   editPresets: EditPreset[];
 }
+
+// ── 台本作成モード（ScriptMode） ──
+export interface GeneratedScript {
+  title: string
+  script: string
+}
+
+export interface ScriptSlide {
+  text: string
+}

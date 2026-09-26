@@ -8,6 +8,7 @@ import multer from 'multer'
 import { randomUUID } from 'crypto'
 import { spawn } from 'child_process'
 import { createLocalCaptionVideoRouter } from './server/localCaptionVideoRoutes.mjs'
+import { createScriptRouter } from './server/scriptRoutes.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SLIDES_PATH = resolve(__dirname, '../public/data/slides.json')
@@ -259,6 +260,9 @@ app.get('/api/health', (_req, res) => {
 // ── ローカルAIテロップ動画機能（追加機能・既存ロジックには影響しない） ──
 // 実装本体は server/localCaptionVideoRoutes.mjs と server/lib/*.mjs に分離。
 app.use('/api/local-caption-videos', createLocalCaptionVideoRouter({ jobsDir: LOCAL_CAPTION_VIDEOS_DIR }))
+
+// ── 台本作成モード: /api/generate-script, /api/split-script（実装は server/scriptRoutes.mjs） ──
+app.use('/api', createScriptRouter({ isMockMode: isMockAiMode }))
 
 app.get('/api/reel-ai-config', (_req, res) => {
   res.json({
