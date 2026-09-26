@@ -1,5 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { generateStory, type AIPresetKey, type GeneratedSlideContent } from '../../storyGenerator'
+import type { ScriptHandoff } from '../../types'
+import { handoffToCardTexts, rolesForCount } from '../script/scriptHandoff'
 import './WizardMode.css'
 
 // ── ダミーデータ ──────────────────────────────────────────
@@ -154,6 +156,8 @@ interface WizardState {
   isGenerating: boolean
   generationError: string | null
   storyGenerated: boolean
+  // ScriptMode から受け取った台本で作ったカードか（null＝通常起動・AI生成）。theme はそのときのタイトル。
+  scriptCards: { theme: string; filled: number } | null
   // CTA mode (slide 14)
   ctaMode: boolean
   ctaHeadline: string
@@ -167,20 +171,41 @@ interface WizardState {
 
 interface WizardModeProps {
   onClose?: () => void
+  /** ScriptMode から渡された台本。最初のマウント時だけ使い、以降の再renderでは上書きしない。 */
+  initialScript?: ScriptHandoff | null
+  /** 初期値をstateへ取り込んだ後に一度だけ呼ぶ（親が受け渡しデータを破棄する合図）。 */
+  onInitialScriptConsumed?: () => void
+}
+
+/** 配列を n 個に合わせる（足りなければ fill で補い、多ければ切る）。通常の14→14では同じ内容。 */
+function fitArray<T>(arr: T[], n: number, fill: T): T[] {
+  return arr.length === n ? arr : Array.from({ length: n }, (_, i) => (i < arr.length ? arr[i] : fill))
+}
+
+/**
+ * 台本の受け渡しから、Wizardの初期state用のテーマとカードを作る。AIは使わない。
+ * 台本から作るときだけカード数は 1〜14 の可変（空カードで14枚へ水増ししない）。通常起動・AI生成は従来どおり14枚。
+ */
+function seedFromScript(h: ScriptHandoff) {
+  const { texts } = handoffToCardTexts(h, 14)
+  const roles = rolesForCount(STORY_ROLES, texts.length)
+  const cards: StoryCard[] = texts.map((text, i) => ({ id: i + 1, role: roles[i], text }))
+  return { theme: h.title, cards, filled: cards.length }
 }
 
 // ── Component ────────────────────────────────────────────
 
-export function WizardMode({ onClose }: WizardModeProps) {
-  const [step, setStep] = useState(1)
+export function WizardMode({ onClose, initialScript, onInitialScriptConsumed }: WizardModeProps) {
+  const [seed] = useState(() => (initialScript ? seedFromScript(initialScript) : null))
+  const [step, setStep] = useState(seed ? 2 : 1)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [state, setState] = useState<WizardState>({
-    theme: '',
+    theme: seed?.theme ?? '',
     selectedTemplate: '',
-    storyCards: INITIAL_STORY_CARDS,
-    images: Array(14).fill(null),
-    imageUploading: Array(14).fill(false),
-    imageErrors: Array(14).fill(null),
+    storyCards: seed?.cards ?? INITIAL_STORY_CARDS,
+    images: Array(seed?.cards.length ?? 14).fill(null),
+    imageUploading: Array(seed?.cards.length ?? 14).fill(false),
+    imageErrors: Array(seed?.cards.length ?? 14).fill(null),
     bgmFile: null,
     bgmUrl: null,
     bgmUploading: false,
@@ -202,7 +227,8 @@ export function WizardMode({ onClose }: WizardModeProps) {
     advancedOpen: false,
     isGenerating: false,
     generationError: null,
-    storyGenerated: false,
+    storyGenerated: Boolean(seed),
+    scriptCards: seed ? { theme: seed.theme, filled: seed.filled } : null,
     ctaMode: false,
     ctaHeadline: '',
     ctaNote: '',
@@ -216,6 +242,12 @@ export function WizardMode({ onClose }: WizardModeProps) {
   const ctaQrInputRef = useRef<HTMLInputElement | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollStartTimeRef = useRef<number | null>(null)
+
+  // 受け渡しデータを取り込んだ（stateへ反映済み）ことを親へ知らせる。マウント時に一度だけ。
+  useEffect(() => {
+    if (initialScript) onInitialScriptConsumed?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -232,7 +264,8 @@ export function WizardMode({ onClose }: WizardModeProps) {
   }, [])
 
   const filledImages = state.images.filter(Boolean).length
-  const allImagesUploaded = filledImages === 14
+  const cardCount = state.storyCards.length // 通常は14。台本から作ったときだけ 1〜14
+  const allImagesUploaded = filledImages === cardCount
   const hasBgm = !!state.bgmFile && !!state.bgmUrl && !state.bgmUploading
   const anyUploading = state.imageUploading.some(Boolean) || state.bgmUploading
   const step3Complete = allImagesUploaded && hasBgm && !anyUploading
@@ -247,7 +280,16 @@ export function WizardMode({ onClose }: WizardModeProps) {
       const presetKey = templateKey ? WIZARD_PRESET_MAP[templateKey] : undefined
       const result = await generateStory(theme, presetKey)
       const cards = normalizeToStoryCards(result.slides)
-      update({ storyCards: cards, isGenerating: false, storyGenerated: true })
+      setState(prev => ({
+        ...prev,
+        storyCards: cards,
+        images: fitArray(prev.images, cards.length, null),
+        imageUploading: fitArray(prev.imageUploading, cards.length, false),
+        imageErrors: fitArray(prev.imageErrors, cards.length, null),
+        isGenerating: false,
+        storyGenerated: true,
+        scriptCards: null,
+      }))
     } catch {
       update({
         isGenerating: false,
@@ -260,7 +302,7 @@ export function WizardMode({ onClose }: WizardModeProps) {
   // ── ナビゲーション ────────────────────────────────────
   const canNext: boolean[] = [
     state.theme.trim().length > 0,
-    !state.isGenerating && !state.generationError && state.storyGenerated,
+    !state.isGenerating && !state.generationError && state.storyGenerated && state.storyCards.every(c => c.text.trim().length > 0),
     step3Complete,
     true,
     true,
@@ -268,6 +310,8 @@ export function WizardMode({ onClose }: WizardModeProps) {
 
   const goNext = () => {
     if (step === 1) {
+      // 台本から作ったカードは、テーマを変えていない限りAIで作り直さない（「もう一度作り直す」で明示的に置き換える）
+      if (state.scriptCards && state.theme === state.scriptCards.theme) { setStep(2); return }
       setStep(2)
       void generateStoryCards(state.theme, state.selectedTemplate)
       return
@@ -440,9 +484,9 @@ export function WizardMode({ onClose }: WizardModeProps) {
       title: state.theme,
       slides: state.storyCards.map((card, i) => {
         const [headline, subline = ''] = card.text.split('\n')
-        const isLastSlide = i === 13
+        const isLastSlide = i === state.storyCards.length - 1
         if (isLastSlide && state.ctaMode) {
-          // 14枚目 CTAモード
+          // 最終枚（通常は14枚目）CTAモード
           return {
             id: card.id,
             headline: state.ctaHeadline || headline,
@@ -657,8 +701,8 @@ export function WizardMode({ onClose }: WizardModeProps) {
           <div className="wz-footer-inner">
             <p className="wz-footer-hint">
               {step === 1 && 'テーマを入力して、ストーリーを作りましょう'}
-              {step === 2 && '14枚のシーンを確認・編集できます'}
-              {step === 3 && `画像 ${filledImages}/14${hasBgm ? '・BGM 1/1' : '・BGM 未設定'}`}
+              {step === 2 && `${cardCount}枚のシーンを確認・編集できます`}
+              {step === 3 && `画像 ${filledImages}/${cardCount}${hasBgm ? '・BGM 1/1' : '・BGM 未設定'}`}
               {step === 4 && 'シーンを選んで内容を調整しましょう'}
               {step === 5 && isRendering && '動画を生成中です。完了まで他のステップには戻れません。'}
               {step === 5 && !isRendering && '動画が完成しました！ダウンロードしてSNSに投稿しましょう'}
@@ -697,9 +741,9 @@ export function WizardMode({ onClose }: WizardModeProps) {
             <h2 className="wz-modal-title">🎬 動画を作成しますか？</h2>
             <p className="wz-modal-desc">以下の内容で動画を生成します。</p>
             <ul className="wz-modal-specs">
-              <li>🖼️ 画像 14枚</li>
+              <li>🖼️ 画像 {cardCount}枚</li>
               <li>🎵 BGM 1曲</li>
-              <li>⏱️ 動画の長さ：約 45 秒</li>
+              <li>⏱️ 動画の長さ：約 {cardCount === 14 ? 45 : cardCount * 3} 秒</li>
               <li>⏳ 生成に 2〜5 分ほどかかります</li>
             </ul>
             {isCompleted && (
@@ -841,7 +885,9 @@ function Step2({
   onCancelEdit: () => void
 }) {
   const totalChars = state.storyCards.reduce((s, c) => s + c.text.length, 0)
-  const avgChars = Math.round(totalChars / 14)
+  const sceneCount = Math.max(1, state.storyCards.length)
+  const avgChars = Math.round(totalChars / sceneCount)
+  const emptyCards = state.storyCards.filter(c => !c.text.trim()).length
 
   if (state.isGenerating) {
     return (
@@ -884,8 +930,19 @@ function Step2({
     <div>
       <div className="wz-step-heading">
         <h1>「{state.theme}」のストーリー</h1>
-        <p>14枚のシーンを確認しましょう。気に入らない箇所は編集できます。</p>
+        <p>{state.storyCards.length}枚のシーンを確認しましょう。気に入らない箇所は編集できます。</p>
       </div>
+
+      {state.scriptCards && (
+        <div className="wz-info-box" style={{ marginBottom: 12 }}>
+          <span>📝</span>
+          <span style={{ fontSize: 13 }}>
+            台本から{state.scriptCards.filled}枚のシーンを作成しました（AIは使っていません）。
+            {emptyCards > 0 && ` 空のシーンが${emptyCards}枚あります。「編集」で入力すると次へ進めます。`}
+            {' '}「もう一度作り直す」を押すと、AIが同じテーマで作り直し、この台本の内容は置き換わります。
+          </span>
+        </div>
+      )}
 
       <div className="wz-step2-layout">
         <div className="wz-story-cards">
@@ -929,11 +986,11 @@ function Step2({
             <p className="wz-summary-card-title">ストーリー概要</p>
             <div className="wz-summary-row">
               <span className="wz-summary-row-label">シーン数</span>
-              <span className="wz-summary-row-value">14枚</span>
+              <span className="wz-summary-row-value">{state.storyCards.length}枚</span>
             </div>
             <div className="wz-summary-row">
               <span className="wz-summary-row-label">想定時間</span>
-              <span className="wz-summary-row-value">約 45〜60 秒</span>
+              <span className="wz-summary-row-value">{state.storyCards.length === 14 ? '約 45〜60 秒' : `約 ${state.storyCards.length * 3} 秒`}</span>
             </div>
             <div className="wz-summary-row">
               <span className="wz-summary-row-label">1枚あたり</span>
@@ -1001,7 +1058,8 @@ function Step3({
   const filledImages = state.images.filter(Boolean).length
   const bgmReady = !!state.bgmFile && !!state.bgmUrl && !state.bgmUploading
   const anyUploading = state.imageUploading.some(Boolean) || state.bgmUploading
-  const allDone = filledImages === 14 && bgmReady && !anyUploading
+  const sceneTotal = state.storyCards.length
+  const allDone = filledImages === sceneTotal && bgmReady && !anyUploading
 
   const handleDrop = (index: number, e: React.DragEvent) => {
     e.preventDefault()
@@ -1014,7 +1072,7 @@ function Step3({
     <div className="wz-step3-layout">
       <div className="wz-step-heading">
         <h1>素材をアップロードしましょう</h1>
-        <p>14枚の画像とBGMを準備してください。縦長（9:16）の画像が最適です。</p>
+        <p>{sceneTotal}枚の画像とBGMを準備してください。縦長（9:16）の画像が最適です。</p>
       </div>
 
       {/* レンダー中ロック通知 */}
@@ -1030,7 +1088,7 @@ function Step3({
           ? 'アップロード中です。完了するまでお待ちください…'
           : allDone
           ? 'すべての素材がそろいました！「次へ」を押して動画を作りましょう。'
-          : `まだ素材が足りません。画像 ${filledImages}/14${bgmReady ? '・BGM 準備OK' : '・BGM 未設定'}`}
+          : `まだ素材が足りません。画像 ${filledImages}/${sceneTotal}${bgmReady ? '・BGM 準備OK' : '・BGM 未設定'}`}
       </div>
 
       {/* 画像アップロード */}
@@ -1039,8 +1097,8 @@ function Step3({
           <span className="wz-upload-section-title">
             🖼️ 画像をアップロード
           </span>
-          <span className={`wz-upload-count${filledImages === 14 ? ' wz-upload-count--complete' : ''}`}>
-            {filledImages} / 14
+          <span className={`wz-upload-count${filledImages === sceneTotal ? ' wz-upload-count--complete' : ''}`}>
+            {filledImages} / {sceneTotal}
           </span>
         </div>
         <p style={{ fontSize: 12, color: 'var(--wz-text-3)', marginBottom: 16, lineHeight: 1.6 }}>
@@ -1251,7 +1309,7 @@ function Step4({
           {state.storyCards.map((c, i) => (
             <div
               key={c.id}
-              className={`wz-scene-thumb${safeScene === i ? ' wz-scene-thumb--active' : ''}${i === 13 && state.ctaMode ? ' wz-scene-thumb--cta' : ''}`}
+              className={`wz-scene-thumb${safeScene === i ? ' wz-scene-thumb--active' : ''}${i === state.storyCards.length - 1 && state.ctaMode ? ' wz-scene-thumb--cta' : ''}`}
               onClick={() => update({ selectedScene: i })}
             >
               {state.images[i] ? (
@@ -1265,7 +1323,7 @@ function Step4({
               )}
               <div className="wz-scene-thumb-label">
                 {c.id}. {c.role}
-                {i === 13 && state.ctaMode && <span className="wz-scene-cta-badge">CTA</span>}
+                {i === state.storyCards.length - 1 && state.ctaMode && <span className="wz-scene-cta-badge">CTA</span>}
               </div>
             </div>
           ))}
@@ -1444,12 +1502,12 @@ function Step4({
         </div>
       </div>
 
-      {/* ── 14枚目 CTAモード設定 ── */}
+      {/* ── 最終枚（通常14枚目）CTAモード設定 ── */}
       <div className="wz-cta-mode-section">
         <div className="wz-cta-mode-header">
           <div className="wz-cta-mode-title-row">
             <span className="wz-cta-mode-icon">🎯</span>
-            <span className="wz-cta-mode-title">14枚目をCTAカードにする</span>
+            <span className="wz-cta-mode-title">{state.storyCards.length}枚目をCTAカードにする</span>
             <label className="wz-toggle">
               <input
                 type="checkbox"
@@ -1546,7 +1604,7 @@ function Step4({
                 onChange={e => onCtaQrChange(e.target.files?.[0] ?? null)}
               />
               <p className="wz-edit-hint">
-                未設定の場合、14枚目は通常スライドとしてレンダーされます。
+                未設定の場合、{state.storyCards.length}枚目は通常スライドとしてレンダーされます。
               </p>
             </div>
           </div>

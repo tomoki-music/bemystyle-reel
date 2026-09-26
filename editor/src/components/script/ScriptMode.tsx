@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
-import type { GeneratedScript, ScriptSlide } from '../../types'
+import type { GeneratedScript, ScriptHandoff, ScriptSlide } from '../../types'
+import { buildScriptHandoff } from './scriptHandoff'
 import './ScriptMode.css'
 
 // 台本作成モード: コンセプト → AIが3パターンの台本 → 選択・編集 → コピー / スライド単位へ分割。
@@ -10,6 +11,8 @@ export const SCRIPT_MAX_CHARS = 8000
 
 interface ScriptModeProps {
   onClose?: () => void
+  /** 「この台本で動画を作る」。編集後の最新の台本（と最新の分割結果）を渡す。渡さなければボタンは出さない。 */
+  onCreateVideo?: (handoff: ScriptHandoff) => void
 }
 
 const CONCEPT_EXAMPLES = ['歌が上手くなる方法', 'ボイトレ初心者向け3つのコツ', '音程改善の秘訣', 'MMMイベント告知', '無料診断キャンペーン']
@@ -33,7 +36,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return data as T
 }
 
-export function ScriptMode({ onClose }: ScriptModeProps) {
+export function ScriptMode({ onClose, onCreateVideo }: ScriptModeProps) {
   const [concept, setConcept] = useState('')
   const [patterns, setPatterns] = useState<GeneratedScript[]>([])
   const [edited, setEdited] = useState<Record<number, string>>({})
@@ -45,6 +48,8 @@ export function ScriptMode({ onClose }: ScriptModeProps) {
   const [slides, setSlides] = useState<{ source: string; items: ScriptSlide[] } | null>(null)
   const [copied, setCopied] = useState(false)
   const busy = useRef(false) // 多重送信防止（state更新前の連打も止める）
+  const handedOff = useRef(false)
+  const [handingOff, setHandingOff] = useState(false)
 
   const scriptOf = (i: number) => edited[i] ?? patterns[i]?.script ?? ''
   const currentScript = selected === null ? '' : scriptOf(selected)
@@ -98,6 +103,21 @@ export function ScriptMode({ onClose }: ScriptModeProps) {
       setTimeout(() => setCopied(false), 2000)
     } catch {
       setGenerateError('クリップボードへコピーできませんでした。台本を選択して手動でコピーしてください。')
+    }
+  }
+
+  // 外部APIは呼ばない。渡すのは画面上の最新の内容（編集後の台本・最新の分割結果）だけ。
+  const createVideo = () => {
+    if (handedOff.current || !onCreateVideo || selected === null) return
+    const handoff = buildScriptHandoff({ concept, fallbackTitle: patterns[selected]?.title, script: currentScript, slides })
+    if (!handoff) return
+    handedOff.current = true
+    setHandingOff(true)
+    try {
+      onCreateVideo(handoff)
+    } catch {
+      handedOff.current = false
+      setHandingOff(false)
     }
   }
 
@@ -174,10 +194,20 @@ export function ScriptMode({ onClose }: ScriptModeProps) {
                 {splitting ? '分割中…' : '✂️ スライド単位に分割'}
               </button>
               <button type="button" className="sm-btn" disabled={!currentScript.trim()} onClick={() => { void copy() }}>{copied ? '✅ コピーしました' : '📋 台本をコピー'}</button>
+              {onCreateVideo && (
+                <button type="button" className="sm-btn sm-btn--success" disabled={disabled || handingOff || !currentScript.trim()} onClick={createVideo}>
+                  {handingOff ? '移動中…' : '🎬 この台本で動画を作る'}
+                </button>
+              )}
               {edited[selected] !== undefined && (
                 <button type="button" className="sm-btn sm-btn--ghost" disabled={disabled} onClick={() => setEdited((prev) => { const n = { ...prev }; delete n[selected]; return n })}>↩︎ 元の台本に戻す</button>
               )}
             </div>
+            {onCreateVideo && (
+              <p className="sm-hint">
+                {slides && !slidesStale ? `分割済みの${slides.items.length}枚を、動画作成のシーンとして渡します。` : '分割していない台本は、文ごとに区切ってシーンにします（AIは使いません）。AIで分割する場合は先に「スライド単位に分割」を押してください。'}
+              </p>
+            )}
             {splitError && <div className="sm-error" role="alert">⚠️ {splitError}</div>}
           </section>
         )}

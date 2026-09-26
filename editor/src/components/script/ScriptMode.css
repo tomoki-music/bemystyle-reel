@@ -16,6 +16,7 @@
 .sm-chip:disabled { cursor: not-allowed; opacity: 0.6; }
 .sm-btn { padding: 9px 16px; border: 1px solid var(--wz-border, #d5d5e3); border-radius: 8px; background: #fff; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
 .sm-btn--primary { background: var(--wz-accent, #6c4bff); border-color: var(--wz-accent, #6c4bff); color: #fff; }
+.sm-btn--success { background: #1f9d55; border-color: #1f9d55; color: #fff; }
 .sm-btn--ghost { background: transparent; }
 .sm-btn:disabled { cursor: not-allowed; opacity: 0.5; }
 .sm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -27,6 +28,7 @@
 .sm-pattern-body { font-size: 13px; line-height: 1.7; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
 .sm-error { padding: 10px 12px; border-radius: 8px; background: #fdecea; color: #a12a1f; font-size: 14px; }
 .sm-note { padding: 8px 12px; border-radius: 8px; background: #fff6e0; color: #7a5b00; font-size: 13px; }
+.sm-hint { margin: 0; font-size: 12px; line-height: 1.6; color: #6b6b80; }
 .sm-slides { margin: 0; padding-left: 24px; display: flex; flex-direction: column; gap: 6px; }
 .sm-slide { line-height: 1.6; }
 @media (max-width: 600px) { .sm-header { padding: 10px 16px; } .sm-main { padding: 16px 12px 48px; } }

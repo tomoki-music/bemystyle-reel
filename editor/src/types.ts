@@ -155,3 +155,11 @@ export interface GeneratedScript {
 export interface ScriptSlide {
   text: string
 }
+
+// ScriptMode → Wizard への一時的な受け渡し（メモリ上だけ。URL・ストレージ・ログには載せない）
+export interface ScriptHandoff {
+  title: string
+  script: string
+  /** 「編集後の台本」と一致する最新の分割結果があるときだけ入る */
+  slides?: ScriptSlide[]
+}
