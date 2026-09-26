@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { APPROVED, FINAL_MIN_FREE_BYTES, FINAL_ABORT_FREE_BYTES, titleSpans, spanCheck } from './localCaptionFinal.mjs'
+import { APPROVED, FINAL_MIN_FREE_BYTES, FINAL_ABORT_FREE_BYTES, titleSpans, spanCheck, finalCutEndSec, mainTailTrimOk, runPrechecks, buildFinalPlan } from './localCaptionFinal.mjs'
 import { MAIN_BGM_DUCK, MAIN_BGM_DEFAULTS, MAIN_BGM_LIMITER } from '../server/lib/mainBgm.mjs'
 import { buildMainBgmPreviewPlan } from './localCaptionMainBgm.mjs'
 import { introCutItems } from '../server/lib/mainEdit.mjs'
@@ -45,6 +45,72 @@ describe('全編用の本編項目（fullItems）', () => {
     expect(full.items[0].srcStartSec).toBeCloseTo(62 / 30, 6)
     expect(full.items[0].srcEndSec - full.items[0].srcStartSec).toBeGreaterThan(900)
     expect(typeof buildMainBgmPreviewPlan).toBe('function')
+  })
+})
+
+const deepFreeze = (o) => { Object.values(o).forEach((v) => { if (v && typeof v === 'object') deepFreeze(v) }); return Object.freeze(o) }
+
+describe('先頭カット終了位置の導出（precheckの cutEnd）', () => {
+  // 合成fixture（実データのcaption・秒数は使わない）
+  const dur = 100
+  const plan = (cutEndSec) => introCutItems(dur, cutEndSec, 30)
+
+  it('full.items[0].srcStartSec から先頭カット終了位置を取得できる', () => {
+    const full = plan(3)
+    expect(finalCutEndSec(full)).toBe(full.items[0].srcStartSec)
+    expect(finalCutEndSec(full)).toBeCloseTo(3, 6)
+  })
+  it('先頭カットが0秒でも成功する', () => {
+    expect(finalCutEndSec(plan(0))).toBe(0)
+  })
+  it('カット秒数が違っても固定値に依存せず、フレーム境界へ丸めた値を返す', () => {
+    for (const sec of [0.5, 1.2345, 7.9, 12]) {
+      const full = plan(sec)
+      expect(finalCutEndSec(full)).toBeCloseTo(Math.round(sec * 30) / 30, 9)
+    }
+  })
+  it('本編の長さの検査は、導出したcutEndで成り立つ（末尾は1フレーム未満だけ切る）', () => {
+    for (const sec of [0, 2.5, 9.99]) {
+      const full = plan(sec)
+      const cutEnd = finalCutEndSec(full)
+      const mainSec = full.items[0].srcEndSec - cutEnd
+      expect(mainTailTrimOk(dur, cutEnd, mainSec)).toBe(true)
+    }
+    expect(mainTailTrimOk(dur, 2, 90)).toBe(false) // 10秒ぶん余る=末尾を大きく削っている
+    expect(mainTailTrimOk(dur, 2, 0)).toBe(false)
+  })
+  it('full.items が空・欠落なら明示的な検証エラー（ReferenceError/TypeError ではない）', () => {
+    for (const bad of [{ items: [] }, { items: undefined }, {}, null, undefined]) {
+      expect(() => finalCutEndSec(bad)).toThrow(/編集計画の検証に失敗/)
+    }
+  })
+  it('srcStartSec / srcEndSec が不正なら明示的な検証エラー', () => {
+    for (const srcStartSec of [NaN, undefined, '2', -1, Infinity]) {
+      expect(() => finalCutEndSec({ items: [{ kind: 'seg', srcStartSec, srcEndSec: 50 }] })).toThrow(/srcStartSec/)
+    }
+    expect(() => finalCutEndSec({ items: [{ kind: 'seg', srcStartSec: 5, srcEndSec: 5 }] })).toThrow(/srcEndSec/)
+    expect(() => finalCutEndSec({ items: [{ kind: 'seg', srcStartSec: 5, srcEndSec: NaN }] })).toThrow(/srcEndSec/)
+    expect(() => introCutItems(dur, NaN, 30) && finalCutEndSec(introCutItems(dur, NaN, 30))).toThrow(/編集計画の検証に失敗/)
+  })
+  it('入力を変更しない（凍結した計画でも動く）', () => {
+    const full = deepFreeze(plan(4))
+    const before = JSON.stringify(full)
+    expect(() => finalCutEndSec(full)).not.toThrow()
+    expect(JSON.stringify(full)).toBe(before)
+  })
+  it('cutEnd is not defined が再発しない: runPrechecks は cutEnd を宣言して使う', () => {
+    const src = runPrechecks.toString()
+    expect(src).toMatch(/\bcutEnd\b/)
+    // 使う前に P から受け取っている（未宣言のまま参照しない）
+    expect(src).toMatch(/const \{[^}]*\bcutEnd\b[^}]*\} = P/)
+    expect(buildFinalPlan.toString()).toMatch(/const cutEnd = finalCutEndSec\(full\)/)
+    expect(buildFinalPlan.toString()).not.toMatch(/2\.0667|\b62\b/)
+  })
+  it('precheck はレンダー・外部API・保存を呼ばない（読み取りと検査のみ）', () => {
+    const src = runPrechecks.toString()
+    for (const forbidden of ['renderCompositionToFile', 'writeJsonAtomic', 'spawn(', 'fetch(', 'openai', 'whisper', 'writeFile', 'unlink', 'rename']) {
+      expect(src.toLowerCase()).not.toContain(forbidden.toLowerCase())
+    }
   })
 })
 

@@ -48,6 +48,23 @@ const numEq = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps
 const readable = (p) => { try { const fd = openSync(p, 'r'); const b = Buffer.alloc(1); readSync(fd, b, 0, 1, 0); closeSync(fd); return true } catch { return false } }
 
 /**
+ * 先頭カットの終了位置（元動画の秒）を、保存済み編集計画から導く。カット秒数は素材ごとに違うため固定値は使わない。
+ * 最終版の本編は introCutItems が作る「元動画の連続1区間」で、items[0].srcStartSec が先頭カットの終了位置（=本編の開始位置）。
+ * 空・不正な計画は、未定義変数や NaN の比較として黙って通らず、意味の分かるエラーにする。
+ */
+export function finalCutEndSec(full) {
+  const items = full?.items
+  if (!Array.isArray(items) || items.length === 0) throw new Error('編集計画の検証に失敗: 本編の区間(full.items)が空です。先頭カットの保存データを確認してください')
+  const first = items[0]
+  if (!Number.isFinite(first?.srcStartSec) || first.srcStartSec < 0) throw new Error('編集計画の検証に失敗: 先頭カットの終了位置(srcStartSec)が不正です')
+  if (!Number.isFinite(first.srcEndSec) || first.srcEndSec <= first.srcStartSec) throw new Error('編集計画の検証に失敗: 本編の区間の終了位置(srcEndSec)が不正です')
+  return first.srcStartSec
+}
+
+/** 本編の長さ=先頭カット後の元動画。末尾は1フレーム(1/fps)未満だけ切ってよい。 */
+export const mainTailTrimOk = (durationSec, cutEnd, mainSec) => mainSec > 0 && durationSec - cutEnd - mainSec >= 0 && durationSec - cutEnd - mainSec < 1 / FPS + 1e-6
+
+/**
  * 最終版の計画（レンダーもverifyもここから。推測値は使わない: ダイジェスト末尾・遷移・BGM開始点は承認済みの保存状態と一致を確認する）。
  * 音声を読む処理はダイジェスト末尾の実測（ローカルffmpegで元動画の数秒を読むだけ）。
  */
@@ -65,15 +82,16 @@ export async function buildFinalPlan(args) {
   if (!dig0.ok) throw new Error(`ダイジェストの検証に失敗: ${dig0.problems.join(' / ')}`)
   const digestTail = await measureDigestTail({ sourcePath: ctx.sourceRealPath, base, dig: dig0 })
   const full = introCutItems(job.durationSec, cutDoc.cut.cutEndSec, FPS)
-  const mainSec = round(full.items[0].srcEndSec - full.items[0].srcStartSec, 3)
+  const cutEnd = finalCutEndSec(full)
+  const mainSec = round(full.items[0].srcEndSec - cutEnd, 3)
   const plan = buildMainBgmPreviewPlan(job, base, { paths: { bgm: args.bgm, qr: args.qr }, cutEndSec: cutDoc.cut.cutEndSec, mainBgm: { sourcePath: info.realPath, overrides: {} }, mainSec, recovered, digestTail, transition: PREVIEW_TRANSITION, fullItems: full.items, strict: true })
-  return { job, file, bytes, canon, base, cutDoc, ctx, state, info, rec, recovered, dig0, digestTail, full, mainSec, plan }
+  return { job, file, bytes, canon, base, cutDoc, ctx, state, info, rec, recovered, dig0, digestTail, full, cutEnd, mainSec, plan }
 }
 
 /** レンダー前の必須確認。{ ok, checks: [{ name, ok, detail }] }。何も書かない。 */
 export async function runPrechecks(args) {
   const P = await buildFinalPlan(args)
-  const { job, base, cutDoc, ctx, state, info, recovered, dig0, digestTail, full, mainSec, plan } = P
+  const { job, base, cutDoc, ctx, state, info, recovered, dig0, digestTail, full, cutEnd, mainSec, plan } = P
   const T = plan.timeline
   const D = plan.D
   const checks = []
@@ -113,7 +131,7 @@ export async function runPrechecks(args) {
   const sec = (k) => T.sections.find((s) => s.kind === k)
   const mainS = sec('main')
   add('最終タイムラインが連続（隙間・重なりなし）', cont && numEq(T.sections.at(-1).endSec, T.totalSec, 1e-6), T.sections.map((s) => ({ kind: s.kind, startSec: s.startSec, endSec: s.endSec, sec: round(s.endSec - s.startSec, 3) })))
-  add('本編の長さ=先頭カット後の元動画（末尾は0.033秒未満だけ切る）', numEq(mainS.endSec - mainS.startSec, mainSec, 1e-3) && numEq(D, mainS.startSec) && mainSec > 0 && job.durationSec - cutEnd - mainSec >= 0 && job.durationSec - cutEnd - mainSec < 1 / FPS + 1e-6, { mainSec, mainStartSec: D })
+  add('本編の長さ=先頭カット後の元動画（末尾は0.033秒未満だけ切る）', numEq(mainS.endSec - mainS.startSec, mainSec, 1e-3) && numEq(D, mainS.startSec) && mainTailTrimOk(job.durationSec, cutEnd, mainSec), { mainSec, mainStartSec: D })
   add('冒頭LINE: 本編開始から30秒のオーバーレイ（全体の尺へ加算しない）', T.overlays.length === 1 && numEq(T.overlays[0].startSec, D) && numEq(T.overlays[0].endSec - T.overlays[0].startSec, APPROVED.overlaySec) && !T.sections.some((s) => s.kind === 'lineIntro'), T.overlays[0])
   add('末尾LINE: 12秒の独立区間・最後', sec('lineOutro') && numEq(sec('lineOutro').endSec - sec('lineOutro').startSec, APPROVED.outroSec) && numEq(sec('lineOutro').endSec, T.totalSec) && numEq(sec('lineOutro').startSec, mainS.endSec), sec('lineOutro'))
   const expectedFrames = Math.round(T.totalSec * FPS)
