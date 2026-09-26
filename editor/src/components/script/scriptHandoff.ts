@@ -55,34 +55,29 @@ function mergeTo(segs: string[], count: number): string[] {
   return out
 }
 
-/** count より少ないときは、いちばん長い「、」入りの要素を「、」で二つに分けて増やす（分けられなくなったら止める）。 */
-function fillByClauses(segs: string[], count: number): string[] {
-  const out = [...segs]
-  while (out.length < count) {
-    let idx = -1
-    for (let i = 0; i < out.length; i++) if (out[i].includes('、') && (idx < 0 || [...out[i]].length > [...out[idx]].length)) idx = i
-    if (idx < 0) break
-    const chars = [...out[idx]]
-    const mid = chars.length / 2
-    let cut = -1
-    chars.forEach((c, i) => { if (c === '、' && i < chars.length - 1 && (cut < 0 || Math.abs(i - mid) < Math.abs(cut - mid))) cut = i })
-    if (cut < 0) break // 末尾の「、」だけ
-    const head = chars.slice(0, cut).join('').trim()
-    const tail = chars.slice(cut + 1).join('').trim()
-    if (!head || !tail) break
-    out.splice(idx, 1, head, tail)
-  }
-  return out
+/**
+ * Wizard のカード用テキスト。空カードは作らず、実際の内容があるカードだけ（1〜count 個）。
+ * 最新の分割結果があればそれを、なければ台本を文ごとに分けて使う（どちらもAPIなし）。
+ * count を超えるときだけ、隣り合う要素を均等にまとめる（切り捨て・重複・言い換えはしない）。
+ * 分割結果／文の本文は一切変更しない（前後の空白のトリムのみ）。
+ */
+export function handoffToCardTexts(h: ScriptHandoff, count = WIZARD_CARD_COUNT): { texts: string[]; usedSlides: boolean } {
+  const usedSlides = Boolean(h.slides?.length)
+  let base = usedSlides ? h.slides!.map((s) => s.text.trim()).filter(Boolean) : splitSentences(h.script)
+  if (!base.length && h.script.trim()) base = [h.script.trim()] // 句読点だけなど、文として分けられない台本もそのまま1枚にする
+  return { texts: mergeTo(base, count), usedSlides }
 }
 
 /**
- * Wizard のカード用テキスト（ちょうど count 個。足りない分は空文字）。
- * 最新の分割結果があればそれを使い、なければ台本を文ごとに分ける（どちらもAPIなし）。
+ * n 枚のカードへ、既存の14役割（先頭=オープニング／末尾=エンディング／間=中間の12役割）を決定的に割り当てる。
+ * n=14 のときは従来と完全に同じ（roles[i]）。n<14 の中間カードは重複なく順序を保って間引く。
  */
-export function handoffToCardTexts(h: ScriptHandoff, count = WIZARD_CARD_COUNT): { texts: string[]; filled: number; usedSlides: boolean } {
-  const usedSlides = Boolean(h.slides?.length)
-  const base = usedSlides ? h.slides!.map((s) => s.text.trim()).filter(Boolean) : splitSentences(h.script)
-  const segs = fillByClauses(mergeTo(base, count), count)
-  const texts = Array.from({ length: count }, (_, i) => segs[i] ?? '')
-  return { texts, filled: Math.min(segs.length, count), usedSlides }
+export function rolesForCount<T extends string>(roles: readonly T[], n: number): T[] {
+  const total = roles.length
+  if (n >= total) return Array.from({ length: n }, (_, i) => (roles[i] ?? (`シーン${i + 1}` as T)))
+  if (n <= 1) return n === 1 ? [roles[0]] : []
+  const middle = roles.slice(1, total - 1)
+  const m = n - 2
+  const picked = Array.from({ length: m }, (_, k) => middle[Math.floor((k * middle.length) / m)])
+  return [roles[0], ...picked, roles[total - 1]]
 }

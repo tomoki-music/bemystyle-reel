@@ -70,17 +70,26 @@ describe('ScriptMode → Wizard の受け渡し（App）', () => {
   }
 
   it('「この台本で動画を作る」でWizardへ切り替わり、編集済みの台本がカードに入る。URLに本文は入らず、AIも呼ばない', async () => {
+    const logs: string[] = []
+    for (const m of ['log', 'error', 'warn', 'info', 'debug'] as const) vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(' ')) })
+    localStorage.clear(); sessionStorage.clear()
     const fetchMock = await goToWizardFromScriptMode()
     fireEvent.change(screen.getByLabelText(/台本を編集/), { target: { value: '編集した一つ目です。編集した二つ目です。' } })
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /この台本で動画を作る/ })) })
     expect(await screen.findByRole('heading', { name: /「歌が上手くなる方法」のストーリー/ })).toBeInTheDocument()
     expect(screen.queryByTestId('script-mode')).toBeNull()
     const cards = [...document.querySelectorAll('.wz-story-text')].map((e) => e.textContent)
-    expect(cards.slice(0, 2)).toEqual(['編集した一つ目です。', '編集した二つ目です。'])
+    expect(cards).toEqual(['編集した一つ目です。', '編集した二つ目です。']) // 空カードで14枚に水増ししない
+    expect(document.querySelectorAll('.wz-story-card')).toHaveLength(2)
     expect(cards.join('')).not.toContain('三つ目のシーンです') // 編集前の本文は渡らない
     expect(window.location.search).toBe('')
     expect(decodeURIComponent(window.location.href)).not.toContain('編集した')
     expect(fetchMock.mock.calls.map((c) => c[0])).not.toContain('/api/generate-story')
+    expect(fetchMock.mock.calls.map((c) => c[0])).not.toContain('/api/split-script') // ボタンだけで追加のAPIは呼ばない
+    // 本文はURL・localStorage・sessionStorage・ログのどこにも入らない
+    const stored = JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage })
+    expect(stored).not.toContain('編集した')
+    expect(logs.join('\n')).not.toContain('編集した')
     expect(fetchMock.mock.calls.filter((c) => c[0] === '/api/generate-script')).toHaveLength(1)
   })
   it('受け渡し後にWizardを再renderしても、ScriptModeへ戻らず台本のカードが保たれる', async () => {
