@@ -1,5 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { generateStory, type AIPresetKey, type GeneratedSlideContent } from '../../storyGenerator'
+import type { ScriptHandoff } from '../../types'
+import { handoffToCardTexts } from '../script/scriptHandoff'
 import './WizardMode.css'
 
 // ── ダミーデータ ──────────────────────────────────────────
@@ -154,6 +156,8 @@ interface WizardState {
   isGenerating: boolean
   generationError: string | null
   storyGenerated: boolean
+  // ScriptMode から受け取った台本で作ったカードか（null＝通常起動・AI生成）。theme はそのときのタイトル。
+  scriptCards: { theme: string; filled: number } | null
   // CTA mode (slide 14)
   ctaMode: boolean
   ctaHeadline: string
@@ -167,17 +171,29 @@ interface WizardState {
 
 interface WizardModeProps {
   onClose?: () => void
+  /** ScriptMode から渡された台本。最初のマウント時だけ使い、以降の再renderでは上書きしない。 */
+  initialScript?: ScriptHandoff | null
+  /** 初期値をstateへ取り込んだ後に一度だけ呼ぶ（親が受け渡しデータを破棄する合図）。 */
+  onInitialScriptConsumed?: () => void
+}
+
+/** 台本の受け渡しから、Wizardの初期state用のテーマとカード（14枚固定）を作る。AIは使わない。 */
+function seedFromScript(h: ScriptHandoff) {
+  const { texts, filled } = handoffToCardTexts(h, 14)
+  const cards: StoryCard[] = texts.map((text, i) => ({ id: i + 1, role: STORY_ROLES[i] ?? `シーン${i + 1}`, text }))
+  return { theme: h.title, cards, filled }
 }
 
 // ── Component ────────────────────────────────────────────
 
-export function WizardMode({ onClose }: WizardModeProps) {
-  const [step, setStep] = useState(1)
+export function WizardMode({ onClose, initialScript, onInitialScriptConsumed }: WizardModeProps) {
+  const [seed] = useState(() => (initialScript ? seedFromScript(initialScript) : null))
+  const [step, setStep] = useState(seed ? 2 : 1)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [state, setState] = useState<WizardState>({
-    theme: '',
+    theme: seed?.theme ?? '',
     selectedTemplate: '',
-    storyCards: INITIAL_STORY_CARDS,
+    storyCards: seed?.cards ?? INITIAL_STORY_CARDS,
     images: Array(14).fill(null),
     imageUploading: Array(14).fill(false),
     imageErrors: Array(14).fill(null),
@@ -202,7 +218,8 @@ export function WizardMode({ onClose }: WizardModeProps) {
     advancedOpen: false,
     isGenerating: false,
     generationError: null,
-    storyGenerated: false,
+    storyGenerated: Boolean(seed),
+    scriptCards: seed ? { theme: seed.theme, filled: seed.filled } : null,
     ctaMode: false,
     ctaHeadline: '',
     ctaNote: '',
@@ -216,6 +233,12 @@ export function WizardMode({ onClose }: WizardModeProps) {
   const ctaQrInputRef = useRef<HTMLInputElement | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollStartTimeRef = useRef<number | null>(null)
+
+  // 受け渡しデータを取り込んだ（stateへ反映済み）ことを親へ知らせる。マウント時に一度だけ。
+  useEffect(() => {
+    if (initialScript) onInitialScriptConsumed?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -247,7 +270,7 @@ export function WizardMode({ onClose }: WizardModeProps) {
       const presetKey = templateKey ? WIZARD_PRESET_MAP[templateKey] : undefined
       const result = await generateStory(theme, presetKey)
       const cards = normalizeToStoryCards(result.slides)
-      update({ storyCards: cards, isGenerating: false, storyGenerated: true })
+      update({ storyCards: cards, isGenerating: false, storyGenerated: true, scriptCards: null })
     } catch {
       update({
         isGenerating: false,
@@ -260,7 +283,7 @@ export function WizardMode({ onClose }: WizardModeProps) {
   // ── ナビゲーション ────────────────────────────────────
   const canNext: boolean[] = [
     state.theme.trim().length > 0,
-    !state.isGenerating && !state.generationError && state.storyGenerated,
+    !state.isGenerating && !state.generationError && state.storyGenerated && state.storyCards.every(c => c.text.trim().length > 0),
     step3Complete,
     true,
     true,
@@ -268,6 +291,8 @@ export function WizardMode({ onClose }: WizardModeProps) {
 
   const goNext = () => {
     if (step === 1) {
+      // 台本から作ったカードは、テーマを変えていない限りAIで作り直さない（「もう一度作り直す」で明示的に置き換える）
+      if (state.scriptCards && state.theme === state.scriptCards.theme) { setStep(2); return }
       setStep(2)
       void generateStoryCards(state.theme, state.selectedTemplate)
       return
@@ -842,6 +867,7 @@ function Step2({
 }) {
   const totalChars = state.storyCards.reduce((s, c) => s + c.text.length, 0)
   const avgChars = Math.round(totalChars / 14)
+  const emptyCards = state.storyCards.filter(c => !c.text.trim()).length
 
   if (state.isGenerating) {
     return (
@@ -886,6 +912,17 @@ function Step2({
         <h1>「{state.theme}」のストーリー</h1>
         <p>14枚のシーンを確認しましょう。気に入らない箇所は編集できます。</p>
       </div>
+
+      {state.scriptCards && (
+        <div className="wz-info-box" style={{ marginBottom: 12 }}>
+          <span>📝</span>
+          <span style={{ fontSize: 13 }}>
+            台本から{state.scriptCards.filled}枚のシーンを作成しました（AIは使っていません）。
+            {emptyCards > 0 && ` 空のシーンが${emptyCards}枚あります。「編集」で入力すると次へ進めます。`}
+            {' '}「もう一度作り直す」を押すと、AIが同じテーマで作り直し、この台本の内容は置き換わります。
+          </span>
+        </div>
+      )}
 
       <div className="wz-step2-layout">
         <div className="wz-story-cards">

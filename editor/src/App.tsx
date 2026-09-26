@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { WizardMode } from './components/wizard/WizardMode'
-import { Slide, SlidesData, ReelAiConfig, SimpleTemplateType, FreeDiagnosisForm, NoteArticleForm, YoutubeVideoForm, MusicCommunityForm } from './types'
+import { Slide, SlidesData, ReelAiConfig, SimpleTemplateType, FreeDiagnosisForm, NoteArticleForm, YoutubeVideoForm, MusicCommunityForm, ScriptHandoff } from './types'
 import { useStoryGenerator, type AIGenerationHistory } from './components/story/useStoryGenerator'
 import { SimpleTemplateSelector } from './components/simple/SimpleTemplateSelector'
 import { SimpleTemplateForms } from './components/simple/SimpleTemplateForms'
@@ -310,6 +310,10 @@ export default function App() {
   // Core editor/save, SNS/posting history, SimpleMode/templates, story/image generation,
   // Render/Compare pipelines, Factory, and asset/template management are still co-located here.
   // Next extraction candidates: useSimpleMode, useTemplateGallery, useHistoryManager, useCompareDashboard.
+  // ScriptMode → Wizard の一時的な受け渡し（メモリ上だけ。URL・ストレージには保存しない）。
+  // handoff: Wizard が取り込むまで保持。scriptModeLeft: ScriptMode から離れた後は ?mode=script でも再表示しない。
+  const [scriptHandoff, setScriptHandoff] = useState<ScriptHandoff | null>(null)
+  const [scriptModeLeft, setScriptModeLeft] = useState(false)
   // Core editor / save state
   const newProjectSideEffectsRef = useRef<() => void>(() => {})
   const editorCore = useEditorCore({
@@ -1393,8 +1397,18 @@ export default function App() {
     return <LocalCaptionVideoMode />
   }
 
-  if (isScriptModeRequested()) {
-    return <ScriptMode onClose={() => { window.location.assign(window.location.pathname) }} />
+  if (isScriptModeRequested() && !scriptModeLeft) {
+    return (
+      <ScriptMode
+        onClose={() => { window.location.assign(window.location.pathname) }}
+        onCreateVideo={(handoff) => {
+          setScriptHandoff(handoff)
+          setScriptModeLeft(true)
+          // 台本本文はURLへ入れない。?mode=script だけを外して通常のWizardのURLにする
+          window.history.replaceState(null, '', window.location.pathname)
+        }}
+      />
+    )
   }
 
   if (loading) {
@@ -1408,7 +1422,7 @@ export default function App() {
 
   // Phase-W: USE_WIZARD_MODE = false に変更すると既存UIに戻る
   if (USE_WIZARD_MODE) {
-    return <WizardMode />
+    return <WizardMode initialScript={scriptHandoff} onInitialScriptConsumed={() => setScriptHandoff(null)} />
   }
 
   return (
