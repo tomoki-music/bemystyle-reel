@@ -48,46 +48,71 @@ const numEq = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps
 const readable = (p) => { try { const fd = openSync(p, 'r'); const b = Buffer.alloc(1); readSync(fd, b, 0, 1, 0); closeSync(fd); return true } catch { return false } }
 
 /**
+ * 先頭カットの終了位置（元動画の秒）を、保存済み編集計画から導く。カット秒数は素材ごとに違うため固定値は使わない。
+ * 最終版の本編は introCutItems が作る「元動画の連続1区間」で、items[0].srcStartSec が先頭カットの終了位置（=本編の開始位置）。
+ * 空・不正な計画は、未定義変数や NaN の比較として黙って通らず、意味の分かるエラーにする。
+ */
+export function finalCutEndSec(full) {
+  const items = full?.items
+  if (!Array.isArray(items) || items.length === 0) throw new Error('編集計画の検証に失敗: 本編の区間(full.items)が空です。先頭カットの保存データを確認してください')
+  const first = items[0]
+  if (!Number.isFinite(first?.srcStartSec) || first.srcStartSec < 0) throw new Error('編集計画の検証に失敗: 先頭カットの終了位置(srcStartSec)が不正です')
+  if (!Number.isFinite(first.srcEndSec) || first.srcEndSec <= first.srcStartSec) throw new Error('編集計画の検証に失敗: 本編の区間の終了位置(srcEndSec)が不正です')
+  return first.srcStartSec
+}
+
+/** 本編の長さ=先頭カット後の元動画。末尾は1フレーム(1/fps)未満だけ切ってよい。mainSec はミリ秒へ丸めた値なので、丸め誤差(1ms)だけ許容する。 */
+export const mainTailTrimOk = (durationSec, cutEnd, mainSec) => {
+  const trim = durationSec - cutEnd - mainSec
+  return mainSec > 0 && trim >= -1e-3 && trim < 1 / FPS + 1e-3
+}
+
+/**
  * 最終版の計画（レンダーもverifyもここから。推測値は使わない: ダイジェスト末尾・遷移・BGM開始点は承認済みの保存状態と一致を確認する）。
  * 音声を読む処理はダイジェスト末尾の実測（ローカルffmpegで元動画の数秒を読むだけ）。
  */
-export async function buildFinalPlan(args) {
-  const { job, file, bytes, canon } = loadJob(args.job)
-  const base = loadBase(job)
-  const cutDoc = loadCut()
-  const ctx = safetyContext(job)
-  const state = JSON.parse(readFileSync(PREVIEW_STATE(), 'utf-8'))
-  const info = await inspectMainBgm(args.mainBgm, ctx.inputRoots)
+export async function buildFinalPlan(args, deps = {}) {
+  // deps: 保存データ・素材の読み込みだけを差し替えられる（テスト用。既定は本番の実装）
+  const d = { loadJob, loadBase, loadCut, safetyContext, readPreviewState: () => JSON.parse(readFileSync(PREVIEW_STATE(), 'utf-8')), inspectMainBgm, loadRecovered, measureDigestTail, introCutItems, ...deps }
+  const { job, file, bytes, canon } = d.loadJob(args.job)
+  const base = d.loadBase(job)
+  const cutDoc = d.loadCut()
+  const ctx = d.safetyContext(job)
+  const state = d.readPreviewState()
+  const info = await d.inspectMainBgm(args.mainBgm, ctx.inputRoots)
   if (!info.ok) throw new Error(info.error)
-  const rec = loadRecovered(job)
+  const rec = d.loadRecovered(job)
   const recovered = rec.captions.filter((c) => c.confirmed)
   const dig0 = buildShortDigest(base.captions, base.norm, getDigestPicks())
   if (!dig0.ok) throw new Error(`ダイジェストの検証に失敗: ${dig0.problems.join(' / ')}`)
-  const digestTail = await measureDigestTail({ sourcePath: ctx.sourceRealPath, base, dig: dig0 })
-  const full = introCutItems(job.durationSec, cutDoc.cut.cutEndSec, FPS)
-  const mainSec = round(full.items[0].srcEndSec - full.items[0].srcStartSec, 3)
+  const digestTail = await d.measureDigestTail({ sourcePath: ctx.sourceRealPath, base, dig: dig0 })
+  const full = d.introCutItems(job.durationSec, cutDoc.cut.cutEndSec, FPS)
+  const cutEnd = finalCutEndSec(full)
+  const mainSec = round(full.items[0].srcEndSec - cutEnd, 3)
   const plan = buildMainBgmPreviewPlan(job, base, { paths: { bgm: args.bgm, qr: args.qr }, cutEndSec: cutDoc.cut.cutEndSec, mainBgm: { sourcePath: info.realPath, overrides: {} }, mainSec, recovered, digestTail, transition: PREVIEW_TRANSITION, fullItems: full.items, strict: true })
-  return { job, file, bytes, canon, base, cutDoc, ctx, state, info, rec, recovered, dig0, digestTail, full, mainSec, plan }
+  return { job, file, bytes, canon, base, cutDoc, ctx, state, info, rec, recovered, dig0, digestTail, full, cutEnd, mainSec, plan }
 }
 
 /** レンダー前の必須確認。{ ok, checks: [{ name, ok, detail }] }。何も書かない。 */
-export async function runPrechecks(args) {
-  const P = await buildFinalPlan(args)
-  const { job, base, cutDoc, ctx, state, info, recovered, dig0, digestTail, full, mainSec, plan } = P
+export async function runPrechecks(args, deps = {}) {
+  const resolveAssets = deps.resolveCompositionAssets ?? resolveCompositionAssets
+  const checkFree = deps.checkFreeSpace ?? checkFreeSpace
+  const P = await buildFinalPlan(args, deps)
+  const { job, base, cutDoc, ctx, state, info, recovered, dig0, digestTail, full, cutEnd, mainSec, plan } = P
   const T = plan.timeline
   const D = plan.D
   const checks = []
   const add = (name, ok, detail) => checks.push({ name, ok: Boolean(ok), detail })
 
   // 素材
-  const assets = await resolveCompositionAssets(plan.cfg, ctx.inputRoots)
+  const assets = await resolveAssets(plan.cfg, ctx.inputRoots)
   add('素材: 元動画が読み取れる', readable(ctx.sourceRealPath), { sizeBytes: statSync(ctx.sourceRealPath).size })
   add('素材: 本編BGMが実在・MP3として有効', info.ok && /\.mp3$/i.test(info.fileName), { fileName: info.fileName, durationSec: info.durationSec, sampleRate: info.sampleRate, channels: info.channels })
   add('素材: ダイジェストBGMとQR画像が有効', assets.ok, { errors: assets.errors, bgm: assets.bgm && { durationSec: assets.bgm.durationSec }, qr: assets.qr && { width: assets.qr.width, height: assets.qr.height } })
   if (assets.ok) {
     add('素材: 承認済みの確認動画と同一のファイル(SHA-256)', sha256(readFileSync(info.realPath)) === state.guard.mp3 && sha256(readFileSync(assets.bgm.realPath)) === state.guard.digestBgm && sha256(readFileSync(assets.qr.realPath)) === state.guard.qr && fileSig(ctx.sourceRealPath) === state.guard.source, { mp3: true, digestBgm: true, qr: true, source: true })
   }
-  const free = await checkFreeSpace(ctx.outputRoot, FINAL_MIN_FREE_BYTES)
+  const free = await checkFree(ctx.outputRoot, FINAL_MIN_FREE_BYTES)
   add('空き容量15GB以上', free.ok, { freeGB: round(free.freeBytes / 1024 ** 3, 1) })
 
   // 承認済みの仕様との一致
@@ -113,7 +138,7 @@ export async function runPrechecks(args) {
   const sec = (k) => T.sections.find((s) => s.kind === k)
   const mainS = sec('main')
   add('最終タイムラインが連続（隙間・重なりなし）', cont && numEq(T.sections.at(-1).endSec, T.totalSec, 1e-6), T.sections.map((s) => ({ kind: s.kind, startSec: s.startSec, endSec: s.endSec, sec: round(s.endSec - s.startSec, 3) })))
-  add('本編の長さ=先頭カット後の元動画（末尾は0.033秒未満だけ切る）', numEq(mainS.endSec - mainS.startSec, mainSec, 1e-3) && numEq(D, mainS.startSec) && mainSec > 0 && job.durationSec - cutEnd - mainSec >= 0 && job.durationSec - cutEnd - mainSec < 1 / FPS + 1e-6, { mainSec, mainStartSec: D })
+  add('本編の長さ=先頭カット後の元動画（末尾は0.033秒未満だけ切る）', numEq(mainS.endSec - mainS.startSec, mainSec, 1e-3) && numEq(D, mainS.startSec) && mainTailTrimOk(job.durationSec, cutEnd, mainSec), { mainSec, mainStartSec: D })
   add('冒頭LINE: 本編開始から30秒のオーバーレイ（全体の尺へ加算しない）', T.overlays.length === 1 && numEq(T.overlays[0].startSec, D) && numEq(T.overlays[0].endSec - T.overlays[0].startSec, APPROVED.overlaySec) && !T.sections.some((s) => s.kind === 'lineIntro'), T.overlays[0])
   add('末尾LINE: 12秒の独立区間・最後', sec('lineOutro') && numEq(sec('lineOutro').endSec - sec('lineOutro').startSec, APPROVED.outroSec) && numEq(sec('lineOutro').endSec, T.totalSec) && numEq(sec('lineOutro').startSec, mainS.endSec), sec('lineOutro'))
   const expectedFrames = Math.round(T.totalSec * FPS)
